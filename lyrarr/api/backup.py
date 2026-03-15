@@ -117,3 +117,62 @@ class BackupRestore(Resource):
         return {
             'message': f'Restored {restored_profiles} profiles and {restored_settings} setting sections',
         }
+
+
+def run_scheduled_backup():
+    """Standalone backup function for scheduler — saves a backup to disk and cleans old ones."""
+    import os
+    import logging
+    from datetime import datetime, timedelta
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        backup_dir = settings.backup.folder
+        retention_days = settings.backup.retention  # how many days to keep backups
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Build backup data
+        profiles = database.execute(select(TableProfiles)).scalars().all()
+        profiles_data = [p.to_dict() for p in profiles]
+
+        settings_data = {}
+        for section in ['general', 'lidarr', 'fanart', 'genius', 'notifications', 'auth', 'metadata',
+                        'musixmatch', 'theaudiodb', 'backup']:
+            try:
+                section_obj = getattr(settings, section, None)
+                if section_obj:
+                    settings_data[section] = dict(section_obj)
+            except Exception:
+                pass
+
+        backup = {
+            'version': 1,
+            'timestamp': datetime.now().isoformat(),
+            'profiles': profiles_data,
+            'settings': settings_data,
+        }
+
+        # Write backup file
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'lyrarr-backup-{timestamp}.json'
+        filepath = os.path.join(backup_dir, filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(backup, f, indent=2, default=str)
+
+        logger.info(f"Backup saved: {filepath}")
+
+        # Clean old backups
+        if retention_days > 0:
+            cutoff = datetime.now() - timedelta(days=retention_days)
+            for fname in os.listdir(backup_dir):
+                if fname.startswith('lyrarr-backup-') and fname.endswith('.json'):
+                    fpath = os.path.join(backup_dir, fname)
+                    fstat = os.stat(fpath)
+                    file_time = datetime.fromtimestamp(fstat.st_mtime)
+                    if file_time < cutoff:
+                        os.remove(fpath)
+                        logger.info(f"Removed old backup: {fname}")
+
+    except Exception as e:
+        logger.error(f"Scheduled backup failed: {e}")

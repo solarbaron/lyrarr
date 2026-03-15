@@ -22,6 +22,7 @@ from dateutil.relativedelta import relativedelta
 from lyrarr.lidarr.sync import update_artists
 from lyrarr.metadata.download_worker import run_metadata_downloads
 from lyrarr.utilities.health import check_health
+from lyrarr.api.backup import run_scheduled_backup
 from .config import settings
 from .get_args import args
 from .event_handler import event_stream
@@ -74,6 +75,7 @@ class Scheduler:
         self.__lidarr_sync_task()
         self.__lidarr_full_update_task()
         self.__metadata_download_task()
+        self.__backup_task()
         self.__randomize_interval_task()
         if args.no_tasks:
             self.__no_task()
@@ -167,6 +169,27 @@ class Scheduler:
             max_instances=1, coalesce=True, misfire_grace_time=15,
             id='download_metadata', name='Download Missing Metadata',
             replace_existing=True)
+
+    def __backup_task(self):
+        frequency = settings.backup.frequency
+        hour = settings.backup.hour
+        day = settings.backup.day
+
+        if frequency == 'Daily':
+            self.aps_scheduler.add_job(
+                run_scheduled_backup, 'cron', hour=hour,
+                max_instances=1, coalesce=True, misfire_grace_time=15,
+                id='scheduled_backup', name='Scheduled Backup', replace_existing=True)
+        elif frequency == 'Weekly':
+            self.aps_scheduler.add_job(
+                run_scheduled_backup, 'cron', day_of_week=day, hour=hour,
+                max_instances=1, coalesce=True, misfire_grace_time=15,
+                id='scheduled_backup', name='Scheduled Backup', replace_existing=True)
+        else:  # Manually
+            self.aps_scheduler.add_job(
+                run_scheduled_backup, 'cron', year=in_a_century(),
+                max_instances=1, coalesce=True, misfire_grace_time=15,
+                id='scheduled_backup', name='Scheduled Backup', replace_existing=True)
 
     def __randomize_interval_task(self):
         for job in self.aps_scheduler.get_jobs():
