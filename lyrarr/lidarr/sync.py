@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import datetime
 
 from lyrarr.app.database import (
@@ -263,6 +264,10 @@ def update_tracks(force=False):
                             'mediumNumber': tr.get('mediumNumber', 1),
                             'duration': int((tr.get('duration', 0) or 0) / 1000) if tr.get('duration') else None,
                         }
+            
+            logger.info(f"Album {album.lidarrAlbumId} '{album.title}': {len(track_files)} trackfiles, "
+                        f"{len(track_records) if track_records else 0} track records, "
+                        f"{len(tf_to_metadata)} matched by trackFileId")
 
             for tf in track_files:
                 track_id = tf.get('id')
@@ -274,10 +279,35 @@ def update_tracks(force=False):
                 # Get real metadata from track record (matched by trackFileId)
                 meta = tf_to_metadata.get(track_id, {})
                 
+                # If no match by trackFileId, try matching by track file path
+                if not meta.get('title') and track_records:
+                    for tr in track_records:
+                        tr_file_id = tr.get('trackFileId')
+                        if tr_file_id and tr_file_id == track_id:
+                            meta = {
+                                'title': tr.get('title', ''),
+                                'trackNumber': tr.get('absoluteTrackNumber') or tr.get('trackNumber'),
+                                'mediumNumber': tr.get('mediumNumber', 1),
+                                'duration': int((tr.get('duration', 0) or 0) / 1000) if tr.get('duration') else None,
+                            }
+                            break
+                
                 # Derive title: prefer track record, fall back to filename
                 title = meta.get('title', '').strip()
                 if not title and track_path:
-                    title = os.path.splitext(os.path.basename(track_path))[0]
+                    # Parse from filename, trying to strip track numbers and prefixes
+                    fname = os.path.splitext(os.path.basename(track_path))[0]
+                    # Remove common patterns: "01 - ", "01. ", "1-01 ", artist - album - 01 - 
+                    # Strip leading disc-track patterns like "1-01 " or "01 "
+                    cleaned = re.sub(r'^(\d+-)?(\d+)\s*[-\.]\s*', '', fname)
+                    # Strip "Artist - Album - " prefix patterns
+                    parts = cleaned.split(' - ')
+                    if len(parts) >= 3:
+                        cleaned = parts[-1].strip()
+                    elif len(parts) == 2:
+                        cleaned = parts[-1].strip()
+                    title = cleaned if cleaned else fname
+                    logger.info(f"Track {track_id}: no metadata from Lidarr, parsed title from filename: '{title}'")
                 if not title:
                     title = 'Unknown'
 

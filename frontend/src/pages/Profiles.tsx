@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Button, TextInput, Modal, Checkbox, Group } from '@mantine/core';
+import { Loader, Button, TextInput, Modal, Checkbox, Group, Menu } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { getProfiles, createProfile, updateProfile, deleteProfile } from '../api';
+import { getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignProfile } from '../api';
 
 interface ProfileForm {
   name: string;
@@ -72,6 +72,18 @@ export default function ProfilesPage() {
     },
   });
 
+  const bulkAssignMutation = useMutation({
+    mutationFn: (data: { profileId: number; mode: 'all' | 'unassigned' }) => bulkAssignProfile(data),
+    onSuccess: (data: any) => {
+      notifications.show({ title: 'Done', message: data.message, color: 'green' });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      queryClient.invalidateQueries({ queryKey: ['albums'] });
+    },
+    onError: (err: any) => {
+      notifications.show({ title: 'Error', message: err?.response?.data?.message || 'Failed', color: 'red' });
+    },
+  });
+
   const openCreate = () => {
     setEditId(null);
     setForm(DEFAULT_FORM);
@@ -120,7 +132,7 @@ export default function ProfilesPage() {
             <th>Lyrics</th>
             <th>Synced Lyrics</th>
             <th>Default</th>
-            <th style={{ width: 160 }}>Actions</th>
+            <th style={{ width: 280 }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -150,6 +162,19 @@ export default function ProfilesPage() {
               <td>
                 <Group gap="xs">
                   <Button variant="subtle" color="violet" size="xs" onClick={() => openEdit(p)}>Edit</Button>
+                  <Menu shadow="md" width={200}>
+                    <Menu.Target>
+                      <Button variant="subtle" color="violet" size="xs">Assign ▾</Button>
+                    </Menu.Target>
+                    <Menu.Dropdown styles={{ dropdown: { background: 'var(--surface-bg)', border: '1px solid var(--card-border)' } }}>
+                      <Menu.Item onClick={() => bulkAssignMutation.mutate({ profileId: p.id, mode: 'all' })}>
+                        Set to All Artists/Albums
+                      </Menu.Item>
+                      <Menu.Item onClick={() => bulkAssignMutation.mutate({ profileId: p.id, mode: 'unassigned' })}>
+                        Set to Unassigned Only
+                      </Menu.Item>
+                    </Menu.Dropdown>
+                  </Menu>
                   {p.is_default !== 'True' && (
                     <Button variant="subtle" color="red" size="xs" onClick={() => deleteMutation.mutate(p.id)}>
                       Delete

@@ -110,3 +110,81 @@ class AlbumItem(Resource):
         )
 
         return {'message': 'Album updated'}
+
+
+@api_ns_albums.route('/albums/<int:album_id>/upload-cover')
+class AlbumUploadCover(Resource):
+    def post(self, album_id):
+        """Upload a custom cover image for an album."""
+        import os
+        from datetime import datetime
+
+        album = database.execute(
+            select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
+        ).scalars().first()
+        if not album:
+            return {'message': 'Album not found'}, 404
+
+        if 'file' not in request.files:
+            return {'message': 'No file provided'}, 400
+
+        file = request.files['file']
+        if not file.filename:
+            return {'message': 'No file selected'}, 400
+
+        # Validate file type
+        allowed = {'png', 'jpg', 'jpeg', 'webp'}
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        if ext not in allowed:
+            return {'message': f'Invalid format. Allowed: {", ".join(allowed)}'}, 400
+
+        if not album.path:
+            return {'message': 'Album has no path on disk'}, 400
+
+        # Normalize extension
+        if ext == 'jpeg':
+            ext = 'jpg'
+
+        cover_data = file.read()
+        filepath = os.path.join(album.path, f'cover.{ext}')
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        with open(filepath, 'wb') as f:
+            f.write(cover_data)
+
+        # Update database
+        database.execute(
+            update(TableAlbums)
+            .where(TableAlbums.lidarrAlbumId == album_id)
+            .values(cover_status='available', updated_at_timestamp=datetime.now())
+        )
+
+        # Log to history
+        from lyrarr.app.database import TableHistory
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        database.execute(
+            sqlite_insert(TableHistory).values(
+                action=1,
+                description=f"Uploaded custom cover art for {album.title}",
+                metadata_type='cover',
+                provider='upload',
+                lidarrAlbumId=album.lidarrAlbumId,
+                lidarrArtistId=album.artistId,
+                timestamp=datetime.now(),
+                metadata_path=filepath,
+            )
+        )
+
+        # Optionally embed into audio files
+        try:
+            profile = database.execute(
+                select(TableProfiles).where(TableProfiles.id == album.profileId)
+            ).scalars().first()
+            if profile and getattr(profile, 'embed_cover_art', 'False') == 'True':
+                from lyrarr.metadata.download_worker import embed_cover_in_files
+                embed_cover_in_files(album.path, cover_data, ext)
+        except Exception:
+            pass  # Non-critical
+
+        return {'message': f'Cover art uploaded for "{album.title}"'}
+

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TextInput, Switch, Button, NumberInput, Loader, FileButton } from '@mantine/core';
+import { TextInput, Switch, Button, NumberInput, Loader, FileButton, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup } from '../api';
@@ -174,6 +174,70 @@ export default function SettingsPage() {
             onChange={(e) => updateField('general', 'instance_name', e.currentTarget.value)} styles={inputStyles} />
           <NumberInput label="Port" min={1} max={65535} value={form.general?.port || 6868}
             onChange={(v) => updateField('general', 'port', v)} styles={inputStyles} />
+        </div>
+      </div>
+
+      {/* Whisper */}
+      <div className="settings-section">
+        <h3>🎤 Whisper (AI Lyrics Sync)</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
+          Settings for generating synced lyrics from plain text using audio transcription.
+          Requires <code>faster-whisper</code> and <code>ffmpeg</code>.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <Select label="Model" description="Larger = more accurate but slower"
+            data={[
+              { value: 'tiny', label: 'Tiny (~1GB RAM, fastest)' },
+              { value: 'base', label: 'Base (~1.5GB RAM, balanced)' },
+              { value: 'small', label: 'Small (~2GB RAM, better)' },
+              { value: 'medium', label: 'Medium (~5GB RAM, best)' },
+              { value: 'large-v3', label: 'Large v3 (~10GB RAM, highest)' },
+            ]}
+            value={form.metadata?.whisper?.model || 'base'}
+            onChange={(v) => {
+              setForm((prev: any) => ({
+                ...prev,
+                metadata: {
+                  ...prev.metadata,
+                  whisper: { ...prev.metadata?.whisper, model: v },
+                },
+              }));
+            }}
+            styles={inputStyles} />
+          <Select label="Device" description="GPU (cuda) is much faster if available"
+            data={[
+              { value: 'cpu', label: 'CPU' },
+              { value: 'cuda', label: 'CUDA (GPU)' },
+              { value: 'auto', label: 'Auto-detect' },
+            ]}
+            value={form.metadata?.whisper?.device || 'cpu'}
+            onChange={(v) => {
+              setForm((prev: any) => ({
+                ...prev,
+                metadata: {
+                  ...prev.metadata,
+                  whisper: { ...prev.metadata?.whisper, device: v },
+                },
+              }));
+            }}
+            styles={inputStyles} />
+          <Select label="Compute Type" description="int8 is fastest, float32 is most accurate"
+            data={[
+              { value: 'int8', label: 'int8 (fastest)' },
+              { value: 'float16', label: 'float16 (balanced)' },
+              { value: 'float32', label: 'float32 (most accurate)' },
+            ]}
+            value={form.metadata?.whisper?.compute_type || 'int8'}
+            onChange={(v) => {
+              setForm((prev: any) => ({
+                ...prev,
+                metadata: {
+                  ...prev.metadata,
+                  whisper: { ...prev.metadata?.whisper, compute_type: v },
+                },
+              }));
+            }}
+            styles={inputStyles} />
         </div>
       </div>
 

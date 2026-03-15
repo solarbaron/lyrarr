@@ -196,3 +196,50 @@ class ProfileMassAssign(Resource):
             'updated_artists': updated_artists,
             'updated_albums': updated_albums,
         }
+
+
+@api_ns_profiles.route('/profiles/bulk-assign')
+class ProfileBulkAssign(Resource):
+    def post(self):
+        """Assign a profile to all or all unassigned artists/albums.
+
+        Body: { profileId: int, mode: "all" | "unassigned" }
+        """
+        data = request.get_json() or {}
+        profile_id = data.get('profileId')
+        mode = data.get('mode', 'all')
+
+        if profile_id is None:
+            return {'message': 'profileId is required'}, 400
+
+        profile = database.execute(
+            select(TableProfiles).where(TableProfiles.id == profile_id)
+        ).scalars().first()
+        if not profile:
+            return {'message': 'Profile not found'}, 404
+
+        if mode == 'unassigned':
+            # Only set where profileId is NULL
+            artist_result = database.execute(
+                update(TableArtists)
+                .where(TableArtists.profileId == None)
+                .values(profileId=profile_id)
+            )
+            album_result = database.execute(
+                update(TableAlbums)
+                .where(TableAlbums.profileId == None)
+                .values(profileId=profile_id)
+            )
+        else:
+            # Set on all
+            artist_result = database.execute(
+                update(TableArtists).values(profileId=profile_id)
+            )
+            album_result = database.execute(
+                update(TableAlbums).values(profileId=profile_id)
+            )
+
+        return {
+            'message': f'Assigned profile "{profile.name}" to {artist_result.rowcount} artists, {album_result.rowcount} albums',
+        }
+

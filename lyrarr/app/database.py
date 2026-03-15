@@ -197,6 +197,25 @@ class TableBlacklist(Base):
 def init_db():
     metadata.create_all(engine)
 
+    # Auto-migrate: add any missing columns to existing tables
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    for table in metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        existing_cols = {c['name'] for c in inspector.get_columns(table.name)}
+        for col in table.columns:
+            if col.name not in existing_cols:
+                col_type = col.type.compile(engine.dialect)
+                default_clause = ''
+                if col.default is not None:
+                    default_clause = f" DEFAULT {col.default.arg!r}"
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col_type}{default_clause}'
+                    ))
+                logger.info(f"Migration: added column {col.name} to {table.name}")
+
     # Add the system table single row if it doesn't exist
     if not database.execute(select(System)).first():
         from sqlalchemy.dialects.sqlite import insert

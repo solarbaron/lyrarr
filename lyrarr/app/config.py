@@ -106,6 +106,14 @@ validators = [
               is_in=['lrc', 'txt']),
     Validator('metadata.lyrics.save_alongside_track', must_exist=True, default=True, is_type_of=bool),
 
+    # metadata > whisper section (for synced lyrics generation)
+    Validator('metadata.whisper.model', must_exist=True, default='base', is_type_of=str,
+              is_in=['tiny', 'base', 'small', 'medium', 'large-v3']),
+    Validator('metadata.whisper.device', must_exist=True, default='cpu', is_type_of=str,
+              is_in=['cpu', 'cuda', 'auto']),
+    Validator('metadata.whisper.compute_type', must_exist=True, default='int8', is_type_of=str,
+              is_in=['int8', 'float16', 'float32']),
+
     # fanart.tv section
     Validator('fanart.apikey', must_exist=True, default='', is_type_of=str),
 

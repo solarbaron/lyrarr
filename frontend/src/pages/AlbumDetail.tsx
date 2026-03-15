@@ -1,13 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loader, Button, Select, Group, Badge } from '@mantine/core';
+import { Loader, Button, Select, Group, Badge, FileButton } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
-import { getAlbum, getProfiles, massAssignProfile } from '../api';
+import { faArrowLeft, faMagnifyingGlass, faUpload, faPenToSquare } from '@fortawesome/free-solid-svg-icons';
+import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover } from '../api';
 import CoverSearchModal from '../components/CoverSearchModal';
 import LyricsSearchModal from '../components/LyricsSearchModal';
+import LyricsEditorModal from '../components/LyricsEditorModal';
 
 export default function AlbumDetailPage() {
   const { albumId } = useParams();
@@ -16,6 +17,7 @@ export default function AlbumDetailPage() {
   const [profileId, setProfileId] = useState<string | null>(null);
   const [coverSearchOpen, setCoverSearchOpen] = useState(false);
   const [lyricsTrack, setLyricsTrack] = useState<any>(null);
+  const [editorTrack, setEditorTrack] = useState<any>(null);
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', albumId],
@@ -30,6 +32,17 @@ export default function AlbumDetailPage() {
     onSuccess: () => {
       notifications.show({ title: 'Done', message: 'Profile updated', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+    },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadAlbumCover(Number(albumId), file),
+    onSuccess: (data: any) => {
+      notifications.show({ title: 'Uploaded', message: data.message, color: 'green' });
+      queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+    },
+    onError: (err: any) => {
+      notifications.show({ title: 'Error', message: err?.response?.data?.message || 'Upload failed', color: 'red' });
     },
   });
 
@@ -81,10 +94,28 @@ export default function AlbumDetailPage() {
               size="xs"
               leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} />}
               onClick={() => setCoverSearchOpen(true)}
-              style={{ position: 'absolute', bottom: 8, left: 8, right: 8 }}
+              style={{ position: 'absolute', bottom: 8, left: 8, right: '50%', marginRight: 2 }}
             >
-              Search Covers
+              Search
             </Button>
+            <FileButton
+              onChange={(file) => file && uploadMutation.mutate(file)}
+              accept="image/png,image/jpeg,image/webp"
+            >
+              {(props) => (
+                <Button
+                  {...props}
+                  variant="light"
+                  color="violet"
+                  size="xs"
+                  leftSection={<FontAwesomeIcon icon={faUpload} />}
+                  loading={uploadMutation.isPending}
+                  style={{ position: 'absolute', bottom: 8, left: '50%', right: 8, marginLeft: 2 }}
+                >
+                  Upload
+                </Button>
+              )}
+            </FileButton>
           </div>
           <div style={{ flex: 1 }}>
             <h2 style={{ margin: '0 0 4px', fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -152,7 +183,7 @@ export default function AlbumDetailPage() {
               <th style={{ width: 60 }}>#</th>
               <th>Title</th>
               <th>Lyrics</th>
-              <th style={{ width: 100 }}>Actions</th>
+              <th style={{ width: 180 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -176,15 +207,26 @@ export default function AlbumDetailPage() {
                   </span>
                 </td>
                 <td>
-                  <Button
-                    variant="subtle"
-                    color="violet"
-                    size="xs"
-                    leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} />}
-                    onClick={() => setLyricsTrack(track)}
-                  >
-                    Lyrics
-                  </Button>
+                  <Group gap="xs">
+                    <Button
+                      variant="subtle"
+                      color="violet"
+                      size="xs"
+                      leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} />}
+                      onClick={() => setLyricsTrack(track)}
+                    >
+                      Search
+                    </Button>
+                    <Button
+                      variant="subtle"
+                      color="grape"
+                      size="xs"
+                      leftSection={<FontAwesomeIcon icon={faPenToSquare} />}
+                      onClick={() => setEditorTrack(track)}
+                    >
+                      Edit
+                    </Button>
+                  </Group>
                 </td>
               </tr>
             ))}
@@ -206,6 +248,16 @@ export default function AlbumDetailPage() {
           albumId={Number(albumId)}
           opened={!!lyricsTrack}
           onClose={() => setLyricsTrack(null)}
+        />
+      )}
+
+      {editorTrack && (
+        <LyricsEditorModal
+          trackId={editorTrack.lidarrTrackId}
+          trackTitle={editorTrack.title}
+          albumId={Number(albumId)}
+          opened={!!editorTrack}
+          onClose={() => setEditorTrack(null)}
         />
       )}
     </div>
