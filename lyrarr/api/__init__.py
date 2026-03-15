@@ -14,6 +14,7 @@ from .profiles import api_ns_profiles
 from .search import api_ns_search
 from .dashboard import api_ns_dashboard
 from .backup import api_ns_backup
+from .webhook import api_ns_webhook
 
 api_ns_list = [
     api_ns_artists,
@@ -27,6 +28,7 @@ api_ns_list = [
     api_ns_search,
     api_ns_dashboard,
     api_ns_backup,
+    api_ns_webhook,
 ]
 
 authorizations = {
