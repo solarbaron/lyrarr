@@ -68,10 +68,11 @@ export const generateSyncedLyrics = (trackId: number, data: { content: string; m
 export const getHistory = () => api.get('/history').then(r => r.data as HistoryEntry[]);
 
 // ---------- Wanted ----------
-export const getWantedCovers = (params?: PaginationParams) =>
+export const getWantedCovers = (params?: PaginationParams & { search?: string; sortBy?: string }) =>
   api.get('/wanted/covers', { params }).then(r => r.data as PaginatedResponse<Album>);
-export const getWantedLyrics = (params?: PaginationParams) =>
+export const getWantedLyrics = (params?: PaginationParams & { search?: string }) =>
   api.get('/wanted/lyrics', { params }).then(r => r.data as PaginatedResponse<Track & { artistName?: string; albumTitle?: string }>);
+export const getWantedStats = () => api.get('/wanted/stats').then(r => r.data);
 
 // ---------- System ----------
 export const getTasks = () => api.get('/system/tasks').then(r => r.data);
