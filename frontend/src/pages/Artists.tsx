@@ -3,7 +3,7 @@ import { Loader, TextInput, Pagination, Group, Select, Button, Checkbox } from '
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getArtists, getProfiles, massAssignProfile } from '../api';
+import { getArtists, getProfiles, massAssignProfile, batchDownload } from '../api';
 
 export default function ArtistsPage() {
   const navigate = useNavigate();
@@ -29,6 +29,14 @@ export default function ArtistsPage() {
       notifications.show({ title: 'Done', message: data.message, color: 'green' });
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ['artists'] });
+    },
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: () => batchDownload({ artistIds: selected, type: 'all' }),
+    onSuccess: (data: any) => {
+      notifications.show({ title: 'Download Started', message: data.message, color: 'blue' });
+      setSelected([]);
     },
   });
 
@@ -102,6 +110,13 @@ export default function ArtistsPage() {
               loading={assignMutation.isPending}
             >
               Set Profile ({selected.length})
+            </Button>
+            <Button
+              variant="light" color="green"
+              onClick={() => downloadMutation.mutate()}
+              loading={downloadMutation.isPending}
+            >
+              ⬇ Download Missing ({selected.length})
             </Button>
           </>
         )}

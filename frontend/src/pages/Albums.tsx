@@ -3,7 +3,7 @@ import { Loader, TextInput, Pagination, Group, Select, Button, Checkbox, Segment
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAlbums, getProfiles, massAssignProfile } from '../api';
+import { getAlbums, getProfiles, massAssignProfile, batchDownload } from '../api';
 
 export default function AlbumsPage() {
   const navigate = useNavigate();
@@ -32,6 +32,14 @@ export default function AlbumsPage() {
       notifications.show({ title: 'Done', message: data.message, color: 'green' });
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ['albums'] });
+    },
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: () => batchDownload({ albumIds: selected, type: 'all' }),
+    onSuccess: (data: any) => {
+      notifications.show({ title: 'Download Started', message: data.message, color: 'blue' });
+      setSelected([]);
     },
   });
 
@@ -151,6 +159,13 @@ export default function AlbumsPage() {
               loading={assignMutation.isPending}
             >
               Set Profile ({selected.length})
+            </Button>
+            <Button
+              variant="light" color="green"
+              onClick={() => downloadMutation.mutate()}
+              loading={downloadMutation.isPending}
+            >
+              ⬇ Download Missing ({selected.length})
             </Button>
           </>
         )}

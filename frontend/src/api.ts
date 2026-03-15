@@ -63,6 +63,8 @@ export const translateLyrics = (trackId: number, data: { content: string; target
   api.post(`/metadata/lyrics/translate/${trackId}`, data).then(r => r.data);
 export const generateSyncedLyrics = (trackId: number, data: { content: string; model?: string }) =>
   api.post(`/metadata/lyrics/sync-generate/${trackId}`, data).then(r => r.data);
+export const batchDownload = (data: { albumIds?: number[]; artistIds?: number[]; type?: string }) =>
+  api.post('/metadata/batch-download', data).then(r => r.data);
 
 // ---------- History ----------
 export const getHistory = () => api.get('/history').then(r => r.data as HistoryEntry[]);

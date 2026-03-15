@@ -415,3 +415,56 @@ class LyricsSyncGenerate(Resource):
             return {'message': f'Sync generation failed: {str(e)}'}, 500
 
 
+@api_ns_metadata.route('/metadata/batch-download')
+class BatchDownload(Resource):
+    def post(self):
+        """Trigger metadata downloads for specific albums/artists in background."""
+        from threading import Thread
+        from lyrarr.metadata.download_worker import download_missing_covers, download_missing_lyrics
+        from lyrarr.app.event_handler import event_stream
+
+        data = request.get_json() or {}
+        album_ids = data.get('albumIds', [])
+        artist_ids = data.get('artistIds', [])
+        dtype = data.get('type', 'all')  # 'covers', 'lyrics', 'all'
+
+        if not album_ids and not artist_ids:
+            return {'message': 'albumIds or artistIds required'}, 400
+
+        # If artist IDs provided, resolve to album IDs
+        if artist_ids:
+            albums = database.execute(
+                select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
+            ).scalars().all()
+            album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
+
+        count = len(album_ids)
+
+        def _run():
+            try:
+                event_stream(type='download_start', payload={
+                    'message': f'Batch download started for {count} album(s)',
+                    'total_covers': count if dtype in ('covers', 'all') else 0,
+                    'total_lyrics': count if dtype in ('lyrics', 'all') else 0,
+                })
+
+                covers = 0
+                lyrics = 0
+
+                if dtype in ('covers', 'all'):
+                    covers = download_missing_covers(album_ids=album_ids) or 0
+                if dtype in ('lyrics', 'all'):
+                    lyrics = download_missing_lyrics(album_ids=album_ids) or 0
+
+                event_stream(type='download_complete', payload={
+                    'covers': covers, 'lyrics': lyrics,
+                    'message': f'Batch: {covers} covers, {lyrics} lyrics downloaded',
+                })
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Batch download error: {e}")
+
+        thread = Thread(target=_run, daemon=True)
+        thread.start()
+
+        return {'message': f'Batch download started for {count} album(s)', 'albumCount': count}

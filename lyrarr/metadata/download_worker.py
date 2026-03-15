@@ -105,11 +105,16 @@ def _parse_providers_list(providers_str):
         return []
 
 
-def download_missing_covers():
-    """Download cover art for albums that are missing it, based on their profile."""
-    albums = database.execute(
-        select(TableAlbums).where(TableAlbums.cover_status == 'missing')
-    ).scalars().all()
+def download_missing_covers(album_ids=None):
+    """Download cover art for albums that are missing it, based on their profile.
+
+    Args:
+        album_ids: Optional list of album IDs to scope the download. If None, all missing.
+    """
+    query = select(TableAlbums).where(TableAlbums.cover_status == 'missing')
+    if album_ids:
+        query = query.where(TableAlbums.lidarrAlbumId.in_(album_ids))
+    albums = database.execute(query).scalars().all()
 
     if not albums:
         logger.info("No albums with missing covers")
@@ -259,11 +264,16 @@ def download_missing_covers():
     return downloaded
 
 
-def download_missing_lyrics():
-    """Download lyrics for tracks that are missing them, based on their album's profile."""
-    tracks = database.execute(
-        select(TableTracks).where(TableTracks.lyrics_status == 'missing')
-    ).scalars().all()
+def download_missing_lyrics(album_ids=None):
+    """Download lyrics for tracks that are missing them, based on their album's profile.
+
+    Args:
+        album_ids: Optional list of album IDs to scope the download. If None, all missing.
+    """
+    query = select(TableTracks).where(TableTracks.lyrics_status == 'missing')
+    if album_ids:
+        query = query.where(TableTracks.albumId.in_(album_ids))
+    tracks = database.execute(query).scalars().all()
 
     if not tracks:
         logger.info("No tracks with missing lyrics")
