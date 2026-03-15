@@ -9,6 +9,7 @@ import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover } from '../a
 import CoverSearchModal from '../components/CoverSearchModal';
 import LyricsSearchModal from '../components/LyricsSearchModal';
 import LyricsEditorModal from '../components/LyricsEditorModal';
+import ImageLightbox from '../components/ImageLightbox';
 
 export default function AlbumDetailPage() {
   const { albumId } = useParams();
@@ -18,6 +19,7 @@ export default function AlbumDetailPage() {
   const [coverSearchOpen, setCoverSearchOpen] = useState(false);
   const [lyricsTrack, setLyricsTrack] = useState<any>(null);
   const [editorTrack, setEditorTrack] = useState<any>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', albumId],
@@ -80,7 +82,8 @@ export default function AlbumDetailPage() {
               <img
                 src={album.cover}
                 alt={album.title}
-                style={{ width: 180, height: 180, borderRadius: 12, objectFit: 'cover' }}
+                style={{ width: 180, height: 180, borderRadius: 12, objectFit: 'cover', cursor: 'pointer' }}
+                onClick={() => setLightboxOpen(true)}
               />
             ) : (
               <div style={{
@@ -259,6 +262,9 @@ export default function AlbumDetailPage() {
           opened={!!editorTrack}
           onClose={() => setEditorTrack(null)}
         />
+      )}
+      {lightboxOpen && album.cover && (
+        <ImageLightbox src={album.cover} alt={album.title} onClose={() => setLightboxOpen(false)} />
       )}
     </div>
   );

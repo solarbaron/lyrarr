@@ -11,6 +11,7 @@ from lyrarr.app.database import (
 )
 from lyrarr.lidarr.api_client import lidarr_api
 from lyrarr.app.config import settings
+from lyrarr.app.event_handler import event_stream
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def update_artists(force=False):
         return
 
     logger.info("Starting artist sync from Lidarr...")
+    event_stream(type='sync_start', payload={'message': 'Syncing with Lidarr...'})
     artists = lidarr_api.get_artists()
 
     if artists is None:
@@ -75,7 +77,7 @@ def update_artists(force=False):
             'name': artist.get('artistName', 'Unknown'),
             'sortName': artist.get('sortName', ''),
             'path': artist.get('path', ''),
-            'monitored': str(artist.get('monitored', False)),
+            'monitored': bool(artist.get('monitored', False)),
             'overview': (artist.get('overview') or '')[:500],
             'fanart': fanart,
             'poster': poster,
@@ -185,7 +187,7 @@ def update_albums(force=False):
             'title': album.get('title', 'Unknown'),
             'year': year,
             'path': album_path,
-            'monitored': str(album.get('monitored', False)),
+            'monitored': bool(album.get('monitored', False)),
             'overview': (album.get('overview') or '')[:500],
             'cover': cover,
             'genres': str(album.get('genres', [])),
@@ -361,3 +363,12 @@ def update_tracks(force=False):
             logger.error(f"Error syncing tracks for album {album.lidarrAlbumId}: {e}")
 
     logger.info(f"Synced {total_synced} tracks from Lidarr")
+
+    # Emit sync_complete event with stats
+    artist_count = database.execute(select(TableArtists)).scalars().all()
+    album_count = database.execute(select(TableAlbums)).scalars().all()
+    event_stream(type='sync_complete', payload={
+        'message': f'Sync complete: {len(artist_count)} artists, {len(album_count)} albums, {total_synced} tracks',
+        'artists_synced': len(artist_count),
+        'albums_synced': len(album_count),
+    })

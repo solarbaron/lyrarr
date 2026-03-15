@@ -149,8 +149,8 @@ export default function ArtistsPage() {
                     </span>
                   </td>
                   <td onClick={() => navigate(`/artists/${artist.lidarrArtistId}`)}>
-                    <span className={`status-badge ${artist.monitored === 'True' ? 'available' : 'missing'}`}>
-                      {artist.monitored === 'True' ? 'Yes' : 'No'}
+                    <span className={`status-badge ${artist.monitored ? 'available' : 'missing'}`}>
+                      {artist.monitored ? 'Yes' : 'No'}
                     </span>
                   </td>
                 </tr>

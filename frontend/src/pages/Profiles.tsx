@@ -6,26 +6,26 @@ import { getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignPro
 
 interface ProfileForm {
   name: string;
-  download_covers: string;
-  download_lyrics: string;
+  download_covers: boolean;
+  download_lyrics: boolean;
   cover_providers: string;
   lyrics_providers: string;
-  prefer_synced_lyrics: string;
+  prefer_synced_lyrics: boolean;
   cover_format: string;
-  overwrite_existing: string;
-  embed_cover_art: string;
+  overwrite_existing: boolean;
+  embed_cover_art: boolean;
 }
 
 const DEFAULT_FORM: ProfileForm = {
   name: '',
-  download_covers: 'True',
-  download_lyrics: 'True',
+  download_covers: true,
+  download_lyrics: true,
   cover_providers: '["musicbrainz","fanart"]',
   lyrics_providers: '["lrclib","genius"]',
-  prefer_synced_lyrics: 'True',
+  prefer_synced_lyrics: true,
   cover_format: 'jpg',
-  overwrite_existing: 'False',
-  embed_cover_art: 'False',
+  overwrite_existing: false,
+  embed_cover_art: false,
 };
 
 export default function ProfilesPage() {
@@ -65,7 +65,7 @@ export default function ProfilesPage() {
   });
 
   const setDefaultMutation = useMutation({
-    mutationFn: (id: number) => updateProfile(id, { is_default: 'True' }),
+    mutationFn: (id: number) => updateProfile(id, { is_default: true }),
     onSuccess: () => {
       notifications.show({ title: 'Done', message: 'Default profile updated', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
@@ -94,14 +94,14 @@ export default function ProfilesPage() {
     setEditId(profile.id);
     setForm({
       name: profile.name,
-      download_covers: profile.download_covers || 'True',
-      download_lyrics: profile.download_lyrics || 'True',
+      download_covers: profile.download_covers ?? true,
+      download_lyrics: profile.download_lyrics ?? true,
       cover_providers: profile.cover_providers || '["musicbrainz","fanart"]',
       lyrics_providers: profile.lyrics_providers || '["lrclib","genius"]',
-      prefer_synced_lyrics: profile.prefer_synced_lyrics || 'True',
+      prefer_synced_lyrics: profile.prefer_synced_lyrics ?? true,
       cover_format: profile.cover_format || 'jpg',
-      overwrite_existing: profile.overwrite_existing || 'False',
-      embed_cover_art: profile.embed_cover_art || 'False',
+      overwrite_existing: profile.overwrite_existing ?? false,
+      embed_cover_art: profile.embed_cover_art ?? false,
     });
     setModalOpen(true);
   };
@@ -140,18 +140,18 @@ export default function ProfilesPage() {
             <tr key={p.id}>
               <td><span style={{ fontWeight: 600 }}>{p.name}</span></td>
               <td>
-                <span className={`status-badge ${p.download_covers === 'True' ? 'available' : 'missing'}`}>
-                  {p.download_covers === 'True' ? 'Yes' : 'No'}
+                <span className={`status-badge ${p.download_covers ? 'available' : 'missing'}`}>
+                  {p.download_covers ? 'Yes' : 'No'}
                 </span>
               </td>
               <td>
-                <span className={`status-badge ${p.download_lyrics === 'True' ? 'available' : 'missing'}`}>
-                  {p.download_lyrics === 'True' ? 'Yes' : 'No'}
+                <span className={`status-badge ${p.download_lyrics ? 'available' : 'missing'}`}>
+                  {p.download_lyrics ? 'Yes' : 'No'}
                 </span>
               </td>
-              <td>{p.prefer_synced_lyrics === 'True' ? 'Preferred' : 'No'}</td>
+              <td>{p.prefer_synced_lyrics ? 'Preferred' : 'No'}</td>
               <td>
-                {p.is_default === 'True' ? (
+                {p.is_default ? (
                   <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>✓ Default</span>
                 ) : (
                   <Button variant="subtle" color="gray" size="xs" onClick={() => setDefaultMutation.mutate(p.id)}>
@@ -175,7 +175,7 @@ export default function ProfilesPage() {
                       </Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
-                  {p.is_default !== 'True' && (
+                  {!p.is_default && (
                     <Button variant="subtle" color="red" size="xs" onClick={() => deleteMutation.mutate(p.id)}>
                       Delete
                     </Button>
@@ -203,36 +203,36 @@ export default function ProfilesPage() {
         />
         <Checkbox
           label="Download Cover Art"
-          checked={form.download_covers === 'True'}
-          onChange={(e) => setForm({ ...form, download_covers: e.currentTarget.checked ? 'True' : 'False' })}
+          checked={form.download_covers}
+          onChange={(e) => setForm({ ...form, download_covers: e.currentTarget.checked })}
           mb="sm"
           color="violet"
         />
         <Checkbox
           label="Download Lyrics"
-          checked={form.download_lyrics === 'True'}
-          onChange={(e) => setForm({ ...form, download_lyrics: e.currentTarget.checked ? 'True' : 'False' })}
+          checked={form.download_lyrics}
+          onChange={(e) => setForm({ ...form, download_lyrics: e.currentTarget.checked })}
           mb="sm"
           color="violet"
         />
         <Checkbox
           label="Prefer Synced Lyrics (.lrc)"
-          checked={form.prefer_synced_lyrics === 'True'}
-          onChange={(e) => setForm({ ...form, prefer_synced_lyrics: e.currentTarget.checked ? 'True' : 'False' })}
+          checked={form.prefer_synced_lyrics}
+          onChange={(e) => setForm({ ...form, prefer_synced_lyrics: e.currentTarget.checked })}
           mb="sm"
           color="violet"
         />
         <Checkbox
           label="Overwrite Existing Files"
-          checked={form.overwrite_existing === 'True'}
-          onChange={(e) => setForm({ ...form, overwrite_existing: e.currentTarget.checked ? 'True' : 'False' })}
+          checked={form.overwrite_existing}
+          onChange={(e) => setForm({ ...form, overwrite_existing: e.currentTarget.checked })}
           mb="sm"
           color="violet"
         />
         <Checkbox
           label="Embed Cover Art in Audio Files"
-          checked={form.embed_cover_art === 'True'}
-          onChange={(e) => setForm({ ...form, embed_cover_art: e.currentTarget.checked ? 'True' : 'False' })}
+          checked={form.embed_cover_art}
+          onChange={(e) => setForm({ ...form, embed_cover_art: e.currentTarget.checked })}
           mb="md"
           color="violet"
         />

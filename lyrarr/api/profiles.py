@@ -39,14 +39,14 @@ class ProfileList(Resource):
         result = database.execute(
             insert(TableProfiles).values(
                 name=name,
-                is_default='False',
-                download_covers=data.get('download_covers', 'True'),
-                download_lyrics=data.get('download_lyrics', 'True'),
+                is_default=False,
+                download_covers=data.get('download_covers', True),
+                download_lyrics=data.get('download_lyrics', True),
                 cover_providers=data.get('cover_providers', '["musicbrainz","fanart"]'),
                 lyrics_providers=data.get('lyrics_providers', '["lrclib","genius"]'),
-                prefer_synced_lyrics=data.get('prefer_synced_lyrics', 'True'),
+                prefer_synced_lyrics=data.get('prefer_synced_lyrics', True),
                 cover_format=data.get('cover_format', 'jpg'),
-                overwrite_existing=data.get('overwrite_existing', 'False'),
+                overwrite_existing=data.get('overwrite_existing', False),
                 created_at_timestamp=now,
                 updated_at_timestamp=now,
             )
@@ -87,11 +87,11 @@ class ProfileItem(Resource):
                 values[field] = data[field]
 
         # If setting as default, unset all others first
-        if data.get('is_default') == 'True':
+        if data.get('is_default') is True or data.get('is_default') == 'True':
             database.execute(
-                update(TableProfiles).values(is_default='False')
+                update(TableProfiles).values(is_default=False)
             )
-            values['is_default'] = 'True'
+            values['is_default'] = True
 
         database.execute(
             update(TableProfiles)
@@ -111,12 +111,12 @@ class ProfileItem(Resource):
         ).scalars().first()
         if not profile:
             return {'message': 'Profile not found'}, 404
-        if profile.is_default == 'True':
+        if profile.is_default:
             return {'message': 'Cannot delete the default profile'}, 400
 
         # Get the default profile to reassign
         default = database.execute(
-            select(TableProfiles).where(TableProfiles.is_default == 'True')
+            select(TableProfiles).where(TableProfiles.is_default == True)
         ).scalars().first()
         default_id = default.id if default else None
 

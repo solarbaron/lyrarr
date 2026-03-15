@@ -145,9 +145,9 @@ def save_cover_art(album_id, image_data, provider_name):
                 ).scalars().first()
             if not profile:
                 profile = database.execute(
-                    select(TableProfiles).where(TableProfiles.is_default == 'True')
+                    select(TableProfiles).where(TableProfiles.is_default == True)
                 ).scalars().first()
-            if profile and profile.embed_cover_art == 'True':
+            if profile and profile.embed_cover_art:
                 embed_cover_in_files(album.path, image_data, profile.cover_format or 'jpg')
         except Exception as e:
             logger.error(f"Error embedding cover art for album {album_id}: {e}")
@@ -198,7 +198,7 @@ def save_lyrics(track_id, lyrics_data, provider_name):
             .where(TableTracks.lidarrTrackId == track_id)
             .values(
                 lyrics_status='available',
-                hasLyrics='True',
+                hasLyrics=True,
                 updated_at_timestamp=datetime.now()
             )
         )

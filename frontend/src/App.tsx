@@ -4,18 +4,22 @@ import {
   faMusic, faCompactDisc, faUser, faClockRotateLeft,
   faMagnifyingGlass, faGear, faServer, faHouse, faIdBadge, faBars, faXmark
 } from '@fortawesome/free-solid-svg-icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
+import { Loader } from '@mantine/core';
 
-import ArtistsPage from './pages/Artists';
-import ArtistDetailPage from './pages/ArtistDetail';
-import AlbumsPage from './pages/Albums';
-import AlbumDetailPage from './pages/AlbumDetail';
-import WantedPage from './pages/Wanted';
-import HistoryPage from './pages/History';
-import SettingsPage from './pages/Settings';
-import SystemPage from './pages/System';
-import DashboardPage from './pages/Dashboard';
-import ProfilesPage from './pages/Profiles';
+// Lazy-loaded pages (code-split)
+const ArtistsPage = lazy(() => import('./pages/Artists'));
+const ArtistDetailPage = lazy(() => import('./pages/ArtistDetail'));
+const AlbumsPage = lazy(() => import('./pages/Albums'));
+const AlbumDetailPage = lazy(() => import('./pages/AlbumDetail'));
+const WantedPage = lazy(() => import('./pages/Wanted'));
+const HistoryPage = lazy(() => import('./pages/History'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const SystemPage = lazy(() => import('./pages/System'));
+const DashboardPage = lazy(() => import('./pages/Dashboard'));
+const ProfilesPage = lazy(() => import('./pages/Profiles'));
+
+// Always-loaded components
 import ActivityFeed from './components/ActivityFeed';
 import SearchBar from './components/SearchBar';
 import ThemeToggle from './components/ThemeToggle';
@@ -119,18 +123,20 @@ export default function App() {
       </nav>
 
       <main className="main-content">
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/artists" element={<ArtistsPage />} />
-          <Route path="/artists/:artistId" element={<ArtistDetailPage />} />
-          <Route path="/albums" element={<AlbumsPage />} />
-          <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
-          <Route path="/wanted" element={<WantedPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/profiles" element={<ProfilesPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/system" element={<SystemPage />} />
-        </Routes>
+        <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}><Loader color="var(--accent)" /></div>}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/artists" element={<ArtistsPage />} />
+            <Route path="/artists/:artistId" element={<ArtistDetailPage />} />
+            <Route path="/albums" element={<AlbumsPage />} />
+            <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
+            <Route path="/wanted" element={<WantedPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/profiles" element={<ProfilesPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/system" element={<SystemPage />} />
+          </Routes>
+        </Suspense>
       </main>
 
       <ActivityFeed />

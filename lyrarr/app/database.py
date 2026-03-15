@@ -7,7 +7,7 @@ import signal
 
 from datetime import datetime
 
-from sqlalchemy import create_engine, DateTime, ForeignKey, Integer, Text, func, text
+from sqlalchemy import create_engine, DateTime, ForeignKey, Integer, Text, Boolean, func, text
 from sqlalchemy import update, delete, select, func  # noqa W0611
 from sqlalchemy.orm import scoped_session, sessionmaker, mapped_column, close_all_sessions
 from sqlalchemy.ext.declarative import declarative_base
@@ -73,15 +73,15 @@ class TableProfiles(Base):
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     name = mapped_column(Text, nullable=False, unique=True)
-    is_default = mapped_column(Text, default='False')
-    download_covers = mapped_column(Text, default='True')
-    download_lyrics = mapped_column(Text, default='True')
+    is_default = mapped_column(Boolean, default=False)
+    download_covers = mapped_column(Boolean, default=True)
+    download_lyrics = mapped_column(Boolean, default=True)
     cover_providers = mapped_column(Text, default='["musicbrainz","fanart"]')
     lyrics_providers = mapped_column(Text, default='["lrclib","genius"]')
-    prefer_synced_lyrics = mapped_column(Text, default='True')
+    prefer_synced_lyrics = mapped_column(Boolean, default=True)
     cover_format = mapped_column(Text, default='jpg')
-    overwrite_existing = mapped_column(Text, default='False')
-    embed_cover_art = mapped_column(Text, default='False')
+    overwrite_existing = mapped_column(Boolean, default=False)
+    embed_cover_art = mapped_column(Boolean, default=False)
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
 
@@ -97,7 +97,7 @@ class TableArtists(Base):
     name = mapped_column(Text, nullable=False)
     sortName = mapped_column(Text)
     path = mapped_column(Text, nullable=False)
-    monitored = mapped_column(Text)
+    monitored = mapped_column(Boolean, default=False)
     overview = mapped_column(Text)
     fanart = mapped_column(Text)
     poster = mapped_column(Text)
@@ -120,7 +120,7 @@ class TableAlbums(Base):
     title = mapped_column(Text, nullable=False)
     year = mapped_column(Integer)
     path = mapped_column(Text)
-    monitored = mapped_column(Text)
+    monitored = mapped_column(Boolean, default=False)
     overview = mapped_column(Text)
     cover = mapped_column(Text)  # URL from Lidarr
     genres = mapped_column(Text)
@@ -131,9 +131,9 @@ class TableAlbums(Base):
     missing_lyrics = mapped_column(Text)
     profileId = mapped_column(Integer, ForeignKey('table_profiles.id', ondelete='SET NULL'), nullable=True)
     override_cover_format = mapped_column(Text, nullable=True)
-    override_prefer_synced = mapped_column(Text, nullable=True)
-    override_download_covers = mapped_column(Text, nullable=True)
-    override_download_lyrics = mapped_column(Text, nullable=True)
+    override_prefer_synced = mapped_column(Boolean, nullable=True)
+    override_download_covers = mapped_column(Boolean, nullable=True)
+    override_download_lyrics = mapped_column(Boolean, nullable=True)
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
 
@@ -153,7 +153,7 @@ class TableTracks(Base):
     discNumber = mapped_column(Integer, default=1)
     duration = mapped_column(Integer)  # in milliseconds
     path = mapped_column(Text)
-    hasLyrics = mapped_column(Text, default='False')  # whether synced lyrics exist
+    hasLyrics = mapped_column(Boolean, default=False)  # whether synced lyrics exist
     lyrics_status = mapped_column(Text, default='missing')  # missing, available, manual, blacklisted
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
@@ -194,6 +194,43 @@ class TableBlacklist(Base):
         return {column.name: _serialize_value(getattr(self, column.name)) for column in self.__table__.columns}
 
 
+# Columns that were migrated from Text ('True'/'False') to Boolean (1/0)
+_BOOL_MIGRATION_COLUMNS = {
+    'table_profiles': ['is_default', 'download_covers', 'download_lyrics',
+                       'prefer_synced_lyrics', 'overwrite_existing', 'embed_cover_art'],
+    'table_artists': ['monitored'],
+    'table_albums': ['monitored', 'override_prefer_synced',
+                     'override_download_covers', 'override_download_lyrics'],
+    'table_tracks': ['hasLyrics'],
+}
+
+
+def _migrate_bool_columns():
+    """Migrate Text 'True'/'False' values to integer 1/0 for Boolean columns."""
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(engine)
+
+    for table_name, columns in _BOOL_MIGRATION_COLUMNS.items():
+        if not inspector.has_table(table_name):
+            continue
+        for col_name in columns:
+            # Check if any rows still have text 'True' or 'False'
+            with engine.begin() as conn:
+                result = conn.execute(text(
+                    f"SELECT COUNT(*) FROM {table_name} WHERE typeof({col_name}) = 'text' "
+                    f"AND ({col_name} = 'True' OR {col_name} = 'False')"
+                )).scalar()
+                if result and result > 0:
+                    conn.execute(text(
+                        f"UPDATE {table_name} SET {col_name} = CASE "
+                        f"WHEN {col_name} = 'True' THEN 1 "
+                        f"WHEN {col_name} = 'False' THEN 0 "
+                        f"ELSE {col_name} END"
+                    ))
+                    logger.info(f"Migration: converted {result} rows in {table_name}.{col_name} "
+                                f"from text to boolean")
+
+
 def init_db():
     metadata.create_all(engine)
 
@@ -216,6 +253,9 @@ def init_db():
                     ))
                 logger.info(f"Migration: added column {col.name} to {table.name}")
 
+    # Migrate text booleans to real booleans
+    _migrate_bool_columns()
+
     # Add the system table single row if it doesn't exist
     if not database.execute(select(System)).first():
         from sqlalchemy.dialects.sqlite import insert
@@ -229,15 +269,15 @@ def init_db():
         database.execute(
             insert(TableProfiles).values(
                 name='Default',
-                is_default='True',
-                download_covers='True',
-                download_lyrics='True',
+                is_default=True,
+                download_covers=True,
+                download_lyrics=True,
                 cover_providers='["musicbrainz","fanart"]',
                 lyrics_providers='["lrclib","genius"]',
-                prefer_synced_lyrics='True',
+                prefer_synced_lyrics=True,
                 cover_format='jpg',
-                overwrite_existing='False',
-                embed_cover_art='False',
+                overwrite_existing=False,
+                embed_cover_art=False,
                 created_at_timestamp=datetime.now(),
                 updated_at_timestamp=datetime.now(),
             )

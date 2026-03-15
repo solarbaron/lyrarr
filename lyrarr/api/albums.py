@@ -180,7 +180,7 @@ class AlbumUploadCover(Resource):
             profile = database.execute(
                 select(TableProfiles).where(TableProfiles.id == album.profileId)
             ).scalars().first()
-            if profile and getattr(profile, 'embed_cover_art', 'False') == 'True':
+            if profile and getattr(profile, 'embed_cover_art', False):
                 from lyrarr.metadata.download_worker import embed_cover_in_files
                 embed_cover_in_files(album.path, cover_data, ext)
         except Exception:

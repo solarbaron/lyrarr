@@ -80,11 +80,11 @@ export default function DashboardPage() {
       </SimpleGrid>
 
       {/* Downloads Over Time Chart */}
-      {chartData?.downloadHistory?.length > 0 && (
+      {(chartData?.downloadHistory?.length ?? 0) > 0 && (
         <div className="stat-card" style={{ marginTop: 24 }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Downloads Over Time (30 days)</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={chartData.downloadHistory}>
+            <AreaChart data={chartData!.downloadHistory!}>
               <defs>
                 <linearGradient id="colorCovers" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#8b3dff" stopOpacity={0.4} />
@@ -113,11 +113,11 @@ export default function DashboardPage() {
       )}
 
       {/* Per-Artist Completion */}
-      {chartData?.artistCompletion?.length > 0 && (
+      {(chartData?.artistCompletion?.length ?? 0) > 0 && (
         <div className="stat-card" style={{ marginTop: 20 }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Artist Completion</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {chartData.artistCompletion.slice(0, 10).map((a: any) => (
+            {chartData!.artistCompletion!.slice(0, 10).map((a: any) => (
               <div key={a.id}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                   <span style={{ fontWeight: 500, fontSize: 13 }}>{a.name}</span>

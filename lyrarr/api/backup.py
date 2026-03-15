@@ -69,15 +69,15 @@ class BackupRestore(Resource):
 
                 values = {
                     'name': p.get('name', 'Unnamed'),
-                    'download_covers': p.get('download_covers', 'True'),
-                    'download_lyrics': p.get('download_lyrics', 'True'),
+                    'download_covers': p.get('download_covers', True),
+                    'download_lyrics': p.get('download_lyrics', True),
                     'cover_providers': p.get('cover_providers', '["musicbrainz","fanart"]'),
                     'lyrics_providers': p.get('lyrics_providers', '["lrclib","genius"]'),
-                    'prefer_synced_lyrics': p.get('prefer_synced_lyrics', 'True'),
+                    'prefer_synced_lyrics': p.get('prefer_synced_lyrics', True),
                     'cover_format': p.get('cover_format', 'jpg'),
-                    'overwrite_existing': p.get('overwrite_existing', 'False'),
-                    'embed_cover_art': p.get('embed_cover_art', 'False'),
-                    'is_default': p.get('is_default', 'False'),
+                    'overwrite_existing': p.get('overwrite_existing', False),
+                    'embed_cover_art': p.get('embed_cover_art', False),
+                    'is_default': p.get('is_default', False),
                     'updated_at_timestamp': datetime.now(),
                 }
 

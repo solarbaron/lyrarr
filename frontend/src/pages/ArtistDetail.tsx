@@ -89,8 +89,8 @@ export default function ArtistDetailPage() {
             </p>
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-              <Badge color={artist.monitored === 'True' ? 'green' : 'gray'}>
-                {artist.monitored === 'True' ? 'Monitored' : 'Unmonitored'}
+              <Badge color={artist.monitored ? 'green' : 'gray'}>
+                {artist.monitored ? 'Monitored' : 'Unmonitored'}
               </Badge>
               <Badge variant="outline" color="violet">{totalAlbums} albums</Badge>
             </div>

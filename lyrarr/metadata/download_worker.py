@@ -53,7 +53,7 @@ def _get_profile(profile_id):
 
     # Fall back to default
     return database.execute(
-        select(TableProfiles).where(TableProfiles.is_default == 'True')
+        select(TableProfiles).where(TableProfiles.is_default == True)
     ).scalars().first()
 
 
@@ -63,14 +63,14 @@ def _effective_settings(album, profile):
     """
     if not profile:
         return {
-            'download_covers': 'False',
-            'download_lyrics': 'False',
+            'download_covers': False,
+            'download_lyrics': False,
             'cover_format': 'jpg',
-            'prefer_synced_lyrics': 'True',
+            'prefer_synced_lyrics': True,
             'cover_providers': '[]',
             'lyrics_providers': '[]',
-            'overwrite_existing': 'False',
-            'embed_cover_art': 'False',
+            'overwrite_existing': False,
+            'embed_cover_art': False,
         }
 
     def _override(override_val, profile_val):
@@ -84,8 +84,8 @@ def _effective_settings(album, profile):
         'prefer_synced_lyrics': _override(album.override_prefer_synced, profile.prefer_synced_lyrics),
         'cover_providers': profile.cover_providers or '["musicbrainz","fanart"]',
         'lyrics_providers': profile.lyrics_providers or '["lrclib","genius"]',
-        'overwrite_existing': profile.overwrite_existing or 'False',
-        'embed_cover_art': profile.embed_cover_art or 'False',
+        'overwrite_existing': profile.overwrite_existing or False,
+        'embed_cover_art': profile.embed_cover_art or False,
     }
 
 
@@ -113,7 +113,7 @@ def download_missing_covers():
     for album in albums:
         profile = _get_profile(album.profileId)
         eff = _effective_settings(album, profile)
-        if eff['download_covers'] != 'True':
+        if not eff['download_covers']:
             if not profile:
                 logger.debug(f"Skipping '{album.title}' — no profile assigned")
             else:
@@ -136,7 +136,7 @@ def download_missing_covers():
                         cover_exists_on_disk = True
                         break
 
-            if cover_exists_on_disk and eff['overwrite_existing'] != 'True':
+            if cover_exists_on_disk and not eff['overwrite_existing']:
                 # File exists but DB says missing — fix the DB status
                 database.execute(
                     update(TableAlbums)
@@ -223,7 +223,7 @@ def download_missing_covers():
                 })
 
                 # Embed if profile flag is set
-                if eff['embed_cover_art'] == 'True':
+                if eff['embed_cover_art']:
                     try:
                         embed_cover_in_files(album.path, cover_data, cover_format)
                     except Exception as e:
@@ -271,7 +271,7 @@ def download_missing_lyrics():
 
         profile = _get_profile(album.profileId)
         eff = _effective_settings(album, profile)
-        if eff['download_lyrics'] != 'True':
+        if not eff['download_lyrics']:
             if not profile:
                 logger.debug(f"Skipping track '{track.title}' — album has no profile assigned")
             else:
@@ -293,7 +293,7 @@ def download_missing_lyrics():
 
         lyrics_data = None
         used_provider = None
-        prefer_synced = eff['prefer_synced_lyrics'] == 'True'
+        prefer_synced = bool(eff['prefer_synced_lyrics'])
 
         for provider_name in providers:
             provider = _lyrics_providers.get(provider_name)
@@ -344,14 +344,14 @@ def download_missing_lyrics():
                 # Check if lyrics file already exists on disk
                 lrc_exists = os.path.isfile(track_base + '.lrc')
                 txt_exists = os.path.isfile(track_base + '.txt')
-                if (lrc_exists or txt_exists) and eff['overwrite_existing'] != 'True':
+                if (lrc_exists or txt_exists) and not eff['overwrite_existing']:
                     # File exists but DB says missing — fix the DB status
                     database.execute(
                         update(TableTracks)
                         .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
                         .values(
                             lyrics_status='available',
-                            hasLyrics='True',
+                            hasLyrics=True,
                             updated_at_timestamp=datetime.now()
                         )
                     )
@@ -369,7 +369,7 @@ def download_missing_lyrics():
                     .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
                     .values(
                         lyrics_status='available',
-                        hasLyrics='True',
+                        hasLyrics=True,
                         updated_at_timestamp=datetime.now()
                     )
                 )
@@ -392,6 +392,9 @@ def download_missing_lyrics():
 
                 downloaded += 1
                 logger.info(f"✓ Lyrics: '{track.title}' ({used_provider})")
+                event_stream(type='download_progress', payload={
+                    'metadata_type': 'lyrics', 'title': track.title, 'provider': used_provider,
+                })
 
             except Exception as e:
                 logger.error(f"Error saving lyrics for '{track.title}': {e}")
@@ -407,7 +410,20 @@ def download_missing_lyrics():
 def run_metadata_downloads():
     """Main entry point for the scheduled metadata download task."""
     logger.info("Starting scheduled metadata download task...")
-    event_stream(type='download_start', payload={'message': 'Metadata download task started'})
+
+    # Count pending items for progress tracking
+    total_covers = database.execute(
+        select(TableAlbums).where(TableAlbums.cover_status == 'missing')
+    ).scalars().all()
+    total_lyrics = database.execute(
+        select(TableTracks).where(TableTracks.lyrics_status == 'missing')
+    ).scalars().all()
+
+    event_stream(type='download_start', payload={
+        'message': 'Metadata download task started',
+        'total_covers': len(total_covers),
+        'total_lyrics': len(total_lyrics),
+    })
 
     covers_downloaded = 0
     lyrics_downloaded = 0
