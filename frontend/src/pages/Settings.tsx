@@ -124,11 +124,24 @@ export default function SettingsPage() {
       {/* Providers */}
       <div className="settings-section">
         <h3>🔑 Provider API Keys</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
+          Deezer, iTunes, LRCLIB, and NetEase work without API keys. Configure keys below for additional providers.
+        </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <TextInput label="fanart.tv API Key" placeholder="Optional" value={form.fanart?.apikey || ''}
+          <TextInput label="fanart.tv API Key" placeholder="Optional — for artist art"
+            value={form.fanart?.apikey || ''}
             onChange={(e) => updateField('fanart', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="Genius API Key" placeholder="Optional" value={form.genius?.apikey || ''}
+          <TextInput label="Genius API Key" placeholder="Optional — for plain lyrics"
+            value={form.genius?.apikey || ''}
             onChange={(e) => updateField('genius', 'apikey', e.currentTarget.value)} styles={inputStyles} />
+          <TextInput label="Musixmatch API Key" placeholder="Optional — for synced lyrics"
+            description="Free tier: 1000 requests/day. Get key at developer.musixmatch.com"
+            value={form.musixmatch?.apikey || ''}
+            onChange={(e) => updateField('musixmatch', 'apikey', e.currentTarget.value)} styles={inputStyles} />
+          <TextInput label="TheAudioDB API Key" placeholder="Default: free test key"
+            description="Free test key '2' is used by default. Upgrade at theaudiodb.com/patreon"
+            value={form.theaudiodb?.apikey || ''}
+            onChange={(e) => updateField('theaudiodb', 'apikey', e.currentTarget.value)} styles={inputStyles} />
         </div>
       </div>
 

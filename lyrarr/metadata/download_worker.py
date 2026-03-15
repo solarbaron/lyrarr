@@ -18,8 +18,13 @@ from lyrarr.app.database import (
 )
 from lyrarr.metadata.covers.musicbrainz import MusicBrainzCoverProvider
 from lyrarr.metadata.covers.fanart import FanartCoverProvider
+from lyrarr.metadata.covers.deezer import DeezerCoverProvider
+from lyrarr.metadata.covers.itunes import ITunesCoverProvider
+from lyrarr.metadata.covers.theaudiodb import TheAudioDBCoverProvider
 from lyrarr.metadata.lyrics.lrclib import LRCLIBProvider
 from lyrarr.metadata.lyrics.genius import GeniusProvider
+from lyrarr.metadata.lyrics.musixmatch import MusixmatchProvider
+from lyrarr.metadata.lyrics.netease import NetEaseProvider
 from lyrarr.metadata.embed import embed_cover_in_files
 from lyrarr.app.event_handler import event_stream
 
@@ -29,11 +34,16 @@ logger = logging.getLogger(__name__)
 _cover_providers = {
     'musicbrainz': MusicBrainzCoverProvider(),
     'fanart': FanartCoverProvider(),
+    'deezer': DeezerCoverProvider(),
+    'itunes': ITunesCoverProvider(),
+    'theaudiodb': TheAudioDBCoverProvider(),
 }
 
 _lyrics_providers = {
     'lrclib': LRCLIBProvider(),
     'genius': GeniusProvider(),
+    'musixmatch': MusixmatchProvider(),
+    'netease': NetEaseProvider(),
 }
 
 # Rate limit: seconds between API calls
@@ -82,8 +92,8 @@ def _effective_settings(album, profile):
         'download_lyrics': _override(album.override_download_lyrics, profile.download_lyrics),
         'cover_format': _override(album.override_cover_format, profile.cover_format),
         'prefer_synced_lyrics': _override(album.override_prefer_synced, profile.prefer_synced_lyrics),
-        'cover_providers': profile.cover_providers or '["musicbrainz","fanart"]',
-        'lyrics_providers': profile.lyrics_providers or '["lrclib","genius"]',
+        'cover_providers': profile.cover_providers or '["musicbrainz","deezer","itunes","fanart","theaudiodb"]',
+        'lyrics_providers': profile.lyrics_providers or '["lrclib","musixmatch","netease","genius"]',
         'overwrite_existing': profile.overwrite_existing or False,
         'embed_cover_art': profile.embed_cover_art or False,
     }
@@ -160,11 +170,14 @@ def download_missing_covers():
                 continue
 
             try:
-                results = []
-                if provider_name == 'musicbrainz' and album.mbId:
-                    results = provider.search(mb_release_group_id=album.mbId)
-                elif provider_name == 'fanart' and artist and artist.mbId:
-                    results = provider.search(mb_artist_id=artist.mbId)
+                results = provider.search(
+                    mb_release_group_id=album.mbId if album.mbId else None,
+                    mb_release_id=None,
+                    mb_artist_id=artist.mbId if artist and artist.mbId else None,
+                    mb_album_id=album.mbId if album.mbId else None,
+                    artist_name=artist.name if artist else None,
+                    album_name=album.title,
+                )
 
                 if results:
                     # Try to download the first result

@@ -14,7 +14,7 @@ class MusicBrainzCoverProvider:
 
     name = 'musicbrainz'
 
-    def search(self, mb_release_id=None, mb_release_group_id=None):
+    def search(self, mb_release_id=None, mb_release_group_id=None, **kwargs):
         """
         Search for cover art by MusicBrainz Release or Release Group ID.
 

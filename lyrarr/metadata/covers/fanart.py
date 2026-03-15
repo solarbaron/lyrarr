@@ -19,7 +19,7 @@ class FanartCoverProvider:
     def _api_key(self):
         return settings.fanart.apikey
 
-    def search(self, mb_artist_id=None, mb_album_id=None):
+    def search(self, mb_artist_id=None, mb_album_id=None, **kwargs):
         """
         Search for cover art by MusicBrainz Artist or Album ID.
 

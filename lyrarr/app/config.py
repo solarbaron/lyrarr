@@ -90,7 +90,7 @@ validators = [
 
     # metadata > covers section
     Validator('metadata.covers.enabled', must_exist=True, default=True, is_type_of=bool),
-    Validator('metadata.covers.providers', must_exist=True, default=['musicbrainz', 'fanart'], is_type_of=list),
+    Validator('metadata.covers.providers', must_exist=True, default=['musicbrainz', 'deezer', 'itunes', 'fanart', 'theaudiodb'], is_type_of=list),
     Validator('metadata.covers.preferred_size', must_exist=True, default='large', is_type_of=str,
               is_in=['small', 'large', 'original']),
     Validator('metadata.covers.overwrite_existing', must_exist=True, default=False, is_type_of=bool),
@@ -100,7 +100,7 @@ validators = [
 
     # metadata > lyrics section
     Validator('metadata.lyrics.enabled', must_exist=True, default=True, is_type_of=bool),
-    Validator('metadata.lyrics.providers', must_exist=True, default=['lrclib', 'genius'], is_type_of=list),
+    Validator('metadata.lyrics.providers', must_exist=True, default=['lrclib', 'musixmatch', 'netease', 'genius'], is_type_of=list),
     Validator('metadata.lyrics.prefer_synced', must_exist=True, default=True, is_type_of=bool),
     Validator('metadata.lyrics.overwrite_existing', must_exist=True, default=False, is_type_of=bool),
     Validator('metadata.lyrics.file_format', must_exist=True, default='lrc', is_type_of=str,
@@ -120,6 +120,12 @@ validators = [
 
     # genius section
     Validator('genius.apikey', must_exist=True, default='', is_type_of=str),
+
+    # musixmatch section
+    Validator('musixmatch.apikey', must_exist=True, default='', is_type_of=str),
+
+    # theaudiodb section
+    Validator('theaudiodb.apikey', must_exist=True, default='2', is_type_of=str),
 
     # notifications section
     Validator('notifications.enabled', must_exist=True, default=False, is_type_of=bool),

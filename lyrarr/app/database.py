@@ -76,8 +76,8 @@ class TableProfiles(Base):
     is_default = mapped_column(Boolean, default=False)
     download_covers = mapped_column(Boolean, default=True)
     download_lyrics = mapped_column(Boolean, default=True)
-    cover_providers = mapped_column(Text, default='["musicbrainz","fanart"]')
-    lyrics_providers = mapped_column(Text, default='["lrclib","genius"]')
+    cover_providers = mapped_column(Text, default='["musicbrainz","deezer","itunes","fanart","theaudiodb"]')
+    lyrics_providers = mapped_column(Text, default='["lrclib","musixmatch","netease","genius"]')
     prefer_synced_lyrics = mapped_column(Boolean, default=True)
     cover_format = mapped_column(Text, default='jpg')
     overwrite_existing = mapped_column(Boolean, default=False)
@@ -272,8 +272,8 @@ def init_db():
                 is_default=True,
                 download_covers=True,
                 download_lyrics=True,
-                cover_providers='["musicbrainz","fanart"]',
-                lyrics_providers='["lrclib","genius"]',
+                cover_providers='["musicbrainz","deezer","itunes","fanart","theaudiodb"]',
+                lyrics_providers='["lrclib","musixmatch","netease","genius"]',
                 prefer_synced_lyrics=True,
                 cover_format='jpg',
                 overwrite_existing=False,
