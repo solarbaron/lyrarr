@@ -16,36 +16,12 @@ from lyrarr.app.database import (
     database, TableAlbums, TableTracks, TableArtists, TableProfiles, TableHistory,
     select, update
 )
-from lyrarr.metadata.covers.musicbrainz import MusicBrainzCoverProvider
-from lyrarr.metadata.covers.fanart import FanartCoverProvider
-from lyrarr.metadata.covers.deezer import DeezerCoverProvider
-from lyrarr.metadata.covers.itunes import ITunesCoverProvider
-from lyrarr.metadata.covers.theaudiodb import TheAudioDBCoverProvider
-from lyrarr.metadata.lyrics.lrclib import LRCLIBProvider
-from lyrarr.metadata.lyrics.genius import GeniusProvider
-from lyrarr.metadata.lyrics.musixmatch import MusixmatchProvider
-from lyrarr.metadata.lyrics.netease import NetEaseProvider
+from lyrarr.metadata.registry import cover_providers as _cover_providers, lyrics_providers as _lyrics_providers
 from lyrarr.metadata.embed import embed_cover_in_files
 from lyrarr.app.event_handler import event_stream
 from lyrarr.metadata.provider_utils import rate_limiter, health_tracker
 
 logger = logging.getLogger(__name__)
-
-# Provider instances
-_cover_providers = {
-    'musicbrainz': MusicBrainzCoverProvider(),
-    'fanart': FanartCoverProvider(),
-    'deezer': DeezerCoverProvider(),
-    'itunes': ITunesCoverProvider(),
-    'theaudiodb': TheAudioDBCoverProvider(),
-}
-
-_lyrics_providers = {
-    'lrclib': LRCLIBProvider(),
-    'genius': GeniusProvider(),
-    'musixmatch': MusixmatchProvider(),
-    'netease': NetEaseProvider(),
-}
 
 
 def _get_profile(profile_id):

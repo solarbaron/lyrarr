@@ -147,3 +147,12 @@ class ProviderStats(Resource):
         """Get provider health statistics."""
         from lyrarr.metadata.provider_utils import health_tracker
         return health_tracker.get_stats()
+
+
+@api_ns_system.route('/system/providers')
+class ProviderList(Resource):
+    def get(self):
+        """List all registered providers (auto-discovered)."""
+        from lyrarr.metadata.registry import registry
+        return registry.get_all_names()
+

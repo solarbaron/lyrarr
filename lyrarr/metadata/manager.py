@@ -9,24 +9,10 @@ from lyrarr.app.database import (
     database, TableAlbums, TableTracks, TableHistory, TableProfiles,
     select, update
 )
-from lyrarr.metadata.covers.musicbrainz import MusicBrainzCoverProvider
-from lyrarr.metadata.covers.fanart import FanartCoverProvider
-from lyrarr.metadata.lyrics.lrclib import LRCLIBProvider
-from lyrarr.metadata.lyrics.genius import GeniusProvider
+from lyrarr.metadata.registry import cover_providers, lyrics_providers
 from lyrarr.metadata.embed import embed_cover_in_files
 
 logger = logging.getLogger(__name__)
-
-# Provider instances
-cover_providers = {
-    'musicbrainz': MusicBrainzCoverProvider(),
-    'fanart': FanartCoverProvider(),
-}
-
-lyrics_providers = {
-    'lrclib': LRCLIBProvider(),
-    'genius': GeniusProvider(),
-}
 
 
 def search_cover_art(album):
