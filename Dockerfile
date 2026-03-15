@@ -4,7 +4,7 @@ WORKDIR /build
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+RUN npx vite build --outDir dist
 
 # Python backend
 FROM python:3.13-slim
@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY lyrarr/ ./lyrarr/
 
-# Copy built frontend
+# Copy built frontend (overrides any existing frontend dir)
 COPY --from=frontend-builder /build/dist/ ./lyrarr/frontend/
 
 # Create data directory
