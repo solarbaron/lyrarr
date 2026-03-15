@@ -124,6 +124,28 @@ def download_missing_covers():
         if not providers:
             continue
 
+        # Check if cover file already exists on disk
+        if album.path:
+            cover_format = eff['cover_format']
+            existing_path = os.path.join(album.path, f"cover.{cover_format}")
+            # Also check other common extensions
+            cover_exists_on_disk = os.path.isfile(existing_path)
+            if not cover_exists_on_disk:
+                for ext in ['jpg', 'png', 'webp']:
+                    if os.path.isfile(os.path.join(album.path, f"cover.{ext}")):
+                        cover_exists_on_disk = True
+                        break
+
+            if cover_exists_on_disk and eff['overwrite_existing'] != 'True':
+                # File exists but DB says missing — fix the DB status
+                database.execute(
+                    update(TableAlbums)
+                    .where(TableAlbums.lidarrAlbumId == album.lidarrAlbumId)
+                    .values(cover_status='available', updated_at_timestamp=datetime.now())
+                )
+                logger.debug(f"Cover already exists on disk for '{album.title}', updated DB status")
+                continue
+
         # Get the artist for MusicBrainz IDs
         artist = database.execute(
             select(TableArtists).where(TableArtists.lidarrArtistId == album.artistId)
@@ -312,12 +334,29 @@ def download_missing_lyrics():
                     ext = '.lrc'
                 elif plain:
                     content = plain
-                    ext = '.lrc'
+                    ext = '.txt'
                 else:
                     continue
 
                 track_base = os.path.splitext(track.path)[0]
                 filepath = track_base + ext
+
+                # Check if lyrics file already exists on disk
+                lrc_exists = os.path.isfile(track_base + '.lrc')
+                txt_exists = os.path.isfile(track_base + '.txt')
+                if (lrc_exists or txt_exists) and eff['overwrite_existing'] != 'True':
+                    # File exists but DB says missing — fix the DB status
+                    database.execute(
+                        update(TableTracks)
+                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                        .values(
+                            lyrics_status='available',
+                            hasLyrics='True',
+                            updated_at_timestamp=datetime.now()
+                        )
+                    )
+                    logger.debug(f"Lyrics already exist on disk for '{track.title}', updated DB status")
+                    continue
 
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
