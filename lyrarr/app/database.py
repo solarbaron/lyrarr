@@ -256,6 +256,23 @@ def init_db():
     # Migrate text booleans to real booleans
     _migrate_bool_columns()
 
+    # Stamp with Alembic 'head' if alembic_version table doesn't exist yet
+    # This marks existing databases as up-to-date for future Alembic migrations
+    from sqlalchemy import inspect as sa_inspect2
+    inspector2 = sa_inspect2(engine)
+    if not inspector2.has_table('alembic_version'):
+        try:
+            from alembic.config import Config as AlembicConfig
+            from alembic import command as alembic_cmd
+            import os as _os
+            alembic_ini = _os.path.join(_os.path.dirname(__file__), '..', '..', 'alembic.ini')
+            if _os.path.exists(alembic_ini):
+                alembic_cfg = AlembicConfig(alembic_ini)
+                alembic_cmd.stamp(alembic_cfg, 'head')
+                logger.info("Alembic: stamped database with current head revision")
+        except Exception as e:
+            logger.debug(f"Alembic stamp skipped: {e}")
+
     # Add the system table single row if it doesn't exist
     if not database.execute(select(System)).first():
         from sqlalchemy.dialects.sqlite import insert
