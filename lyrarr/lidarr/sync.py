@@ -211,6 +211,12 @@ def update_albums(force=False):
                         break
             values['cover_status'] = 'available' if cover_exists else 'missing'
             values['lyrics_status'] = 'unknown'
+
+            # Auto-assign default profile if configured
+            default_profile_id = settings.general.default_profile_id
+            if default_profile_id:
+                values['profileId'] = int(default_profile_id)
+
             from sqlalchemy.dialects.sqlite import insert
             database.execute(insert(TableAlbums).values(**values))
 

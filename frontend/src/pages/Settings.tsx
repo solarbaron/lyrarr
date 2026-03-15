@@ -2,12 +2,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TextInput, Switch, Button, NumberInput, Loader, FileButton, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
-import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup } from '../api';
+import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup, getProfiles } from '../api';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { data: settings, isLoading } = useQuery({ queryKey: ['settings'], queryFn: getSettings });
   const [form, setForm] = useState<any>({});
+  const { data: profiles } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
 
   useEffect(() => {
     if (settings) setForm(settings);
@@ -169,11 +170,21 @@ export default function SettingsPage() {
       {/* General */}
       <div className="settings-section">
         <h3>⚙️ General</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <TextInput label="Instance Name" placeholder="Lyrarr" value={form.general?.instance_name || ''}
             onChange={(e) => updateField('general', 'instance_name', e.currentTarget.value)} styles={inputStyles} />
           <NumberInput label="Port" min={1} max={65535} value={form.general?.port || 6868}
             onChange={(v) => updateField('general', 'port', v)} styles={inputStyles} />
+          <Select
+            label="Default Profile for New Albums"
+            description="Automatically assign this profile to newly synced albums"
+            placeholder="None (no auto-assign)"
+            clearable
+            data={(profiles || []).map((p: any) => ({ value: String(p.id), label: p.name }))}
+            value={form.general?.default_profile_id ? String(form.general.default_profile_id) : null}
+            onChange={(v) => updateField('general', 'default_profile_id', v ? Number(v) : null)}
+            styles={inputStyles}
+          />
         </div>
       </div>
 

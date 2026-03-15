@@ -62,6 +62,7 @@ validators = [
               is_in=['auto', 'light', 'dark']),
     Validator('general.use_lidarr', must_exist=True, default=False, is_type_of=bool),
     Validator('general.path_mappings', must_exist=True, default=[], is_type_of=list),
+    Validator('general.default_profile_id', must_exist=True, default=None, is_type_of=(NoneType, int)),
 
     # auth section
     Validator('auth.apikey', must_exist=True, default=hexlify(os.urandom(16)).decode(), is_type_of=str),
