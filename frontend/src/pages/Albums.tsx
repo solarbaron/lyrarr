@@ -13,11 +13,15 @@ export default function AlbumsPage() {
   const [selected, setSelected] = useState<number[]>([]);
   const [assignProfileId, setAssignProfileId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('lyrarr-album-view') || 'table');
+  const [sortBy, setSortBy] = useState('title');
+  const [sortDir, setSortDir] = useState('asc');
+  const [coverFilter, setCoverFilter] = useState('');
+  const [lyricsFilter, setLyricsFilter] = useState('');
   const pageSize = 25;
 
   const { data: result, isLoading } = useQuery({
-    queryKey: ['albums', page, search],
-    queryFn: () => getAlbums({ page, pageSize, search }),
+    queryKey: ['albums', page, search, sortBy, sortDir, coverFilter, lyricsFilter],
+    queryFn: () => getAlbums({ page, pageSize, search, sortBy, sortDir, coverStatus: coverFilter || undefined, lyricsStatus: lyricsFilter || undefined }),
   });
 
   const { data: profiles = [] } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
@@ -78,12 +82,56 @@ export default function AlbumsPage() {
         />
       </div>
 
-      <Group mb="lg" gap="md" align="end">
+      <Group mb="lg" gap="md" align="end" wrap="wrap">
         <TextInput
           placeholder="Search albums..."
           value={search}
           onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 200 }}
+          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+        />
+        <Select
+          placeholder="Sort by"
+          data={[
+            { value: 'title', label: 'Title' },
+            { value: 'year', label: 'Year' },
+          ]}
+          value={sortBy}
+          onChange={(v) => { setSortBy(v || 'title'); setPage(1); }}
+          w={120}
+          size="sm"
+          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+        />
+        <Button variant="subtle" color="gray" size="sm" px={8}
+          onClick={() => { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); setPage(1); }}>
+          {sortDir === 'asc' ? '↑ A-Z' : '↓ Z-A'}
+        </Button>
+        <Select
+          placeholder="Cover status"
+          data={[
+            { value: '', label: 'All covers' },
+            { value: 'available', label: '✓ Has cover' },
+            { value: 'missing', label: '✗ Missing cover' },
+          ]}
+          value={coverFilter}
+          onChange={(v) => { setCoverFilter(v || ''); setPage(1); }}
+          w={150}
+          size="sm"
+          clearable
+          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+        />
+        <Select
+          placeholder="Lyrics status"
+          data={[
+            { value: '', label: 'All lyrics' },
+            { value: 'available', label: '✓ Has lyrics' },
+            { value: 'missing', label: '✗ Missing lyrics' },
+          ]}
+          value={lyricsFilter}
+          onChange={(v) => { setLyricsFilter(v || ''); setPage(1); }}
+          w={150}
+          size="sm"
+          clearable
           styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
         />
         {selected.length > 0 && (

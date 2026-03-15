@@ -10,11 +10,17 @@ api_ns_albums = Namespace('albums', description='Album operations')
 @api_ns_albums.route('/albums')
 class AlbumList(Resource):
     def get(self):
-        """List all albums with pagination."""
+        """List all albums with pagination, search, sort, and filter."""
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('pageSize', 25, type=int)
         search = request.args.get('search', '', type=str)
         artist_id = request.args.get('artistId', None, type=int)
+        sort_by = request.args.get('sortBy', 'title', type=str)
+        sort_dir = request.args.get('sortDir', 'asc', type=str)
+        cover_status = request.args.get('coverStatus', '', type=str)
+        lyrics_status = request.args.get('lyricsStatus', '', type=str)
+        monitored = request.args.get('monitored', '', type=str)
+        profile_id = request.args.get('profileId', None, type=int)
 
         query = select(TableAlbums)
         count_query = select(func.count()).select_from(TableAlbums)
@@ -27,9 +33,38 @@ class AlbumList(Resource):
             query = query.where(TableAlbums.artistId == artist_id)
             count_query = count_query.where(TableAlbums.artistId == artist_id)
 
+        if cover_status:
+            query = query.where(TableAlbums.cover_status == cover_status)
+            count_query = count_query.where(TableAlbums.cover_status == cover_status)
+
+        if lyrics_status:
+            query = query.where(TableAlbums.lyrics_status == lyrics_status)
+            count_query = count_query.where(TableAlbums.lyrics_status == lyrics_status)
+
+        if monitored == 'true':
+            query = query.where(TableAlbums.monitored == True)
+            count_query = count_query.where(TableAlbums.monitored == True)
+        elif monitored == 'false':
+            query = query.where(TableAlbums.monitored == False)
+            count_query = count_query.where(TableAlbums.monitored == False)
+
+        if profile_id is not None:
+            query = query.where(TableAlbums.profileId == profile_id)
+            count_query = count_query.where(TableAlbums.profileId == profile_id)
+
         total = database.execute(count_query).scalar()
 
-        query = query.order_by(TableAlbums.title)
+        # Sorting
+        sort_map = {
+            'title': TableAlbums.title,
+            'year': TableAlbums.year,
+        }
+        sort_col = sort_map.get(sort_by, TableAlbums.title)
+        if sort_dir == 'desc':
+            query = query.order_by(sort_col.desc())
+        else:
+            query = query.order_by(sort_col)
+
         query = query.offset((page - 1) * page_size).limit(page_size)
 
         rows = database.execute(query).scalars().all()

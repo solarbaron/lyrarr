@@ -1,1 +1,0 @@
-import{r,j as s}from"./index-BGJI8vp0.js";function u(o){const e=r.createContext(null);return[({children:t,value:n})=>s.jsx(e.Provider,{value:n,children:t}),()=>{const t=r.useContext(e);if(t===null)throw new Error(o);return t}]}export{u as c};

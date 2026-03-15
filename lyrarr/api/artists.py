@@ -10,10 +10,14 @@ api_ns_artists = Namespace('artists', description='Artist operations')
 @api_ns_artists.route('/artists')
 class ArtistList(Resource):
     def get(self):
-        """List all artists with pagination."""
+        """List all artists with pagination, search, sort, and filter."""
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('pageSize', 25, type=int)
         search = request.args.get('search', '', type=str)
+        sort_by = request.args.get('sortBy', 'name', type=str)
+        sort_dir = request.args.get('sortDir', 'asc', type=str)
+        monitored = request.args.get('monitored', '', type=str)
+        profile_id = request.args.get('profileId', None, type=int)
 
         query = select(TableArtists)
         count_query = select(func.count()).select_from(TableArtists)
@@ -22,9 +26,26 @@ class ArtistList(Resource):
             query = query.where(TableArtists.name.ilike(f'%{search}%'))
             count_query = count_query.where(TableArtists.name.ilike(f'%{search}%'))
 
+        if monitored == 'true':
+            query = query.where(TableArtists.monitored == True)
+            count_query = count_query.where(TableArtists.monitored == True)
+        elif monitored == 'false':
+            query = query.where(TableArtists.monitored == False)
+            count_query = count_query.where(TableArtists.monitored == False)
+
+        if profile_id is not None:
+            query = query.where(TableArtists.profileId == profile_id)
+            count_query = count_query.where(TableArtists.profileId == profile_id)
+
         total = database.execute(count_query).scalar()
 
-        query = query.order_by(TableArtists.sortName)
+        # Sorting
+        sort_col = TableArtists.sortName if sort_by == 'name' else TableArtists.sortName
+        if sort_dir == 'desc':
+            query = query.order_by(sort_col.desc())
+        else:
+            query = query.order_by(sort_col)
+
         query = query.offset((page - 1) * page_size).limit(page_size)
 
         rows = database.execute(query).scalars().all()

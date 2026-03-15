@@ -12,11 +12,13 @@ export default function ArtistsPage() {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
   const [assignProfileId, setAssignProfileId] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState('asc');
+  const [monitoredFilter, setMonitoredFilter] = useState('');
   const pageSize = 25;
 
   const { data: result, isLoading } = useQuery({
-    queryKey: ['artists', page, search],
-    queryFn: () => getArtists({ page, pageSize, search }),
+    queryKey: ['artists', page, search, sortDir, monitoredFilter],
+    queryFn: () => getArtists({ page, pageSize, search, sortDir, monitored: monitoredFilter || undefined }),
   });
 
   const { data: profiles = [] } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
@@ -57,12 +59,30 @@ export default function ArtistsPage() {
         <p className="page-subtitle">{total} artists synced from Lidarr</p>
       </div>
 
-      <Group mb="lg" gap="md" align="end">
+      <Group mb="lg" gap="md" align="end" wrap="wrap">
         <TextInput
           placeholder="Search artists..."
           value={search}
           onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 200 }}
+          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+        />
+        <Button variant="subtle" color="gray" size="sm" px={8}
+          onClick={() => { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); setPage(1); }}>
+          {sortDir === 'asc' ? '↑ A-Z' : '↓ Z-A'}
+        </Button>
+        <Select
+          placeholder="Monitored"
+          data={[
+            { value: '', label: 'All' },
+            { value: 'true', label: '✓ Monitored' },
+            { value: 'false', label: '✗ Not monitored' },
+          ]}
+          value={monitoredFilter}
+          onChange={(v) => { setMonitoredFilter(v || ''); setPage(1); }}
+          w={160}
+          size="sm"
+          clearable
           styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
         />
         {selected.length > 0 && (

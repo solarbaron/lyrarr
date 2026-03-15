@@ -11,12 +11,12 @@ const api = axios.create({ baseURL: '/api' });
 export type { PaginatedResponse, PaginationParams };
 
 // ---------- Artists ----------
-export const getArtists = (params?: PaginationParams) =>
+export const getArtists = (params?: PaginationParams & { sortBy?: string; sortDir?: string; monitored?: string; profileId?: number }) =>
   api.get('/artists', { params }).then(r => r.data as PaginatedResponse<Artist>);
 export const getArtist = (id: number) => api.get(`/artists/${id}`).then(r => r.data as Artist);
 
 // ---------- Albums ----------
-export const getAlbums = (params?: PaginationParams & { artistId?: number }) =>
+export const getAlbums = (params?: PaginationParams & { artistId?: number; sortBy?: string; sortDir?: string; coverStatus?: string; lyricsStatus?: string; monitored?: string; profileId?: number }) =>
   api.get('/albums', { params }).then(r => r.data as PaginatedResponse<Album>);
 export const getAlbum = (id: number) => api.get(`/albums/${id}`).then(r => r.data as Album & { tracks: Track[]; artistName: string; artistMbId: string; profileName: string });
 
