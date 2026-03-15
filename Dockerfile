@@ -36,4 +36,4 @@ EXPOSE 6868
 
 VOLUME ["/config", "/music"]
 
-ENTRYPOINT ["python", "-m", "lyrarr", "--config_dir", "/config"]
+ENTRYPOINT ["python", "-m", "lyrarr", "--config", "/config"]
