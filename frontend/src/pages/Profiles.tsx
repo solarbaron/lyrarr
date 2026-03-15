@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Button, TextInput, Modal, Checkbox, Group, Menu } from '@mantine/core';
+import { Loader, Button, TextInput, Modal, Checkbox, Group, Menu, MultiSelect, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignProfile } from '../api';
@@ -8,20 +8,44 @@ interface ProfileForm {
   name: string;
   download_covers: boolean;
   download_lyrics: boolean;
-  cover_providers: string;
-  lyrics_providers: string;
+  cover_providers: string[];
+  lyrics_providers: string[];
   prefer_synced_lyrics: boolean;
   cover_format: string;
   overwrite_existing: boolean;
   embed_cover_art: boolean;
 }
 
+const ALL_COVER_PROVIDERS = [
+  { value: 'musicbrainz', label: 'MusicBrainz (Cover Art Archive)', description: 'Free — no API key' },
+  { value: 'deezer', label: 'Deezer', description: 'Free — no API key' },
+  { value: 'itunes', label: 'iTunes / Apple Music', description: 'Free — no API key' },
+  { value: 'fanart', label: 'fanart.tv', description: 'Requires API key' },
+  { value: 'theaudiodb', label: 'TheAudioDB', description: 'Free test key included' },
+];
+
+const ALL_LYRICS_PROVIDERS = [
+  { value: 'lrclib', label: 'LRCLIB', description: 'Free — synced + plain' },
+  { value: 'musixmatch', label: 'Musixmatch', description: 'API key — synced + plain' },
+  { value: 'netease', label: 'NetEase Cloud Music', description: 'Free — synced + plain' },
+  { value: 'genius', label: 'Genius', description: 'API key — plain only' },
+];
+
+const DEFAULT_COVERS = ['musicbrainz', 'deezer', 'itunes', 'fanart', 'theaudiodb'];
+const DEFAULT_LYRICS = ['lrclib', 'musixmatch', 'netease', 'genius'];
+
+function parseProviders(json: string | string[] | null, fallback: string[]): string[] {
+  if (Array.isArray(json)) return json;
+  if (!json) return fallback;
+  try { return JSON.parse(json); } catch { return fallback; }
+}
+
 const DEFAULT_FORM: ProfileForm = {
   name: '',
   download_covers: true,
   download_lyrics: true,
-  cover_providers: '["musicbrainz","deezer","itunes","fanart","theaudiodb"]',
-  lyrics_providers: '["lrclib","musixmatch","netease","genius"]',
+  cover_providers: DEFAULT_COVERS,
+  lyrics_providers: DEFAULT_LYRICS,
   prefer_synced_lyrics: true,
   cover_format: 'jpg',
   overwrite_existing: false,
@@ -38,8 +62,13 @@ export default function ProfilesPage() {
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      if (editId) return updateProfile(editId, form);
-      return createProfile(form);
+      const payload = {
+        ...form,
+        cover_providers: JSON.stringify(form.cover_providers),
+        lyrics_providers: JSON.stringify(form.lyrics_providers),
+      };
+      if (editId) return updateProfile(editId, payload);
+      return createProfile(payload);
     },
     onSuccess: () => {
       notifications.show({ title: 'Saved', message: 'Profile saved', color: 'green' });
@@ -96,8 +125,8 @@ export default function ProfilesPage() {
       name: profile.name,
       download_covers: profile.download_covers ?? true,
       download_lyrics: profile.download_lyrics ?? true,
-      cover_providers: profile.cover_providers || '["musicbrainz","deezer","itunes","fanart","theaudiodb"]',
-      lyrics_providers: profile.lyrics_providers || '["lrclib","musixmatch","netease","genius"]',
+      cover_providers: parseProviders(profile.cover_providers, DEFAULT_COVERS),
+      lyrics_providers: parseProviders(profile.lyrics_providers, DEFAULT_LYRICS),
       prefer_synced_lyrics: profile.prefer_synced_lyrics ?? true,
       cover_format: profile.cover_format || 'jpg',
       overwrite_existing: profile.overwrite_existing ?? false,
@@ -236,12 +265,39 @@ export default function ProfilesPage() {
           mb="md"
           color="violet"
         />
-        <TextInput
+        <Select
           label="Cover Format"
+          data={[
+            { value: 'jpg', label: 'JPEG (.jpg)' },
+            { value: 'png', label: 'PNG (.png)' },
+            { value: 'webp', label: 'WebP (.webp)' },
+          ]}
           value={form.cover_format}
-          onChange={(e) => setForm({ ...form, cover_format: e.currentTarget.value })}
+          onChange={(v) => setForm({ ...form, cover_format: v || 'jpg' })}
           mb="md"
           styles={inputStyle}
+        />
+        <MultiSelect
+          label="Cover Art Providers"
+          description="Order matters — first provider is tried first"
+          data={ALL_COVER_PROVIDERS}
+          value={form.cover_providers}
+          onChange={(v) => setForm({ ...form, cover_providers: v })}
+          mb="md"
+          styles={inputStyle}
+          searchable
+          clearable
+        />
+        <MultiSelect
+          label="Lyrics Providers"
+          description="Order matters — first provider is tried first"
+          data={ALL_LYRICS_PROVIDERS}
+          value={form.lyrics_providers}
+          onChange={(v) => setForm({ ...form, lyrics_providers: v })}
+          mb="md"
+          styles={inputStyle}
+          searchable
+          clearable
         />
         <Button
           fullWidth
