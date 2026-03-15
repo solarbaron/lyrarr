@@ -41,7 +41,9 @@ RATE_LIMIT = 2.0
 
 
 def _get_profile(profile_id):
-    """Get a profile by ID, or fall back to the default profile."""
+    """Get a profile by ID, or fall back to the default profile.
+    Returns None if no profile is assigned and no default exists.
+    """
     if profile_id:
         profile = database.execute(
             select(TableProfiles).where(TableProfiles.id == profile_id)
@@ -56,16 +58,34 @@ def _get_profile(profile_id):
 
 
 def _effective_settings(album, profile):
-    """Merge album overrides with profile defaults. Album overrides take priority."""
+    """Merge album overrides with profile defaults. Album overrides take priority.
+    If no profile exists, everything is disabled — album is skipped.
+    """
+    if not profile:
+        return {
+            'download_covers': 'False',
+            'download_lyrics': 'False',
+            'cover_format': 'jpg',
+            'prefer_synced_lyrics': 'True',
+            'cover_providers': '[]',
+            'lyrics_providers': '[]',
+            'overwrite_existing': 'False',
+            'embed_cover_art': 'False',
+        }
+
+    def _override(override_val, profile_val):
+        """Use album override if explicitly set (not None), otherwise profile default."""
+        return override_val if override_val is not None else profile_val
+
     return {
-        'download_covers': album.override_download_covers or (profile.download_covers if profile else 'True'),
-        'download_lyrics': album.override_download_lyrics or (profile.download_lyrics if profile else 'True'),
-        'cover_format': album.override_cover_format or (profile.cover_format if profile else 'jpg'),
-        'prefer_synced_lyrics': album.override_prefer_synced or (profile.prefer_synced_lyrics if profile else 'True'),
-        'cover_providers': profile.cover_providers if profile else '["musicbrainz","fanart"]',
-        'lyrics_providers': profile.lyrics_providers if profile else '["lrclib","genius"]',
-        'overwrite_existing': profile.overwrite_existing if profile else 'False',
-        'embed_cover_art': profile.embed_cover_art if profile else 'False',
+        'download_covers': _override(album.override_download_covers, profile.download_covers),
+        'download_lyrics': _override(album.override_download_lyrics, profile.download_lyrics),
+        'cover_format': _override(album.override_cover_format, profile.cover_format),
+        'prefer_synced_lyrics': _override(album.override_prefer_synced, profile.prefer_synced_lyrics),
+        'cover_providers': profile.cover_providers or '["musicbrainz","fanart"]',
+        'lyrics_providers': profile.lyrics_providers or '["lrclib","genius"]',
+        'overwrite_existing': profile.overwrite_existing or 'False',
+        'embed_cover_art': profile.embed_cover_art or 'False',
     }
 
 
@@ -94,6 +114,10 @@ def download_missing_covers():
         profile = _get_profile(album.profileId)
         eff = _effective_settings(album, profile)
         if eff['download_covers'] != 'True':
+            if not profile:
+                logger.debug(f"Skipping '{album.title}' — no profile assigned")
+            else:
+                logger.debug(f"Skipping '{album.title}' — covers disabled in profile '{profile.name}'")
             continue
 
         providers = _parse_providers_list(eff['cover_providers'])
@@ -226,6 +250,10 @@ def download_missing_lyrics():
         profile = _get_profile(album.profileId)
         eff = _effective_settings(album, profile)
         if eff['download_lyrics'] != 'True':
+            if not profile:
+                logger.debug(f"Skipping track '{track.title}' — album has no profile assigned")
+            else:
+                logger.debug(f"Skipping track '{track.title}' — lyrics disabled in profile '{profile.name}'")
             continue
 
         providers = _parse_providers_list(eff['lyrics_providers'])
@@ -243,7 +271,7 @@ def download_missing_lyrics():
 
         lyrics_data = None
         used_provider = None
-        prefer_synced = profile.prefer_synced_lyrics == 'True'
+        prefer_synced = eff['prefer_synced_lyrics'] == 'True'
 
         for provider_name in providers:
             provider = _lyrics_providers.get(provider_name)
