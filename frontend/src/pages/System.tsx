@@ -1,7 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Button, Loader, Code, ScrollArea } from '@mantine/core';
+import { Button, Loader, Code, ScrollArea, Badge, Progress } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { getSystemStatus, getTasks, getLogs, getHealth, runTask } from '../api';
+import { getSystemStatus, getTasks, getLogs, getHealth, runTask, getProviderStats } from '../api';
+
+const PROVIDER_LABELS: Record<string, string> = {
+  musicbrainz: 'MusicBrainz', fanart: 'fanart.tv', deezer: 'Deezer',
+  itunes: 'iTunes', theaudiodb: 'TheAudioDB', lrclib: 'LRCLIB',
+  genius: 'Genius', musixmatch: 'Musixmatch', netease: 'NetEase',
+};
 
 export default function SystemPage() {
   const queryClient = useQueryClient();
@@ -9,6 +15,11 @@ export default function SystemPage() {
   const { data: tasks = [] } = useQuery({ queryKey: ['tasks'], queryFn: getTasks });
   const { data: logs = [], isLoading: logsLoading } = useQuery({ queryKey: ['logs'], queryFn: getLogs });
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth });
+  const { data: providerStats } = useQuery({
+    queryKey: ['provider-stats'],
+    queryFn: getProviderStats,
+    refetchInterval: 30000,
+  });
 
   const runTaskMutation = useMutation({
     mutationFn: runTask,
@@ -49,6 +60,68 @@ export default function SystemPage() {
           </div>
         </div>
       </div>
+
+      {/* Provider Stats */}
+      {providerStats && Object.keys(providerStats).length > 0 && (
+        <div className="settings-section">
+          <h3>🔌 Provider Health</h3>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Status</th>
+                <th>Success</th>
+                <th>Failures</th>
+                <th>Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(providerStats).map(([name, stats]: [string, any]) => {
+                const total = stats.successes + stats.failures;
+                const rate = total > 0 ? Math.round((stats.successes / total) * 100) : 100;
+                return (
+                  <tr key={name}>
+                    <td style={{ fontWeight: 600 }}>{PROVIDER_LABELS[name] || name}</td>
+                    <td>
+                      <Badge
+                        size="sm"
+                        color={stats.available ? 'green' : 'red'}
+                        variant="light"
+                      >
+                        {stats.available ? 'Active' : 'Cooldown'}
+                      </Badge>
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{stats.successes}</td>
+                    <td style={{ color: stats.failures > 0 ? '#f87171' : 'var(--text-secondary)' }}>
+                      {stats.failures}
+                      {stats.consecutive_failures > 0 && (
+                        <span style={{ fontSize: 11, opacity: 0.7 }}> ({stats.consecutive_failures} streak)</span>
+                      )}
+                    </td>
+                    <td style={{ minWidth: 120 }}>
+                      {total > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Progress
+                            value={rate}
+                            color={rate > 80 ? 'green' : rate > 50 ? 'yellow' : 'red'}
+                            size="sm"
+                            style={{ flex: 1 }}
+                          />
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 36 }}>
+                            {rate}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Tasks */}
       <div className="settings-section">

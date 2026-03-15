@@ -85,6 +85,7 @@ export const testLidarr = (params?: { ip?: string; port?: number; base_url?: str
   api.post('/system/test/lidarr', params || {}).then(r => r.data);
 export const triggerSync = () => api.post('/system/sync').then(r => r.data);
 export const testNotification = () => api.post('/system/test/notification').then(r => r.data);
+export const getProviderStats = () => api.get('/system/provider-stats').then(r => r.data);
 export const exportBackup = () => api.get('/system/backup').then(r => r.data);
 export const importBackup = (data: Record<string, unknown>) => api.post('/system/restore', data).then(r => r.data);
 
