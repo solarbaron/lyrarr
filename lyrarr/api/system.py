@@ -139,3 +139,11 @@ class TestNotification(Resource):
             return {'message': 'Test notification sent'}
         except Exception as e:
             return {'message': str(e)}, 500
+
+
+@api_ns_system.route('/system/provider-stats')
+class ProviderStats(Resource):
+    def get(self):
+        """Get provider health statistics."""
+        from lyrarr.metadata.provider_utils import health_tracker
+        return health_tracker.get_stats()

@@ -27,6 +27,7 @@ from lyrarr.metadata.lyrics.musixmatch import MusixmatchProvider
 from lyrarr.metadata.lyrics.netease import NetEaseProvider
 from lyrarr.metadata.embed import embed_cover_in_files
 from lyrarr.app.event_handler import event_stream
+from lyrarr.metadata.provider_utils import rate_limiter, health_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,6 @@ _lyrics_providers = {
     'musixmatch': MusixmatchProvider(),
     'netease': NetEaseProvider(),
 }
-
-# Rate limit: seconds between API calls
-RATE_LIMIT = 2.0
 
 
 def _get_profile(profile_id):
@@ -169,6 +167,13 @@ def download_missing_covers():
             if not provider:
                 continue
 
+            # Skip unhealthy providers
+            if not health_tracker.is_available(provider_name):
+                logger.debug(f"Skipping '{provider_name}' — currently in cooldown")
+                continue
+
+            rate_limiter.wait(provider_name)
+
             try:
                 results = provider.search(
                     mb_release_group_id=album.mbId if album.mbId else None,
@@ -188,15 +193,17 @@ def download_missing_covers():
                             if img_data:
                                 cover_data = img_data
                                 used_provider = provider_name
+                                health_tracker.record_success(provider_name)
                                 break
 
                 if cover_data:
                     break
 
+                # No results is not a failure — just no match
+
             except Exception as e:
                 logger.error(f"Cover search error ({provider_name}) for '{album.title}': {e}")
-
-            time.sleep(RATE_LIMIT)
+                health_tracker.record_failure(provider_name, str(e))
 
         if cover_data and album.path:
             try:
@@ -247,7 +254,6 @@ def download_missing_covers():
         elif not album.path:
             logger.debug(f"Skipping '{album.title}' — no album path set")
 
-        time.sleep(RATE_LIMIT)
 
     logger.info(f"Cover art download complete: {downloaded}/{len(albums)} downloaded")
     return downloaded
@@ -313,6 +319,13 @@ def download_missing_lyrics():
             if not provider:
                 continue
 
+            # Skip unhealthy providers
+            if not health_tracker.is_available(provider_name):
+                logger.debug(f"Skipping '{provider_name}' \u2014 currently in cooldown")
+                continue
+
+            rate_limiter.wait(provider_name)
+
             try:
                 results = provider.search(
                     track_name=track.title,
@@ -330,12 +343,12 @@ def download_missing_lyrics():
 
                     lyrics_data = results[0]
                     used_provider = provider_name
+                    health_tracker.record_success(provider_name)
                     break
 
             except Exception as e:
                 logger.error(f"Lyrics search error ({provider_name}) for '{track.title}': {e}")
-
-            time.sleep(RATE_LIMIT)
+                health_tracker.record_failure(provider_name, str(e))
 
         if lyrics_data and track.path:
             try:
@@ -414,7 +427,7 @@ def download_missing_lyrics():
         elif not track.path:
             logger.debug(f"Skipping '{track.title}' — no track path set")
 
-        time.sleep(RATE_LIMIT)
+
 
     logger.info(f"Lyrics download complete: {downloaded}/{len(tracks)} downloaded")
     return downloaded
