@@ -9,12 +9,14 @@ No API key required.
 import logging
 import requests
 
+from lyrarr.metadata.base import CoverProvider
+
 logger = logging.getLogger(__name__)
 
 DEEZER_API_BASE = 'https://api.deezer.com'
 
 
-class DeezerCoverProvider:
+class DeezerCoverProvider(CoverProvider):
     """Fetch cover art from Deezer (free, no API key)."""
 
     name = 'deezer'

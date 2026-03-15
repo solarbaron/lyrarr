@@ -3,13 +3,15 @@
 import logging
 import requests
 
+from lyrarr.metadata.base import CoverProvider
+
 logger = logging.getLogger(__name__)
 
 # Cover Art Archive base URL
 CAA_BASE_URL = 'https://coverartarchive.org'
 
 
-class MusicBrainzCoverProvider:
+class MusicBrainzCoverProvider(CoverProvider):
     """Fetch cover art from the MusicBrainz Cover Art Archive (free, no API key needed)."""
 
     name = 'musicbrainz'

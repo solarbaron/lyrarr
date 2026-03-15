@@ -10,13 +10,14 @@ import logging
 import requests
 
 from lyrarr.app.config import settings
+from lyrarr.metadata.base import CoverProvider
 
 logger = logging.getLogger(__name__)
 
 TADB_BASE_URL = 'https://theaudiodb.com/api/v1/json'
 
 
-class TheAudioDBCoverProvider:
+class TheAudioDBCoverProvider(CoverProvider):
     """Fetch cover art from TheAudioDB (free test key available)."""
 
     name = 'theaudiodb'

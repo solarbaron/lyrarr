@@ -9,12 +9,14 @@ No API key required.
 import logging
 import requests
 
+from lyrarr.metadata.base import CoverProvider
+
 logger = logging.getLogger(__name__)
 
 ITUNES_SEARCH_URL = 'https://itunes.apple.com/search'
 
 
-class ITunesCoverProvider:
+class ITunesCoverProvider(CoverProvider):
     """Fetch cover art from iTunes/Apple Music (free, no API key)."""
 
     name = 'itunes'

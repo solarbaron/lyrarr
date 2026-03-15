@@ -3,12 +3,14 @@
 import logging
 import requests
 
+from lyrarr.metadata.base import LyricsProvider
+
 logger = logging.getLogger(__name__)
 
 LRCLIB_BASE_URL = 'https://lrclib.net/api'
 
 
-class LRCLIBProvider:
+class LRCLIBProvider(LyricsProvider):
     """Fetch synced and plain lyrics from LRCLIB (free, no API key needed)."""
 
     name = 'lrclib'

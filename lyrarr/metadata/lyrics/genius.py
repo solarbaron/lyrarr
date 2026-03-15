@@ -5,13 +5,14 @@ import re
 import requests
 
 from lyrarr.app.config import settings
+from lyrarr.metadata.base import LyricsProvider
 
 logger = logging.getLogger(__name__)
 
 GENIUS_API_BASE = 'https://api.genius.com'
 
 
-class GeniusProvider:
+class GeniusProvider(LyricsProvider):
     """Fetch plain lyrics from Genius (requires API key)."""
 
     name = 'genius'

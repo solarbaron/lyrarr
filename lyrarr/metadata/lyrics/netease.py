@@ -10,12 +10,14 @@ import logging
 import re
 import requests
 
+from lyrarr.metadata.base import LyricsProvider
+
 logger = logging.getLogger(__name__)
 
 NETEASE_API_BASE = 'https://music.163.com'
 
 
-class NetEaseProvider:
+class NetEaseProvider(LyricsProvider):
     """Fetch synced and plain lyrics from NetEase Cloud Music (free, no API key)."""
 
     name = 'netease'

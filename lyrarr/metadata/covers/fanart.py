@@ -4,13 +4,14 @@ import logging
 import requests
 
 from lyrarr.app.config import settings
+from lyrarr.metadata.base import CoverProvider
 
 logger = logging.getLogger(__name__)
 
 FANART_BASE_URL = 'https://webservice.fanart.tv/v3'
 
 
-class FanartCoverProvider:
+class FanartCoverProvider(CoverProvider):
     """Fetch cover art from fanart.tv (requires API key)."""
 
     name = 'fanart'

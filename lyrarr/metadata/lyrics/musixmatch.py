@@ -10,13 +10,14 @@ import logging
 import requests
 
 from lyrarr.app.config import settings
+from lyrarr.metadata.base import LyricsProvider
 
 logger = logging.getLogger(__name__)
 
 MUSIXMATCH_BASE = 'https://api.musixmatch.com/ws/1.1'
 
 
-class MusixmatchProvider:
+class MusixmatchProvider(LyricsProvider):
     """Fetch synced and plain lyrics from Musixmatch (requires API key)."""
 
     name = 'musixmatch'
