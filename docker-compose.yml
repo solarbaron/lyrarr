@@ -1,0 +1,13 @@
+services:
+  lyrarr:
+    build: .
+    image: lyrarr:latest
+    container_name: lyrarr
+    restart: unless-stopped
+    ports:
+      - "6868:6868"
+    volumes:
+      - ./data:/config
+      - /path/to/music:/music
+    environment:
+      - TZ=Europe/London

@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.venv
+venv
+node_modules
+frontend/node_modules
+frontend/src
+frontend/public
+frontend/tsconfig*.json
+frontend/vite.config.ts
+frontend/index.html
+*.md
+.env
+data/

@@ -1,0 +1,16 @@
+# coding=utf-8
+
+# Exit codes
+EXIT_NORMAL = 0
+EXIT_INTERRUPT = 1
+EXIT_PYTHON_UPGRADE_NEEDED = 2
+EXIT_PORT_ALREADY_IN_USE_ERROR = 3
+EXIT_VALIDATION_ERROR = 4
+
+# File names
+FILE_RESTART = 'lyrarr.restart'
+FILE_STOP = 'lyrarr.stop'
+
+# Environment variable keys
+ENV_RESTARTFILE = 'LYRARR_RESTARTFILE'
+ENV_STOPFILE = 'LYRARR_STOPFILE'

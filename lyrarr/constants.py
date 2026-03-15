@@ -1,0 +1,5 @@
+# coding=utf-8
+
+APP_NAME = 'Lyrarr'
+DEFAULT_PORT = 6868
+MINIMUM_PYTHON_VERSION = (3, 13, 0)
