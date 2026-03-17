@@ -7,8 +7,25 @@ import type {
 
 const api = axios.create({ baseURL: '/api' });
 
+// Redirect to login on 401 (except for auth endpoints)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && !error.config?.url?.includes('/auth/')) {
+      window.dispatchEvent(new CustomEvent('lyrarr-auth-expired'));
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Re-export types for convenience
 export type { PaginatedResponse, PaginationParams };
+
+// ---------- Auth ----------
+export const getAuthStatus = () => api.get('/auth/status').then(r => r.data);
+export const authLogin = (username: string, password: string) =>
+  api.post('/auth/login', { username, password }).then(r => r.data);
+export const authLogout = () => api.post('/auth/logout').then(r => r.data);
 
 // ---------- Artists ----------
 export const getArtists = (params?: PaginationParams & { sortBy?: string; sortDir?: string; monitored?: string; profileId?: number }) =>

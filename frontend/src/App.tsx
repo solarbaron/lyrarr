@@ -2,10 +2,10 @@ import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faMusic, faCompactDisc, faUser, faClockRotateLeft,
-  faMagnifyingGlass, faGear, faServer, faHouse, faIdBadge, faBars, faXmark
+  faMagnifyingGlass, faGear, faServer, faHouse, faIdBadge, faBars, faXmark, faRightFromBracket
 } from '@fortawesome/free-solid-svg-icons';
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { Loader } from '@mantine/core';
+import { Button, Loader } from '@mantine/core';
 
 // Lazy-loaded pages (code-split)
 const ArtistsPage = lazy(() => import('./pages/Artists'));
@@ -18,6 +18,7 @@ const SettingsPage = lazy(() => import('./pages/Settings'));
 const SystemPage = lazy(() => import('./pages/System'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const ProfilesPage = lazy(() => import('./pages/Profiles'));
+const LoginPage = lazy(() => import('./pages/Login'));
 
 // Always-loaded components
 import ActivityFeed from './components/ActivityFeed';
@@ -27,11 +28,64 @@ import ThemeToggle from './components/ThemeToggle';
 export default function App() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authType, setAuthType] = useState<string | null>(null);
+
+  // Check auth status on mount
+  useEffect(() => {
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(data => {
+        setAuthType(data.authType);
+        setAuthenticated(data.authenticated);
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        // If we can't reach the server, assume no auth needed
+        setAuthenticated(true);
+        setAuthChecked(true);
+      });
+  }, []);
+
+  // Listen for 401 auth expired events from axios interceptor
+  useEffect(() => {
+    const handler = () => {
+      setAuthenticated(false);
+    };
+    window.addEventListener('lyrarr-auth-expired', handler);
+    return () => window.removeEventListener('lyrarr-auth-expired', handler);
+  }, []);
 
   // Close sidebar on navigation (mobile)
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setAuthenticated(false);
+  };
+
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-primary)' }}>
+        <Loader color="violet" size="lg" />
+      </div>
+    );
+  }
+
+  // Show login page if form auth is enabled and not authenticated
+  if (authType === 'form' && !authenticated) {
+    return (
+      <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Loader color="violet" /></div>}>
+        <LoginPage onLogin={() => setAuthenticated(true)} />
+      </Suspense>
+    );
+  }
 
   const navItems = [
     { label: 'Dashboard', icon: faHouse, path: '/' },
@@ -119,6 +173,18 @@ export default function App() {
 
         <div className="sidebar-footer">
           <ThemeToggle />
+          {authType === 'form' && (
+            <Button
+              variant="subtle"
+              color="gray"
+              size="xs"
+              leftSection={<FontAwesomeIcon icon={faRightFromBracket} />}
+              onClick={handleLogout}
+              style={{ marginTop: 8, width: '100%' }}
+            >
+              Sign Out
+            </Button>
+          )}
         </div>
       </nav>
 

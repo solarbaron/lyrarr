@@ -133,8 +133,6 @@ validators = [
     Validator('notifications.telegram_bot_token', must_exist=True, default='', is_type_of=str),
     Validator('notifications.telegram_chat_id', must_exist=True, default='', is_type_of=str, cast=str),
 
-    # auth section
-    Validator('auth.api_key', must_exist=True, default='', is_type_of=str),
 
     # backup section
     Validator('backup.folder', must_exist=True, default=os.path.join(args.config_dir, 'backup'),

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TextInput, Switch, Button, NumberInput, Loader, FileButton, Select } from '@mantine/core';
+import { TextInput, PasswordInput, Switch, Button, NumberInput, Loader, FileButton, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup, getProfiles } from '../api';
@@ -172,11 +172,42 @@ export default function SettingsPage() {
       {/* Security */}
       <div className="settings-section">
         <h3>🔒 Security</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
+          Configure authentication for the Lyrarr web UI and API. Changes require a restart to take effect.
+        </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <TextInput label="API Key" placeholder="Leave empty to disable auth"
-            description="Require X-API-KEY header on all API requests"
-            value={form.auth?.api_key || ''}
-            onChange={(e) => updateField('auth', 'api_key', e.currentTarget.value)} styles={inputStyles} />
+          <Select
+            label="Authentication"
+            description="How users authenticate to Lyrarr"
+            data={[
+              { value: 'none', label: 'None (no authentication)' },
+              { value: 'form', label: 'Forms (login page)' },
+              { value: 'basic', label: 'Basic (browser popup)' },
+            ]}
+            value={form.auth?.type || 'none'}
+            onChange={(v) => updateField('auth', 'type', v === 'none' ? null : v)}
+            styles={inputStyles}
+          />
+          <TextInput label="API Key" placeholder="Auto-generated key for external access"
+            description="Use X-API-KEY header — always works regardless of auth type"
+            value={form.auth?.apikey || ''}
+            onChange={(e) => updateField('auth', 'apikey', e.currentTarget.value)} styles={inputStyles} />
+          {form.auth?.type && (
+            <>
+              <TextInput label="Username"
+                placeholder="Admin username"
+                value={form.auth?.username || ''}
+                onChange={(e) => updateField('auth', 'username', e.currentTarget.value)} styles={inputStyles} />
+              <PasswordInput label="Password"
+                placeholder="Admin password"
+                value={form.auth?.password || ''}
+                onChange={(e) => updateField('auth', 'password', e.currentTarget.value)}
+                styles={{
+                  ...inputStyles,
+                  innerInput: { color: 'var(--text-primary)' },
+                }} />
+            </>
+          )}
         </div>
       </div>
 
