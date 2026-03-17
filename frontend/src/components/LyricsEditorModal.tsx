@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Loader, Button, Group, Textarea, Select, FileButton, SegmentedControl, Collapse } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { readLyrics, uploadLyrics, saveLyricsFromEditor, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion } from '../api';
 
 interface Props {
@@ -31,6 +31,48 @@ const LANGUAGES = [
   { value: 'sv', label: 'Swedish' },
 ];
 
+/** Parse LRC timestamps and render syntax-highlighted preview */
+function LrcPreview({ content }: { content: string }) {
+  const lines = useMemo(() => {
+    const tsRegex = /^(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)/;
+    return content.split('\n').map((line, i) => {
+      const m = tsRegex.exec(line.trim());
+      if (m) {
+        return { key: i, tag: m[1], text: m[2], isTs: true };
+      }
+      return { key: i, tag: '', text: line, isTs: false };
+    });
+  }, [content]);
+
+  return (
+    <div style={{
+      padding: '10px 12px',
+      borderRadius: 8,
+      background: 'rgba(0,0,0,0.25)',
+      fontSize: 12,
+      lineHeight: 1.8,
+      maxHeight: 400,
+      overflow: 'auto',
+      fontFamily: 'monospace',
+    }}>
+      {lines.map(l => (
+        <div key={l.key} style={{ minHeight: 20 }}>
+          {l.isTs ? (
+            <>
+              <span style={{ color: '#8b5cf6', fontWeight: 600 }}>{l.tag}</span>
+              <span style={{ color: 'var(--text-primary)', marginLeft: 4 }}>{l.text}</span>
+            </>
+          ) : (
+            <span style={{ color: l.text.trim() ? 'var(--text-primary)' : 'transparent' }}>
+              {l.text || '\u00A0'}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened, onClose }: Props) {
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
@@ -41,6 +83,8 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
   const [syncModel, setSyncModel] = useState<string | null>('base');
   const [syncedPreview, setSyncedPreview] = useState<string | null>(null);
   const [showVersions, setShowVersions] = useState(false);
+  const [expandedVersionId, setExpandedVersionId] = useState<number | null>(null);
+  const [showLrcPreview, setShowLrcPreview] = useState(true);
 
   const { data: existingLyrics, isLoading } = useQuery({
     queryKey: ['lyrics-read', trackId],
@@ -162,24 +206,36 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title={`Edit Lyrics: ${trackTitle}`} size="xl" styles={modalStyles}>
+    <Modal opened={opened} onClose={onClose} title={`Edit Lyrics: ${trackTitle}`} size={isSynced && showLrcPreview ? '90%' : 'xl'} styles={modalStyles}>
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 40 }}>
           <Loader color="violet" />
         </div>
       ) : (
         <>
-          {/* Editor */}
-          <Textarea
-            value={content}
-            onChange={(e) => setContent(e.currentTarget.value)}
-            placeholder="Paste or type lyrics here...&#10;&#10;For synced (LRC) format:&#10;[00:12.34] First line of lyrics&#10;[00:15.67] Second line&#10;&#10;For plain text:&#10;Just type the lyrics line by line"
-            minRows={14}
-            maxRows={20}
-            autosize
-            styles={textareaStyles}
-            mb="md"
-          />
+          {/* Editor + Live Preview */}
+          <div style={{ display: isSynced && showLrcPreview ? 'grid' : 'block', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.currentTarget.value)}
+                placeholder={"Paste or type lyrics here...\n\nFor synced (LRC) format:\n[00:12.34] First line of lyrics\n[00:15.67] Second line\n\nFor plain text:\nJust type the lyrics line by line"}
+                minRows={14}
+                maxRows={20}
+                autosize
+                styles={textareaStyles}
+                mb="md"
+              />
+            </div>
+            {isSynced && showLrcPreview && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--text-secondary)' }}>
+                  🎵 LRC Preview
+                </div>
+                <LrcPreview content={content} />
+              </div>
+            )}
+          </div>
 
           {/* Controls Row */}
           <Group justify="space-between" mb="md">
@@ -196,6 +252,16 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
                   root: { background: 'var(--card-bg)', border: '1px solid var(--card-border)' },
                 }}
               />
+              {isSynced && (
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  size="xs"
+                  onClick={() => setShowLrcPreview(!showLrcPreview)}
+                >
+                  {showLrcPreview ? 'Hide Preview' : 'Show Preview'}
+                </Button>
+              )}
               <FileButton onChange={(file) => file && uploadMutation.mutate(file)} accept=".lrc,.txt">
                 {(props) => (
                   <Button {...props} variant="light" color="violet" size="xs" loading={uploadMutation.isPending}>
@@ -260,21 +326,7 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
 
             {syncedPreview && (
               <div>
-                <pre style={{
-                  margin: 0,
-                  padding: 12,
-                  borderRadius: 8,
-                  background: 'rgba(0,0,0,0.3)',
-                  fontSize: 12,
-                  color: 'var(--text-primary)',
-                  whiteSpace: 'pre-wrap',
-                  maxHeight: 250,
-                  overflow: 'auto',
-                  lineHeight: 1.6,
-                  fontFamily: 'monospace',
-                }}>
-                  {syncedPreview}
-                </pre>
+                <LrcPreview content={syncedPreview} />
                 <Group mt="sm" gap="sm">
                   <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }} size="xs" onClick={applySynced}>
                     Apply to Editor
@@ -380,36 +432,75 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
               <div style={{ marginTop: 8 }}>
                 {versionsData?.versions?.length ? (
                   versionsData.versions.slice(0, 10).map((v: any) => (
-                    <div key={v.id} style={{
-                      padding: '8px 10px',
-                      borderRadius: 8,
-                      background: 'rgba(0,0,0,0.2)',
-                      marginBottom: 6,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      fontSize: 12,
-                    }}>
-                      <div>
-                        <span style={{ color: 'var(--text-secondary)' }}>
-                          {new Date(v.timestamp).toLocaleString()}
-                        </span>
-                        <span style={{ marginLeft: 8, color: 'var(--accent-primary)' }}>
-                          {v.lyrics_type} • {v.provider}
-                        </span>
-                        <span style={{ marginLeft: 8, color: 'var(--text-secondary)' }}>
-                          {v.content.length} chars
-                        </span>
-                      </div>
-                      <Button
-                        variant="light"
-                        color="violet"
-                        size="compact-xs"
-                        onClick={() => restoreMutation.mutate(v.id)}
-                        loading={restoreMutation.isPending}
+                    <div key={v.id} style={{ marginBottom: 8 }}>
+                      <div style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        background: 'rgba(0,0,0,0.2)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                        onClick={() => setExpandedVersionId(expandedVersionId === v.id ? null : v.id)}
                       >
-                        Restore
-                      </Button>
+                        <div>
+                          <span style={{ color: 'var(--text-secondary)' }}>
+                            {new Date(v.timestamp).toLocaleString()}
+                          </span>
+                          <span style={{ marginLeft: 8, color: 'var(--accent-primary)' }}>
+                            {v.lyrics_type} • {v.provider}
+                          </span>
+                          <span style={{ marginLeft: 8, color: 'var(--text-secondary)' }}>
+                            {v.content.length} chars
+                          </span>
+                          {v.translated_from && (
+                            <span style={{ marginLeft: 8, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                              (translated from {v.translated_from})
+                            </span>
+                          )}
+                        </div>
+                        <Group gap="xs">
+                          <Button
+                            variant="subtle"
+                            color="gray"
+                            size="compact-xs"
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              setExpandedVersionId(expandedVersionId === v.id ? null : v.id);
+                            }}
+                          >
+                            {expandedVersionId === v.id ? 'Hide' : 'Preview'}
+                          </Button>
+                          <Button
+                            variant="light"
+                            color="violet"
+                            size="compact-xs"
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); restoreMutation.mutate(v.id); }}
+                            loading={restoreMutation.isPending}
+                          >
+                            Restore
+                          </Button>
+                        </Group>
+                      </div>
+                      <Collapse in={expandedVersionId === v.id}>
+                        <pre style={{
+                          margin: '4px 0 0',
+                          padding: 10,
+                          borderRadius: '0 0 8px 8px',
+                          background: 'rgba(0,0,0,0.3)',
+                          fontSize: 11,
+                          color: 'var(--text-primary)',
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: 200,
+                          overflow: 'auto',
+                          lineHeight: 1.5,
+                          fontFamily: 'monospace',
+                        }}>
+                          {v.content}
+                        </pre>
+                      </Collapse>
                     </div>
                   ))
                 ) : (

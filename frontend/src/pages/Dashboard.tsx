@@ -2,9 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SimpleGrid, Loader, Button, Progress } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate, faLanguage } from '@fortawesome/free-solid-svg-icons';
+import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate, faLanguage, faFileImport } from '@fortawesome/free-solid-svg-icons';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { getArtists, getAlbums, getTracks, getWantedCovers, getWantedLyrics, getSystemStatus, triggerSync, getDashboardStats, getLanguageStats, batchRedetectLanguages } from '../api';
+import { getArtists, getAlbums, getTracks, getWantedCovers, getWantedLyrics, getSystemStatus, triggerSync, getDashboardStats, getLanguageStats, batchRedetectLanguages, importSidecarLyrics } from '../api';
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -107,6 +107,18 @@ export default function DashboardPage() {
               loading={redetectMutation.isPending}
             >
               Re-detect Languages
+            </Button>
+            <Button
+              variant="light" color="grape" size="xs"
+              leftSection={<FontAwesomeIcon icon={faFileImport} />}
+              onClick={() => {
+                importSidecarLyrics().then(() => {
+                  notifications.show({ title: 'Started', message: 'Scanning for existing .lrc/.txt sidecar files...', color: 'violet' });
+                  setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 15000);
+                });
+              }}
+            >
+              Import Sidecar Files
             </Button>
           </div>
 

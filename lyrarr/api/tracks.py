@@ -69,3 +69,50 @@ class TrackItem(Resource):
         if row:
             return row.to_dict()
         return {'message': 'Track not found'}, 404
+
+    def put(self, track_id):
+        """Update track attributes (e.g., toggle blacklist)."""
+        from flask import request
+        from lyrarr.app.database import update
+        from datetime import datetime
+
+        data = request.get_json() or {}
+        row = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not row:
+            return {'message': 'Track not found'}, 404
+
+        updates = {}
+        if 'lyrics_status' in data:
+            new_status = data['lyrics_status']
+            if new_status == 'blacklisted':
+                updates['lyrics_status'] = 'blacklisted'
+                # Remove existing lyrics file
+                import os
+                if row.path:
+                    track_base = os.path.splitext(row.path)[0]
+                    for ext in ['.lrc', '.txt']:
+                        fpath = track_base + ext
+                        if os.path.isfile(fpath):
+                            try:
+                                os.remove(fpath)
+                            except Exception:
+                                pass
+                updates['hasLyrics'] = False
+            elif new_status == 'missing':
+                # Un-blacklist: set to missing so downloader picks it up
+                updates['lyrics_status'] = 'missing'
+
+        if updates:
+            updates['updated_at_timestamp'] = datetime.now()
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track_id)
+                .values(**updates)
+            )
+
+        return database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first().to_dict()
+

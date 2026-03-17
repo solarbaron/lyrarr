@@ -4,8 +4,8 @@ import { Loader, Button, Select, Group, Badge, FileButton } from '@mantine/core'
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faMagnifyingGlass, faUpload, faPenToSquare } from '@fortawesome/free-solid-svg-icons';
-import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover } from '../api';
+import { faArrowLeft, faMagnifyingGlass, faUpload, faPenToSquare, faBan, faRotateLeft } from '@fortawesome/free-solid-svg-icons';
+import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover, updateTrack } from '../api';
 import CoverSearchModal from '../components/CoverSearchModal';
 import LyricsSearchModal from '../components/LyricsSearchModal';
 import LyricsEditorModal from '../components/LyricsEditorModal';
@@ -231,6 +231,7 @@ export default function AlbumDetailPage() {
                       size="xs"
                       leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} />}
                       onClick={() => setLyricsTrack(track)}
+                      disabled={track.lyrics_status === 'blacklisted'}
                     >
                       Search
                     </Button>
@@ -240,8 +241,29 @@ export default function AlbumDetailPage() {
                       size="xs"
                       leftSection={<FontAwesomeIcon icon={faPenToSquare} />}
                       onClick={() => setEditorTrack(track)}
+                      disabled={track.lyrics_status === 'blacklisted'}
                     >
                       Edit
+                    </Button>
+                    <Button
+                      variant="subtle"
+                      color={track.lyrics_status === 'blacklisted' ? 'green' : 'red'}
+                      size="xs"
+                      leftSection={<FontAwesomeIcon icon={track.lyrics_status === 'blacklisted' ? faRotateLeft : faBan} />}
+                      onClick={() => {
+                        const newStatus = track.lyrics_status === 'blacklisted' ? 'missing' : 'blacklisted';
+                        updateTrack(track.lidarrTrackId, { lyrics_status: newStatus }).then(() => {
+                          queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+                          notifications.show({
+                            title: newStatus === 'blacklisted' ? 'Blacklisted' : 'Un-blacklisted',
+                            message: `${track.title} ${newStatus === 'blacklisted' ? 'will be skipped by the downloader' : 'is now eligible for lyrics download'}`,
+                            color: newStatus === 'blacklisted' ? 'red' : 'green',
+                          });
+                        });
+                      }}
+                      title={track.lyrics_status === 'blacklisted' ? 'Un-blacklist' : 'Blacklist (instrumental/no lyrics)'}
+                    >
+                      {track.lyrics_status === 'blacklisted' ? 'Unblock' : 'Skip'}
                     </Button>
                   </Group>
                 </td>

@@ -112,15 +112,25 @@ class ProviderHealthTracker:
     def get_stats(self):
         """Return a snapshot of all provider stats."""
         with self._lock:
-            return {
-                name: {
+            result = {}
+            for name, s in self._stats.items():
+                result[name] = {
                     'successes': s['successes'],
                     'failures': s['failures'],
                     'consecutive_failures': s['consecutive_failures'],
-                    'available': self.is_available(name),
+                    'last_failure': s['last_failure'].isoformat() if s['last_failure'] else None,
+                    'disabled_until': s['disabled_until'].isoformat() if s['disabled_until'] else None,
+                    'available': s['disabled_until'] is None or datetime.now() >= s['disabled_until'],
                 }
-                for name, s in self._stats.items()
-            }
+            return result
+
+    def reset(self, provider_name=None):
+        """Reset stats for a single provider or all providers."""
+        with self._lock:
+            if provider_name:
+                self._stats.pop(provider_name, None)
+            else:
+                self._stats.clear()
 
 
 def retry_with_backoff(fn, max_retries=2, base_delay=1.0, provider_name=''):

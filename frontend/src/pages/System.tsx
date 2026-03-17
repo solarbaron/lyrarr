@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Loader, Code, ScrollArea, Badge, Progress } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { getSystemStatus, getTasks, getLogs, getHealth, runTask, getProviderStats } from '../api';
+import { getSystemStatus, getTasks, getLogs, getHealth, runTask, getProviderStats, getProviderHealth, resetProviderHealth } from '../api';
 
 const PROVIDER_LABELS: Record<string, string> = {
   musicbrainz: 'MusicBrainz', fanart: 'fanart.tv', deezer: 'Deezer',
@@ -26,6 +26,20 @@ export default function SystemPage() {
     onSuccess: (_, taskId) => {
       notifications.show({ title: 'Task triggered', message: `${taskId} started`, color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+
+  const { data: providerHealth } = useQuery({
+    queryKey: ['provider-health'],
+    queryFn: getProviderHealth,
+    refetchInterval: 15000,
+  });
+
+  const resetHealthMutation = useMutation({
+    mutationFn: (provider?: string) => resetProviderHealth(provider),
+    onSuccess: (_, provider) => {
+      notifications.show({ title: 'Reset', message: `Health stats reset for ${provider || 'all providers'}`, color: 'green' });
+      queryClient.invalidateQueries({ queryKey: ['provider-health'] });
     },
   });
 
@@ -118,6 +132,76 @@ export default function SystemPage() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Provider Health Dashboard */}
+      {providerHealth?.providers && (
+        <div className="settings-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h3 style={{ margin: 0 }}>🏥 Provider Health</h3>
+            <Button
+              variant="subtle" color="gray" size="xs"
+              onClick={() => resetHealthMutation.mutate(undefined)}
+              loading={resetHealthMutation.isPending}
+            >
+              Reset All
+            </Button>
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Success</th>
+                <th>Failures</th>
+                <th>Streak</th>
+                <th>Last Failure</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(providerHealth.providers).map(([name, stats]: [string, any]) => (
+                <tr key={name}>
+                  <td style={{ fontWeight: 600 }}>{PROVIDER_LABELS[name] || name}</td>
+                  <td>
+                    <Badge size="xs" color={stats.type === 'lyrics' ? 'violet' : stats.type === 'cover' ? 'blue' : 'grape'} variant="light">
+                      {stats.type}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Badge size="sm" color={stats.available ? 'green' : 'red'} variant="filled">
+                      {stats.available ? 'Online' : 'Cooldown'}
+                    </Badge>
+                    {stats.disabled_until && !stats.available && (
+                      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
+                        until {new Date(stats.disabled_until).toLocaleTimeString()}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{stats.successes}</td>
+                  <td style={{ color: stats.failures > 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.failures}</td>
+                  <td style={{ color: stats.consecutive_failures >= 3 ? '#ef4444' : 'var(--text-secondary)' }}>
+                    {stats.consecutive_failures}
+                  </td>
+                  <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {stats.last_failure ? new Date(stats.last_failure).toLocaleString() : '—'}
+                  </td>
+                  <td>
+                    {(stats.failures > 0 || !stats.available) && (
+                      <Button
+                        variant="subtle" color="violet" size="compact-xs"
+                        onClick={() => resetHealthMutation.mutate(name)}
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

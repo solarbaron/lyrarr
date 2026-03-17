@@ -101,11 +101,34 @@ class LyricsSearch(Resource):
                 )
                 for h in hits:
                     h['provider'] = name
-                    # Truncate lyrics for preview (first 200 chars)
+                    # Truncate lyrics for preview (first 300 chars)
                     if h.get('synced_lyrics'):
                         h['synced_preview'] = h['synced_lyrics'][:300]
                     if h.get('plain_lyrics'):
                         h['plain_preview'] = h['plain_lyrics'][:300]
+
+                    # Fuzzy match breakdown for confidence display
+                    from difflib import SequenceMatcher
+                    match_details = {}
+                    result_title = (h.get('title') or h.get('track_name') or '').lower()
+                    result_artist = (h.get('artist') or h.get('artist_name') or '').lower()
+
+                    if result_title and track.title:
+                        match_details['title_score'] = round(
+                            SequenceMatcher(None, track.title.lower(), result_title).ratio() * 100)
+                        match_details['title_query'] = track.title
+                        match_details['title_result'] = h.get('title') or h.get('track_name') or ''
+                    if result_artist and artist:
+                        match_details['artist_score'] = round(
+                            SequenceMatcher(None, artist.name.lower(), result_artist).ratio() * 100)
+                        match_details['artist_query'] = artist.name
+                        match_details['artist_result'] = h.get('artist') or h.get('artist_name') or ''
+                    if h.get('duration') and track.duration:
+                        duration_diff = abs((h.get('duration') or 0) - track.duration)
+                        match_details['duration_diff'] = duration_diff
+                        match_details['duration_score'] = max(0, round(100 - duration_diff * 10))
+
+                    h['match_details'] = match_details
                 results.extend(hits)
             except Exception as e:
                 pass
@@ -611,3 +634,105 @@ class LyricsLanguageStats(Resource):
             'total_missing': total_missing,
             'providers': providers,
         }
+
+
+@api_ns_metadata.route('/metadata/lyrics/import-sidecar')
+class LyricsSidecarImport(Resource):
+    def post(self):
+        """Scan for existing .lrc/.txt sidecar files on disk and import into DB.
+
+        For each track with lyrics_status='missing', checks if a .lrc or .txt
+        file already exists alongside the audio file. If found, updates the DB
+        with detected language and synced status.
+        """
+        from threading import Thread
+        from lyrarr.app.database import update
+        from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+
+        def _run():
+            import os
+            import logging
+            log = logging.getLogger(__name__)
+
+            tracks = database.execute(
+                select(TableTracks).where(
+                    TableTracks.lyrics_status.in_(['missing', 'unknown'])
+                )
+            ).scalars().all()
+
+            imported = 0
+            for track in tracks:
+                if not track.path:
+                    continue
+                track_base = os.path.splitext(track.path)[0]
+
+                for ext, ltype in [('.lrc', True), ('.txt', False)]:
+                    fpath = track_base + ext
+                    if os.path.isfile(fpath):
+                        try:
+                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            if content.strip():
+                                lang = detect_language(content)
+                                synced = is_synced_lyrics(content) if ext == '.lrc' else False
+                                database.execute(
+                                    update(TableTracks)
+                                    .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                                    .values(
+                                        lyrics_status='available',
+                                        hasLyrics=True,
+                                        detected_language=lang,
+                                        is_synced=synced,
+                                    )
+                                )
+                                imported += 1
+                        except Exception as e:
+                            log.warning(f"Failed to import sidecar for track {track.lidarrTrackId}: {e}")
+                        break  # Found a file, stop checking
+
+            log.info(f"Sidecar import complete: {imported}/{len(tracks)} tracks updated")
+
+        thread = Thread(target=_run, daemon=True)
+        thread.start()
+        return {'message': 'Sidecar import started — scanning for existing lyrics files'}
+
+
+@api_ns_metadata.route('/metadata/providers/health')
+class ProviderHealth(Resource):
+    def get(self):
+        """Get health stats for all metadata providers."""
+        from lyrarr.metadata.provider_utils import health_tracker
+        from lyrarr.metadata.registry import cover_providers, lyrics_providers
+
+        stats = health_tracker.get_stats()
+
+        # Include all known providers even if they have no stats yet
+        all_providers = {}
+        for name in cover_providers:
+            entry = stats.get(name, {
+                'successes': 0, 'failures': 0, 'consecutive_failures': 0,
+                'last_failure': None, 'disabled_until': None, 'available': True,
+            })
+            entry['type'] = 'cover'
+            all_providers[name] = entry
+
+        for name in lyrics_providers:
+            if name in all_providers:
+                all_providers[name]['type'] = 'both'
+            else:
+                entry = stats.get(name, {
+                    'successes': 0, 'failures': 0, 'consecutive_failures': 0,
+                    'last_failure': None, 'disabled_until': None, 'available': True,
+                })
+                entry['type'] = 'lyrics'
+                all_providers[name] = entry
+
+        return {'providers': all_providers}
+
+    def post(self):
+        """Reset provider health stats."""
+        from lyrarr.metadata.provider_utils import health_tracker
+        data = request.get_json() or {}
+        provider_name = data.get('provider')
+        health_tracker.reset(provider_name)
+        return {'message': f'Health stats reset for {"all providers" if not provider_name else provider_name}'}
