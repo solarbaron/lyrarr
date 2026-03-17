@@ -325,11 +325,23 @@ def update_tracks(force=False):
 
                 # Check if lyrics file exists alongside the track
                 lyrics_exist = False
+                detected_lang = None
+                is_synced_flag = False
                 if track_path:
                     track_base = os.path.splitext(track_path)[0]
                     for ext in ['.lrc', '.txt']:
-                        if os.path.isfile(track_base + ext):
+                        lyrics_path = track_base + ext
+                        if os.path.isfile(lyrics_path):
                             lyrics_exist = True
+                            is_synced_flag = ext == '.lrc'
+                            # Detect language from existing lyrics
+                            try:
+                                from lyrarr.metadata.language_detect import detect_language
+                                with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as lf:
+                                    lyrics_content = lf.read()
+                                detected_lang = detect_language(lyrics_content)
+                            except Exception:
+                                pass
                             break
 
                 values = {
@@ -343,6 +355,8 @@ def update_tracks(force=False):
                     'path': track_path,
                     'lyrics_status': 'available' if lyrics_exist else 'missing',
                     'hasLyrics': lyrics_exist,
+                    'detected_language': detected_lang,
+                    'is_synced': is_synced_flag,
                     'updated_at_timestamp': datetime.now(),
                 }
 

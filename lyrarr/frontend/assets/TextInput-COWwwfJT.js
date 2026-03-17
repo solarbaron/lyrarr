@@ -1,0 +1,1 @@
+import{o as n,p as a,j as r}from"./index-C7C91p64.js";import{I as t}from"./InputBase-CrmlDyd_.js";const s=n((e,o)=>{const p=a("TextInput",null,e);return r.jsx(t,{component:"input",ref:o,...p,__staticSelector:"TextInput"})});s.classes=t.classes;s.displayName="@mantine/core/TextInput";export{s as T};

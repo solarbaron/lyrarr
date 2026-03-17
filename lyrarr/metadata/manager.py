@@ -167,13 +167,13 @@ def save_lyrics(track_id, lyrics_data, provider_name):
         synced = lyrics_data.get('synced_lyrics')
         plain = lyrics_data.get('plain_lyrics')
 
-        if synced and settings.metadata.lyrics.prefer_synced:
+        if synced:
             content = synced
             ext = '.lrc'
             lyrics_type = 'synced'
         elif plain:
             content = plain
-            ext = '.txt' if settings.metadata.lyrics.file_format == 'txt' else '.lrc'
+            ext = '.txt'
             lyrics_type = 'plain'
         else:
             return False

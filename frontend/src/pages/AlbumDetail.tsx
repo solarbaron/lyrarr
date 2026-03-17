@@ -205,9 +205,23 @@ export default function AlbumDetailPage() {
                   )}
                 </td>
                 <td>
-                  <span className={`status-badge ${track.lyrics_status || 'missing'}`}>
-                    {track.lyrics_status || 'missing'}
-                  </span>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className={`status-badge ${track.lyrics_status || 'missing'}`}>
+                      {track.lyrics_status || 'missing'}
+                    </span>
+                    {track.is_synced && (
+                      <span className="status-badge available" style={{ fontSize: 10, padding: '1px 5px' }}>LRC</span>
+                    )}
+                    {track.detected_language && (
+                      <span style={{
+                        fontSize: 10, padding: '1px 5px', borderRadius: 4,
+                        background: 'rgba(139,61,255,0.15)', color: 'var(--accent-primary)',
+                        fontWeight: 600, textTransform: 'uppercase',
+                      }}>
+                        {track.detected_language}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td>
                   <Group gap="xs">
