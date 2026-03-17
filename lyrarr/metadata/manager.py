@@ -29,13 +29,18 @@ def search_cover_art(album):
             continue
 
         try:
+            # Build kwargs based on what this provider accepts
+            kwargs = {}
             if provider_name == 'musicbrainz':
-                provider_results = provider.search(mb_release_group_id=album.get('mbId'))
+                kwargs['mb_release_group_id'] = album.get('mbId')
             elif provider_name == 'fanart':
-                provider_results = provider.search(mb_artist_id=album.get('artistMbId'))
+                kwargs['mb_artist_id'] = album.get('artistMbId')
             else:
-                provider_results = []
+                # Deezer, iTunes, TheAudioDB use artist + album name search
+                kwargs['artist_name'] = album.get('artistName')
+                kwargs['album_name'] = album.get('title')
 
+            provider_results = provider.search(**kwargs)
             results.extend(provider_results)
         except Exception as e:
             logger.error(f"Cover art search error ({provider_name}): {e}")

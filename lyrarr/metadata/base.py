@@ -87,6 +87,6 @@ class LyricsProvider(ABC):
                 - plain_lyrics: str or None — plain text lyrics
                 - synced_lyrics: str or None — synced/LRC lyrics
                 - provider: str — provider name
-                - score: float — confidence score (0-100)
+                - score: float — confidence score (0.0-1.0)
         """
         ...
