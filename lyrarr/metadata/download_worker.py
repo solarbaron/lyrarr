@@ -370,9 +370,10 @@ def download_missing_lyrics(album_ids=None):
         used_provider = lyrics_data.get('_provider', 'unknown')
 
         # Score threshold: reject if best result is below minimum
+        # score_threshold is stored as 0-100 in profile, provider scores are 0.0-1.0
         score_threshold = eff.get('score_threshold', 0)
-        if score_threshold > 0 and lyrics_data.get('score', 0) < score_threshold:
-            logger.debug(f"Skipping '{track.title}' — best score {lyrics_data.get('score', 0)} below threshold {score_threshold}")
+        if score_threshold > 0 and (lyrics_data.get('score', 0) * 100) < score_threshold:
+            logger.debug(f"Skipping '{track.title}' — best score {lyrics_data.get('score', 0):.0%} below threshold {score_threshold}%")
             continue
 
         if lyrics_data and track.path:
@@ -523,17 +524,18 @@ def run_metadata_downloads():
     logger.info("Starting scheduled metadata download task...")
 
     # Count pending items for progress tracking
-    total_covers = database.execute(
-        select(TableAlbums).where(TableAlbums.cover_status == 'missing')
-    ).scalars().all()
-    total_lyrics = database.execute(
-        select(TableTracks).where(TableTracks.lyrics_status == 'missing')
-    ).scalars().all()
+    from lyrarr.app.database import func
+    total_cover_count = database.execute(
+        select(func.count()).select_from(TableAlbums).where(TableAlbums.cover_status == 'missing')
+    ).scalar() or 0
+    total_lyrics_count = database.execute(
+        select(func.count()).select_from(TableTracks).where(TableTracks.lyrics_status == 'missing')
+    ).scalar() or 0
 
     event_stream(type='download_start', payload={
         'message': 'Metadata download task started',
-        'total_covers': len(total_covers),
-        'total_lyrics': len(total_lyrics),
+        'total_covers': total_cover_count,
+        'total_lyrics': total_lyrics_count,
     })
 
     covers_downloaded = 0

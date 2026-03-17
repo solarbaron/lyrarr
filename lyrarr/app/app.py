@@ -1,7 +1,7 @@
 # coding=utf-8
 
 import time
-import hashlib
+import hmac
 import secrets
 from collections import defaultdict
 from flask import Flask, request, jsonify, session
@@ -29,28 +29,27 @@ class RateLimiter:
         return True, self.max_requests - len(self._requests[ip]), 0
 
 
-def _hash_password(password):
-    """Hash a password for comparison (simple sha256)."""
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
-
-
 def _check_credentials(username, password):
-    """Check if username/password match the configured auth credentials."""
+    """Check if username/password match the configured auth credentials.
+    Uses constant-time comparison to prevent timing attacks."""
     from lyrarr.app.config import settings
-    conf_user = getattr(settings.auth, 'username', '')
-    conf_pass = getattr(settings.auth, 'password', '')
+    conf_user = getattr(settings.auth, 'username', '') or ''
+    conf_pass = getattr(settings.auth, 'password', '') or ''
     if not conf_user or not conf_pass:
         return False
-    return username == conf_user and password == conf_pass
+    user_match = hmac.compare_digest(username.encode('utf-8'), conf_user.encode('utf-8'))
+    pass_match = hmac.compare_digest(password.encode('utf-8'), conf_pass.encode('utf-8'))
+    return user_match and pass_match
 
 
 def _is_api_key_valid(provided_key):
-    """Check if provided API key matches configured auth.apikey."""
+    """Check if provided API key matches configured auth.apikey.
+    Uses constant-time comparison to prevent timing attacks."""
     from lyrarr.app.config import settings
-    api_key = getattr(settings.auth, 'apikey', '')
-    if not api_key:
+    api_key = getattr(settings.auth, 'apikey', '') or ''
+    if not api_key or not provided_key:
         return False
-    return provided_key == api_key
+    return hmac.compare_digest(provided_key.encode('utf-8'), api_key.encode('utf-8'))
 
 
 def _get_auth_type():
