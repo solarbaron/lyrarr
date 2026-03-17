@@ -36,6 +36,11 @@ class CoverSearch(Resource):
                     hits = provider.search(mb_release_group_id=album.mbId)
                 elif name == 'fanart' and artist and artist.mbId:
                     hits = provider.search(mb_artist_id=artist.mbId)
+                elif name in ('deezer', 'itunes', 'theaudiodb'):
+                    hits = provider.search(
+                        artist_name=artist.name if artist else None,
+                        album_name=album.title,
+                    )
                 else:
                     hits = []
                 for h in hits:
