@@ -16,3 +16,4 @@ pretty-errors>=1.2
 mutagen>=1.47
 deep-translator>=1.11
 faster-whisper>=1.0
+langdetect>=1.0

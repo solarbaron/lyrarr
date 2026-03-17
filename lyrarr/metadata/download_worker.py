@@ -66,6 +66,11 @@ def _effective_settings(album, profile):
         'download_lyrics': _override(album.override_download_lyrics, profile.download_lyrics),
         'cover_format': _override(album.override_cover_format, profile.cover_format),
         'prefer_synced_lyrics': _override(album.override_prefer_synced, profile.prefer_synced_lyrics),
+        'lyrics_selection_mode': getattr(profile, 'lyrics_selection_mode', 'best_score') or 'best_score',
+        'auto_detect_language': getattr(profile, 'auto_detect_language', True),
+        'auto_translate': getattr(profile, 'auto_translate', 'off') or 'off',
+        'translate_target_lang': getattr(profile, 'translate_target_lang', 'en') or 'en',
+        'translate_only_foreign': getattr(profile, 'translate_only_foreign', True),
         'cover_providers': profile.cover_providers or '["musicbrainz","deezer","itunes","fanart","theaudiodb"]',
         'lyrics_providers': profile.lyrics_providers or '["lrclib","musixmatch","netease","genius"]',
         'overwrite_existing': profile.overwrite_existing or False,
@@ -295,10 +300,12 @@ def download_missing_lyrics(album_ids=None):
             artist_cache[track.artistId] = artist
         artist = artist_cache[track.artistId]
         artist_name = artist.name if artist else None
-
         lyrics_data = None
         used_provider = None
-        prefer_synced = bool(eff['prefer_synced_lyrics'])
+        selection_mode = eff.get('lyrics_selection_mode', 'best_score')
+
+        # Collect results from ALL providers (for best_score mode)
+        all_results = []
 
         for provider_name in providers:
             provider = _lyrics_providers.get(provider_name)
@@ -307,7 +314,7 @@ def download_missing_lyrics(album_ids=None):
 
             # Skip unhealthy providers
             if not health_tracker.is_available(provider_name):
-                logger.debug(f"Skipping '{provider_name}' \u2014 currently in cooldown")
+                logger.debug(f"Skipping '{provider_name}' — currently in cooldown")
                 continue
 
             rate_limiter.wait(provider_name)
@@ -321,32 +328,59 @@ def download_missing_lyrics(album_ids=None):
                 )
 
                 if results:
-                    # Sort: prefer synced if configured
-                    if prefer_synced:
-                        results.sort(key=lambda x: (1 if x.get('synced_lyrics') else 0, x.get('score', 0)), reverse=True)
-                    else:
-                        results.sort(key=lambda x: x.get('score', 0), reverse=True)
-
-                    lyrics_data = results[0]
-                    used_provider = provider_name
+                    for r in results:
+                        r['_provider'] = provider_name
+                    all_results.extend(results)
                     health_tracker.record_success(provider_name)
-                    break
 
             except Exception as e:
                 logger.error(f"Lyrics search error ({provider_name}) for '{track.title}': {e}")
                 health_tracker.record_failure(provider_name, str(e))
+
+        if not all_results:
+            continue
+
+        # Sort based on selection mode
+        if selection_mode == 'prefer_synced':
+            # Synced always wins, then sort by score
+            all_results.sort(
+                key=lambda x: (1 if x.get('synced_lyrics') else 0, x.get('score', 0)),
+                reverse=True
+            )
+        elif selection_mode == 'prefer_plain':
+            # Plain always wins, then sort by score
+            all_results.sort(
+                key=lambda x: (1 if x.get('plain_lyrics') and not x.get('synced_lyrics') else 0, x.get('score', 0)),
+                reverse=True
+            )
+        else:
+            # best_score (default): highest score wins, synced is tiebreaker
+            all_results.sort(
+                key=lambda x: (x.get('score', 0), 1 if x.get('synced_lyrics') else 0),
+                reverse=True
+            )
+
+        lyrics_data = all_results[0]
+        used_provider = lyrics_data.get('_provider', 'unknown')
 
         if lyrics_data and track.path:
             try:
                 synced = lyrics_data.get('synced_lyrics')
                 plain = lyrics_data.get('plain_lyrics')
 
-                if synced and prefer_synced:
+                # Determine content based on what's available and selection mode
+                if synced and (selection_mode != 'prefer_plain'):
                     content = synced
                     ext = '.lrc'
+                    is_synced_file = True
                 elif plain:
                     content = plain
                     ext = '.txt'
+                    is_synced_file = False
+                elif synced:  # prefer_plain but only synced available
+                    content = synced
+                    ext = '.lrc'
+                    is_synced_file = True
                 else:
                     continue
 
@@ -370,10 +404,25 @@ def download_missing_lyrics(album_ids=None):
                     logger.debug(f"Lyrics already exist on disk for '{track.title}', updated DB status")
                     continue
 
+                # Remove old lyrics file with different extension
+                for old_ext in ['.lrc', '.txt']:
+                    old_path = track_base + old_ext
+                    if os.path.isfile(old_path) and old_path != filepath:
+                        try:
+                            os.remove(old_path)
+                        except Exception:
+                            pass
+
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
                 with open(filepath, 'w', encoding='utf-8') as f:
                     f.write(content)
+
+                # Language detection
+                detected_lang = None
+                if eff.get('auto_detect_language', True):
+                    from lyrarr.metadata.language_detect import detect_language
+                    detected_lang = detect_language(content)
 
                 # Update database
                 database.execute(
@@ -382,6 +431,8 @@ def download_missing_lyrics(album_ids=None):
                     .values(
                         lyrics_status='available',
                         hasLyrics=True,
+                        is_synced=is_synced_file,
+                        detected_language=detected_lang,
                         updated_at_timestamp=datetime.now()
                     )
                 )
@@ -403,15 +454,34 @@ def download_missing_lyrics(album_ids=None):
                 )
 
                 downloaded += 1
-                logger.info(f"✓ Lyrics: '{track.title}' ({used_provider})")
+                logger.info(f"✓ Lyrics: '{track.title}' ({used_provider}, score={lyrics_data.get('score', '?')}, lang={detected_lang}, synced={is_synced_file})")
                 event_stream(type='download_progress', payload={
                     'metadata_type': 'lyrics', 'title': track.title, 'provider': used_provider,
+                    'language': detected_lang, 'is_synced': is_synced_file,
                 })
+
+                # Auto-translate if configured
+                auto_translate = eff.get('auto_translate', 'off')
+                if auto_translate != 'off' and detected_lang:
+                    target_lang = eff.get('translate_target_lang', 'en')
+                    only_foreign = eff.get('translate_only_foreign', True)
+
+                    should_translate = not only_foreign or (detected_lang != target_lang)
+                    if should_translate:
+                        try:
+                            from lyrarr.metadata.manager import translate_lyrics_content
+                            translated = translate_lyrics_content(
+                                content, target_lang, auto_translate
+                            )
+                            if translated:
+                                with open(filepath, 'w', encoding='utf-8') as f:
+                                    f.write(translated)
+                                logger.info(f"  → Auto-translated '{track.title}' ({detected_lang} → {target_lang}, mode={auto_translate})")
+                        except Exception as e:
+                            logger.warning(f"Auto-translation failed for '{track.title}': {e}")
 
             except Exception as e:
                 logger.error(f"Error saving lyrics for '{track.title}': {e}")
-        elif not track.path:
-            logger.debug(f"Skipping '{track.title}' — no track path set")
 
 
 

@@ -218,6 +218,11 @@ def save_lyrics(track_id, lyrics_data, provider_name):
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
 
+        # Language detection & synced status
+        from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+        detected_lang = detect_language(content)
+        synced_flag = is_synced_lyrics(content)
+
         # Update database
         database.execute(
             update(TableTracks)
@@ -225,6 +230,8 @@ def save_lyrics(track_id, lyrics_data, provider_name):
             .values(
                 lyrics_status='available',
                 hasLyrics=True,
+                detected_language=detected_lang,
+                is_synced=synced_flag,
                 updated_at_timestamp=datetime.now()
             )
         )
@@ -245,10 +252,80 @@ def save_lyrics(track_id, lyrics_data, provider_name):
             )
         )
 
-        logger.info(f"Saved lyrics for track '{track.title}' to {filepath}")
+        logger.info(f"Saved lyrics for track '{track.title}' to {filepath} (lang={detected_lang}, synced={synced_flag})")
         return True
 
     except Exception as e:
         logger.error(f"Error saving lyrics for track {track_id}: {e}")
         return False
+
+
+def translate_lyrics_content(content, target_lang, mode='replace'):
+    """Translate lyrics text to a target language.
+
+    Args:
+        content: Lyrics text (may include LRC timestamps)
+        target_lang: Target ISO 639-1 language code
+        mode: 'replace' (replace original) or 'dual' (interleave original + translation)
+
+    Returns:
+        Translated content string, or None on failure.
+    """
+    import re
+
+    if not content or not content.strip():
+        return None
+
+    try:
+        from deep_translator import GoogleTranslator
+        translator = GoogleTranslator(source='auto', target=target_lang)
+
+        lrc_ts = re.compile(r'(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)')
+        lines = content.split('\n')
+        translated_lines = []
+        original_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            m = lrc_ts.match(stripped)
+
+            if m:
+                tag, text = m.group(1), m.group(2)
+                if text:
+                    try:
+                        trans = translator.translate(text)
+                    except Exception:
+                        trans = text
+                    translated_lines.append(f"{tag} {trans}")
+                    original_lines.append(stripped)
+                else:
+                    translated_lines.append(stripped)
+                    original_lines.append(stripped)
+            elif stripped:
+                try:
+                    trans = translator.translate(stripped)
+                except Exception:
+                    trans = stripped
+                translated_lines.append(trans)
+                original_lines.append(stripped)
+            else:
+                translated_lines.append('')
+                original_lines.append('')
+
+        if mode == 'dual':
+            dual = []
+            for orig, trans in zip(original_lines, translated_lines):
+                if orig.strip():
+                    dual.append(orig)
+                    if trans != orig:
+                        dual.append(trans)
+                else:
+                    dual.append('')
+            return '\n'.join(dual)
+
+        return '\n'.join(translated_lines)
+
+    except Exception as e:
+        logger.error(f"Translation failed: {e}")
+        return None
 

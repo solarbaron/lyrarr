@@ -11,6 +11,11 @@ interface ProfileForm {
   cover_providers: string[];
   lyrics_providers: string[];
   prefer_synced_lyrics: boolean;
+  lyrics_selection_mode: string;
+  auto_detect_language: boolean;
+  auto_translate: string;
+  translate_target_lang: string;
+  translate_only_foreign: boolean;
   cover_format: string;
   overwrite_existing: boolean;
   embed_cover_art: boolean;
@@ -40,6 +45,17 @@ function parseProviders(json: string | string[] | null, fallback: string[]): str
   try { return JSON.parse(json); } catch { return fallback; }
 }
 
+const LANGUAGES = [
+  { value: 'en', label: 'English' }, { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' }, { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' }, { value: 'pt', label: 'Portuguese' },
+  { value: 'ja', label: 'Japanese' }, { value: 'ko', label: 'Korean' },
+  { value: 'zh-cn', label: 'Chinese (Simplified)' }, { value: 'ru', label: 'Russian' },
+  { value: 'ar', label: 'Arabic' }, { value: 'hi', label: 'Hindi' },
+  { value: 'tr', label: 'Turkish' }, { value: 'nl', label: 'Dutch' },
+  { value: 'pl', label: 'Polish' }, { value: 'sv', label: 'Swedish' },
+];
+
 const DEFAULT_FORM: ProfileForm = {
   name: '',
   download_covers: true,
@@ -47,6 +63,11 @@ const DEFAULT_FORM: ProfileForm = {
   cover_providers: DEFAULT_COVERS,
   lyrics_providers: DEFAULT_LYRICS,
   prefer_synced_lyrics: true,
+  lyrics_selection_mode: 'best_score',
+  auto_detect_language: true,
+  auto_translate: 'off',
+  translate_target_lang: 'en',
+  translate_only_foreign: true,
   cover_format: 'jpg',
   overwrite_existing: false,
   embed_cover_art: false,
@@ -128,6 +149,11 @@ export default function ProfilesPage() {
       cover_providers: parseProviders(profile.cover_providers, DEFAULT_COVERS),
       lyrics_providers: parseProviders(profile.lyrics_providers, DEFAULT_LYRICS),
       prefer_synced_lyrics: profile.prefer_synced_lyrics ?? true,
+      lyrics_selection_mode: profile.lyrics_selection_mode || 'best_score',
+      auto_detect_language: profile.auto_detect_language ?? true,
+      auto_translate: profile.auto_translate || 'off',
+      translate_target_lang: profile.translate_target_lang || 'en',
+      translate_only_foreign: profile.translate_only_foreign ?? true,
       cover_format: profile.cover_format || 'jpg',
       overwrite_existing: profile.overwrite_existing ?? false,
       embed_cover_art: profile.embed_cover_art ?? false,
@@ -245,13 +271,6 @@ export default function ProfilesPage() {
           color="violet"
         />
         <Checkbox
-          label="Prefer Synced Lyrics (.lrc)"
-          checked={form.prefer_synced_lyrics}
-          onChange={(e) => setForm({ ...form, prefer_synced_lyrics: e.currentTarget.checked })}
-          mb="sm"
-          color="violet"
-        />
-        <Checkbox
           label="Overwrite Existing Files"
           checked={form.overwrite_existing}
           onChange={(e) => setForm({ ...form, overwrite_existing: e.currentTarget.checked })}
@@ -277,6 +296,72 @@ export default function ProfilesPage() {
           mb="md"
           styles={inputStyle}
         />
+
+        {/* Lyrics Intelligence Section */}
+        <div style={{
+          padding: 16, borderRadius: 12, marginBottom: 16,
+          background: 'rgba(139, 61, 255, 0.06)', border: '1px solid rgba(139, 61, 255, 0.2)',
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: 'var(--accent-primary)' }}>
+            🧠 Lyrics Intelligence
+          </div>
+          <Select
+            label="Selection Mode"
+            description="How to pick the best lyrics result from all providers"
+            data={[
+              { value: 'best_score', label: 'Best Score (highest match %, synced tiebreaker)' },
+              { value: 'prefer_synced', label: 'Prefer Synced (synced always wins, then score)' },
+              { value: 'prefer_plain', label: 'Prefer Plain Text (for incompatible players)' },
+            ]}
+            value={form.lyrics_selection_mode}
+            onChange={(v) => setForm({ ...form, lyrics_selection_mode: v || 'best_score' })}
+            mb="md"
+            styles={inputStyle}
+          />
+          <Checkbox
+            label="Auto-detect Language"
+            description="Identify the language of downloaded lyrics"
+            checked={form.auto_detect_language}
+            onChange={(e) => setForm({ ...form, auto_detect_language: e.currentTarget.checked })}
+            mb="sm"
+            color="violet"
+          />
+          <Select
+            label="Auto-translate"
+            description="Automatically translate lyrics after download"
+            data={[
+              { value: 'off', label: 'Off' },
+              { value: 'dual', label: 'Dual (Original + Translation)' },
+              { value: 'replace', label: 'Replace (Translation only)' },
+            ]}
+            value={form.auto_translate}
+            onChange={(v) => setForm({ ...form, auto_translate: v || 'off' })}
+            mb="md"
+            styles={inputStyle}
+          />
+          {form.auto_translate !== 'off' && (
+            <>
+              <Select
+                label="Target Language"
+                data={LANGUAGES}
+                value={form.translate_target_lang}
+                onChange={(v) => setForm({ ...form, translate_target_lang: v || 'en' })}
+                mb="sm"
+                styles={inputStyle}
+                searchable
+              />
+              <Checkbox
+                label="Only translate foreign languages"
+                description="Skip translation when lyrics are already in the target language"
+                checked={form.translate_only_foreign}
+                onChange={(e) => setForm({ ...form, translate_only_foreign: e.currentTarget.checked })}
+                mb="sm"
+                color="violet"
+              />
+            </>
+          )}
+        </div>
+
         <MultiSelect
           label="Cover Art Providers"
           description="Order matters — first provider is tried first"
@@ -290,7 +375,7 @@ export default function ProfilesPage() {
         />
         <MultiSelect
           label="Lyrics Providers"
-          description="Order matters — first provider is tried first"
+          description="All providers are queried — results are ranked by selection mode"
           data={ALL_LYRICS_PROVIDERS}
           value={form.lyrics_providers}
           onChange={(v) => setForm({ ...form, lyrics_providers: v })}

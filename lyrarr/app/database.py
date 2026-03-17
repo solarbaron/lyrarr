@@ -79,6 +79,11 @@ class TableProfiles(Base):
     cover_providers = mapped_column(Text, default='["musicbrainz","deezer","itunes","fanart","theaudiodb"]')
     lyrics_providers = mapped_column(Text, default='["lrclib","musixmatch","netease","genius"]')
     prefer_synced_lyrics = mapped_column(Boolean, default=True)
+    lyrics_selection_mode = mapped_column(Text, default='best_score')  # 'best_score' | 'prefer_synced' | 'prefer_plain'
+    auto_detect_language = mapped_column(Boolean, default=True)
+    auto_translate = mapped_column(Text, default='off')  # 'off' | 'dual' | 'replace'
+    translate_target_lang = mapped_column(Text, default='en')
+    translate_only_foreign = mapped_column(Boolean, default=True)
     cover_format = mapped_column(Text, default='jpg')
     overwrite_existing = mapped_column(Boolean, default=False)
     embed_cover_art = mapped_column(Boolean, default=False)
@@ -155,6 +160,8 @@ class TableTracks(Base):
     path = mapped_column(Text)
     hasLyrics = mapped_column(Boolean, default=False)  # whether synced lyrics exist
     lyrics_status = mapped_column(Text, default='missing')  # missing, available, manual, blacklisted
+    detected_language = mapped_column(Text, nullable=True)  # ISO 639-1 code (e.g. 'en', 'ja')
+    is_synced = mapped_column(Boolean, default=False)  # whether current lyrics file is synced LRC
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
 
