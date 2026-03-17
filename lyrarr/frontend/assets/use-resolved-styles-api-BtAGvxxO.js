@@ -1,0 +1,1 @@
+import{t as a,bh as r,bi as i}from"./index-xbc2zk3J.js";function m({classNames:l,styles:o,props:e,stylesCtx:s}){const t=a();return{resolvedClassNames:i({theme:t,classNames:l,props:e,stylesCtx:s||void 0}),resolvedStyles:r({theme:t,styles:o,props:e,stylesCtx:s||void 0})}}export{m as u};

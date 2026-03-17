@@ -86,6 +86,8 @@ class TrackItem(Resource):
         updates = {}
         if 'lyrics_status' in data:
             new_status = data['lyrics_status']
+            if new_status not in ('blacklisted', 'missing'):
+                return {'message': f'Invalid lyrics_status: {new_status}. Allowed: blacklisted, missing'}, 400
             if new_status == 'blacklisted':
                 updates['lyrics_status'] = 'blacklisted'
                 # Remove existing lyrics file

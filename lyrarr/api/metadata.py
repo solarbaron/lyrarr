@@ -90,6 +90,8 @@ class LyricsSearch(Resource):
             select(TableAlbums).where(TableAlbums.lidarrAlbumId == track.albumId)
         ).scalars().first()
 
+        from difflib import SequenceMatcher
+
         results = []
         for name, provider in lyrics_providers.items():
             try:
@@ -108,7 +110,6 @@ class LyricsSearch(Resource):
                         h['plain_preview'] = h['plain_lyrics'][:300]
 
                     # Fuzzy match breakdown for confidence display
-                    from difflib import SequenceMatcher
                     match_details = {}
                     result_title = (h.get('title') or h.get('track_name') or '').lower()
                     result_artist = (h.get('artist') or h.get('artist_name') or '').lower()
@@ -646,7 +647,7 @@ class LyricsSidecarImport(Resource):
         with detected language and synced status.
         """
         from threading import Thread
-        from lyrarr.app.database import update
+        from lyrarr.app.database import update, database as db_session
         from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
 
         def _run():
@@ -654,43 +655,46 @@ class LyricsSidecarImport(Resource):
             import logging
             log = logging.getLogger(__name__)
 
-            tracks = database.execute(
-                select(TableTracks).where(
-                    TableTracks.lyrics_status.in_(['missing', 'unknown'])
-                )
-            ).scalars().all()
+            try:
+                tracks = db_session.execute(
+                    select(TableTracks).where(
+                        TableTracks.lyrics_status.in_(['missing', 'unknown'])
+                    )
+                ).scalars().all()
 
-            imported = 0
-            for track in tracks:
-                if not track.path:
-                    continue
-                track_base = os.path.splitext(track.path)[0]
+                imported = 0
+                for track in tracks:
+                    if not track.path:
+                        continue
+                    track_base = os.path.splitext(track.path)[0]
 
-                for ext, ltype in [('.lrc', True), ('.txt', False)]:
-                    fpath = track_base + ext
-                    if os.path.isfile(fpath):
-                        try:
-                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                            if content.strip():
-                                lang = detect_language(content)
-                                synced = is_synced_lyrics(content) if ext == '.lrc' else False
-                                database.execute(
-                                    update(TableTracks)
-                                    .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
-                                    .values(
-                                        lyrics_status='available',
-                                        hasLyrics=True,
-                                        detected_language=lang,
-                                        is_synced=synced,
+                    for ext in ['.lrc', '.txt']:
+                        fpath = track_base + ext
+                        if os.path.isfile(fpath):
+                            try:
+                                with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read()
+                                if content.strip():
+                                    lang = detect_language(content)
+                                    synced = is_synced_lyrics(content) if ext == '.lrc' else False
+                                    db_session.execute(
+                                        update(TableTracks)
+                                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                                        .values(
+                                            lyrics_status='available',
+                                            hasLyrics=True,
+                                            detected_language=lang,
+                                            is_synced=synced,
+                                        )
                                     )
-                                )
-                                imported += 1
-                        except Exception as e:
-                            log.warning(f"Failed to import sidecar for track {track.lidarrTrackId}: {e}")
-                        break  # Found a file, stop checking
+                                    imported += 1
+                            except Exception as e:
+                                log.warning(f"Failed to import sidecar for track {track.lidarrTrackId}: {e}")
+                            break  # Found a file, stop checking
 
-            log.info(f"Sidecar import complete: {imported}/{len(tracks)} tracks updated")
+                log.info(f"Sidecar import complete: {imported}/{len(tracks)} tracks updated")
+            finally:
+                db_session.remove()  # Clean up scoped session for this thread
 
         thread = Thread(target=_run, daemon=True)
         thread.start()

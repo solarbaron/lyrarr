@@ -259,6 +259,8 @@ export default function AlbumDetailPage() {
                             message: `${track.title} ${newStatus === 'blacklisted' ? 'will be skipped by the downloader' : 'is now eligible for lyrics download'}`,
                             color: newStatus === 'blacklisted' ? 'red' : 'green',
                           });
+                        }).catch(() => {
+                          notifications.show({ title: 'Error', message: 'Failed to update track status', color: 'red' });
                         });
                       }}
                       title={track.lyrics_status === 'blacklisted' ? 'Un-blacklist' : 'Blacklist (instrumental/no lyrics)'}
