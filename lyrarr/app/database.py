@@ -194,6 +194,21 @@ class TableBlacklist(Base):
         return {column.name: _serialize_value(getattr(self, column.name)) for column in self.__table__.columns}
 
 
+class TableLyricsVersions(Base):
+    """Store previous lyrics versions in-app instead of leaving extra files in music dirs."""
+    __tablename__ = 'table_lyrics_versions'
+
+    id = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'))
+    content = mapped_column(Text, nullable=False)
+    lyrics_type = mapped_column(Text, nullable=False)  # 'synced' or 'plain'
+    provider = mapped_column(Text)
+    timestamp = mapped_column(DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {column.name: _serialize_value(getattr(self, column.name)) for column in self.__table__.columns}
+
+
 # Columns that were migrated from Text ('True'/'False') to Boolean (1/0)
 _BOOL_MIGRATION_COLUMNS = {
     'table_profiles': ['is_default', 'download_covers', 'download_lyrics',

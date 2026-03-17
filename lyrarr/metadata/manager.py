@@ -146,7 +146,14 @@ def save_cover_art(album_id, image_data, provider_name):
 
 
 def save_lyrics(track_id, lyrics_data, provider_name):
-    """Save lyrics to disk for a track."""
+    """Save lyrics to disk for a track.
+
+    - Archives the previous version in the database (TableLyricsVersions)
+    - Removes any old lyrics file with a different extension (.lrc/.txt)
+    - Writes only one lyrics file per track
+    """
+    from lyrarr.app.database import TableLyricsVersions
+
     track = database.execute(
         select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
     ).scalars().first()
@@ -163,18 +170,51 @@ def save_lyrics(track_id, lyrics_data, provider_name):
         if synced and settings.metadata.lyrics.prefer_synced:
             content = synced
             ext = '.lrc'
+            lyrics_type = 'synced'
         elif plain:
             content = plain
             ext = '.txt' if settings.metadata.lyrics.file_format == 'txt' else '.lrc'
+            lyrics_type = 'plain'
         else:
             return False
 
-        # Save alongside track file
         track_base = os.path.splitext(track.path)[0]
         filepath = track_base + ext
 
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # Archive previous version if a lyrics file already exists
+        for old_ext in ['.lrc', '.txt']:
+            old_path = track_base + old_ext
+            if os.path.isfile(old_path):
+                try:
+                    with open(old_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        old_content = f.read()
 
+                    if old_content.strip():
+                        old_type = 'synced' if old_ext == '.lrc' and old_content.strip().startswith('[') else 'plain'
+                        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                        database.execute(
+                            sqlite_insert(TableLyricsVersions).values(
+                                lidarrTrackId=track_id,
+                                content=old_content,
+                                lyrics_type=old_type,
+                                provider=provider_name,
+                                timestamp=datetime.now(),
+                            )
+                        )
+                        logger.debug(f"Archived previous lyrics for track {track_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to archive old lyrics: {e}")
+
+                # Remove old file (especially if different extension)
+                if old_path != filepath:
+                    try:
+                        os.remove(old_path)
+                        logger.info(f"Removed old lyrics file: {old_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove old lyrics file: {e}")
+
+        # Write the new lyrics file
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
 
@@ -211,3 +251,4 @@ def save_lyrics(track_id, lyrics_data, provider_name):
     except Exception as e:
         logger.error(f"Error saving lyrics for track {track_id}: {e}")
         return False
+

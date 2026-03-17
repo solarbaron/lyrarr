@@ -135,6 +135,43 @@ class LyricsDownload(Resource):
         return {'message': 'Failed to save lyrics'}, 500
 
 
+@api_ns_metadata.route('/metadata/lyrics/versions/<int:track_id>')
+class LyricsVersions(Resource):
+    def get(self, track_id):
+        """List previous lyrics versions stored in-app."""
+        from lyrarr.app.database import TableLyricsVersions
+        versions = database.execute(
+            select(TableLyricsVersions)
+            .where(TableLyricsVersions.lidarrTrackId == track_id)
+            .order_by(TableLyricsVersions.timestamp.desc())
+        ).scalars().all()
+        return {'versions': [v.to_dict() for v in versions], 'trackId': track_id}
+
+    def post(self, track_id):
+        """Restore a previous lyrics version by ID."""
+        data = request.get_json() or {}
+        version_id = data.get('versionId')
+        if not version_id:
+            return {'message': 'versionId is required'}, 400
+
+        from lyrarr.app.database import TableLyricsVersions
+        version = database.execute(
+            select(TableLyricsVersions).where(TableLyricsVersions.id == version_id)
+        ).scalars().first()
+        if not version or version.lidarrTrackId != track_id:
+            return {'message': 'Version not found'}, 404
+
+        lyrics_data = {}
+        if version.lyrics_type == 'synced':
+            lyrics_data['synced_lyrics'] = version.content
+        else:
+            lyrics_data['plain_lyrics'] = version.content
+
+        success = save_lyrics(track_id, lyrics_data, 'restored')
+        if success:
+            return {'message': 'Lyrics version restored'}
+        return {'message': 'Failed to restore'}, 500
+
 @api_ns_metadata.route('/metadata/lyrics/read/<int:track_id>')
 class LyricsRead(Resource):
     def get(self, track_id):

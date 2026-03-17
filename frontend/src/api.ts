@@ -65,6 +65,10 @@ export const generateSyncedLyrics = (trackId: number, data: { content: string; m
   api.post(`/metadata/lyrics/sync-generate/${trackId}`, data).then(r => r.data);
 export const batchDownload = (data: { albumIds?: number[]; artistIds?: number[]; type?: string }) =>
   api.post('/metadata/batch-download', data).then(r => r.data);
+export const getLyricsVersions = (trackId: number) =>
+  api.get(`/metadata/lyrics/versions/${trackId}`).then(r => r.data);
+export const restoreLyricsVersion = (trackId: number, versionId: number) =>
+  api.post(`/metadata/lyrics/versions/${trackId}`, { versionId }).then(r => r.data);
 
 // ---------- History ----------
 export const getHistory = () => api.get('/history').then(r => r.data as HistoryEntry[]);

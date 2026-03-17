@@ -342,7 +342,7 @@ def update_tracks(force=False):
                     'duration': meta.get('duration'),
                     'path': track_path,
                     'lyrics_status': 'available' if lyrics_exist else 'missing',
-                    'hasLyrics': str(lyrics_exist),
+                    'hasLyrics': lyrics_exist,
                     'updated_at_timestamp': datetime.now(),
                 }
 

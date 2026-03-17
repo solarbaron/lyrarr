@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Modal, Loader, Button, Group, Textarea, Select, FileButton, SegmentedControl } from '@mantine/core';
+import { Modal, Loader, Button, Group, Textarea, Select, FileButton, SegmentedControl, Collapse } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
-import { readLyrics, uploadLyrics, saveLyricsFromEditor, translateLyrics, generateSyncedLyrics } from '../api';
+import { readLyrics, uploadLyrics, saveLyricsFromEditor, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion } from '../api';
 
 interface Props {
   trackId: number;
@@ -40,11 +40,29 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
   const [translatedContent, setTranslatedContent] = useState<string | null>(null);
   const [syncModel, setSyncModel] = useState<string | null>('base');
   const [syncedPreview, setSyncedPreview] = useState<string | null>(null);
+  const [showVersions, setShowVersions] = useState(false);
 
   const { data: existingLyrics, isLoading } = useQuery({
     queryKey: ['lyrics-read', trackId],
     queryFn: () => readLyrics(trackId),
     enabled: opened,
+  });
+
+  const { data: versionsData } = useQuery({
+    queryKey: ['lyrics-versions', trackId],
+    queryFn: () => getLyricsVersions(trackId),
+    enabled: opened && showVersions,
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (versionId: number) => restoreLyricsVersion(trackId, versionId),
+    onSuccess: () => {
+      notifications.show({ title: 'Restored', message: 'Previous version restored', color: 'green' });
+      queryClient.invalidateQueries({ queryKey: ['lyrics-read', trackId] });
+      queryClient.invalidateQueries({ queryKey: ['lyrics-versions', trackId] });
+      queryClient.invalidateQueries({ queryKey: ['album', String(albumId)] });
+    },
+    onError: () => notifications.show({ title: 'Error', message: 'Failed to restore', color: 'red' }),
   });
 
   useEffect(() => {
@@ -341,6 +359,66 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
                 </Group>
               </div>
             )}
+          </div>
+
+          {/* Previous Versions */}
+          <div style={{
+            padding: 16,
+            borderRadius: 12,
+            background: 'var(--card-bg)',
+            border: '1px solid var(--card-border)',
+            marginTop: 12,
+          }}>
+            <div
+              style={{ fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={() => setShowVersions(!showVersions)}
+            >
+              <span style={{ transform: showVersions ? 'rotate(90deg)' : 'none', transition: '0.2s' }}>▶</span>
+              📜 Previous Versions
+            </div>
+            <Collapse in={showVersions}>
+              <div style={{ marginTop: 8 }}>
+                {versionsData?.versions?.length ? (
+                  versionsData.versions.slice(0, 10).map((v: any) => (
+                    <div key={v.id} style={{
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      background: 'rgba(0,0,0,0.2)',
+                      marginBottom: 6,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: 12,
+                    }}>
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)' }}>
+                          {new Date(v.timestamp).toLocaleString()}
+                        </span>
+                        <span style={{ marginLeft: 8, color: 'var(--accent-primary)' }}>
+                          {v.lyrics_type} • {v.provider}
+                        </span>
+                        <span style={{ marginLeft: 8, color: 'var(--text-secondary)' }}>
+                          {v.content.length} chars
+                        </span>
+                      </div>
+                      <Button
+                        variant="light"
+                        color="violet"
+                        size="compact-xs"
+                        onClick={() => restoreMutation.mutate(v.id)}
+                        loading={restoreMutation.isPending}
+                      >
+                        Restore
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '8px 0' }}>
+                    No previous versions yet. Versions are saved automatically when lyrics are updated.
+                  </div>
+                )}
+              </div>
+            </Collapse>
           </div>
         </>
       )}
