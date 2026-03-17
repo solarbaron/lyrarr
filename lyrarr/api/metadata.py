@@ -254,10 +254,12 @@ class LyricsUpload(Resource):
         if ext not in allowed:
             return {'message': f'Invalid format. Allowed: .lrc, .txt'}, 400
 
+        from lyrarr.metadata.language_detect import is_synced_lyrics
+
         content = file.read().decode('utf-8', errors='replace')
 
-        # Determine if synced or plain
-        is_synced = ext == 'lrc' or '[' in content[:50]
+        # Determine if synced or plain using proper detection
+        is_synced = (ext == 'lrc') or is_synced_lyrics(content)
         lyrics_data = {}
         if is_synced:
             lyrics_data['synced_lyrics'] = content
@@ -429,7 +431,7 @@ class LyricsSyncGenerate(Resource):
             lrc_lines = []
             used_segments = set()
 
-            for lyric_line in lyric_lines:
+            for line_idx, lyric_line in enumerate(lyric_lines):
                 best_score = 0
                 best_idx = -1
                 lyric_lower = lyric_line.lower()
@@ -453,7 +455,7 @@ class LyricsSyncGenerate(Resource):
                     # No good match — estimate from position ratio
                     if transcribed_segments:
                         total_duration = transcribed_segments[-1]['end']
-                        ratio = lyric_lines.index(lyric_line) / max(len(lyric_lines), 1)
+                        ratio = line_idx / max(len(lyric_lines), 1)
                         estimated_time = ratio * total_duration
                         minutes = int(estimated_time // 60)
                         seconds = estimated_time % 60
@@ -524,6 +526,8 @@ class BatchDownload(Resource):
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Batch download error: {e}")
+            finally:
+                database.remove()  # Clean up scoped session for this thread
 
         thread = Thread(target=_run, daemon=True)
         thread.start()
@@ -543,39 +547,42 @@ class LyricsBatchRedetect(Resource):
         def _run():
             import logging
             logger = logging.getLogger(__name__)
-            tracks = database.execute(
-                select(TableTracks).where(TableTracks.lyrics_status == 'available')
-            ).scalars().all()
+            try:
+                tracks = database.execute(
+                    select(TableTracks).where(TableTracks.lyrics_status == 'available')
+                ).scalars().all()
 
-            updated = 0
-            for track in tracks:
-                if not track.path:
-                    continue
-                track_base = os.path.splitext(track.path)[0]
-                content = None
-                synced = False
+                updated = 0
+                for track in tracks:
+                    if not track.path:
+                        continue
+                    track_base = os.path.splitext(track.path)[0]
+                    content = None
+                    synced = False
 
-                for ext in ['.lrc', '.txt']:
-                    fpath = track_base + ext
-                    if os.path.isfile(fpath):
-                        try:
-                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read()
-                            synced = ext == '.lrc'
-                        except Exception:
-                            pass
-                        break
+                    for ext in ['.lrc', '.txt']:
+                        fpath = track_base + ext
+                        if os.path.isfile(fpath):
+                            try:
+                                with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read()
+                                synced = ext == '.lrc'
+                            except Exception:
+                                pass
+                            break
 
-                if content:
-                    lang = detect_language(content)
-                    database.execute(
-                        update(TableTracks)
-                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
-                        .values(detected_language=lang, is_synced=synced)
-                    )
-                    updated += 1
+                    if content:
+                        lang = detect_language(content)
+                        database.execute(
+                            update(TableTracks)
+                            .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                            .values(detected_language=lang, is_synced=synced)
+                        )
+                        updated += 1
 
-            logger.info(f"Batch re-detect complete: {updated}/{len(tracks)} tracks updated")
+                logger.info(f"Batch re-detect complete: {updated}/{len(tracks)} tracks updated")
+            finally:
+                database.remove()  # Clean up scoped session for this thread
 
         thread = Thread(target=_run, daemon=True)
         thread.start()
