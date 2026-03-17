@@ -82,7 +82,9 @@ class ProfileItem(Resource):
 
         for field in ['name', 'download_covers', 'download_lyrics', 'cover_providers',
                       'lyrics_providers', 'prefer_synced_lyrics', 'cover_format', 'overwrite_existing',
-                      'embed_cover_art']:
+                      'embed_cover_art', 'lyrics_selection_mode', 'auto_detect_language',
+                      'auto_translate', 'translate_target_lang', 'translate_only_foreign',
+                      'score_threshold']:
             if field in data:
                 values[field] = data[field]
 

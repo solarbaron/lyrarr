@@ -344,6 +344,14 @@ def update_tracks(force=False):
                                 pass
                             break
 
+                # Determine lyrics_status: preserve 'blacklisted' if already set
+                if existing and existing.lyrics_status == 'blacklisted':
+                    new_lyrics_status = 'blacklisted'
+                    new_has_lyrics = False
+                else:
+                    new_lyrics_status = 'available' if lyrics_exist else 'missing'
+                    new_has_lyrics = lyrics_exist
+
                 values = {
                     'lidarrTrackId': track_id,
                     'albumId': album.lidarrAlbumId,
@@ -353,8 +361,8 @@ def update_tracks(force=False):
                     'discNumber': meta.get('mediumNumber', 1),
                     'duration': meta.get('duration'),
                     'path': track_path,
-                    'lyrics_status': 'available' if lyrics_exist else 'missing',
-                    'hasLyrics': lyrics_exist,
+                    'lyrics_status': new_lyrics_status,
+                    'hasLyrics': new_has_lyrics,
                     'detected_language': detected_lang,
                     'is_synced': is_synced_flag,
                     'updated_at_timestamp': datetime.now(),
@@ -379,10 +387,15 @@ def update_tracks(force=False):
     logger.info(f"Synced {total_synced} tracks from Lidarr")
 
     # Emit sync_complete event with stats
-    artist_count = database.execute(select(TableArtists)).scalars().all()
-    album_count = database.execute(select(TableAlbums)).scalars().all()
+    from lyrarr.app.database import func
+    artist_count = database.execute(
+        select(func.count()).select_from(TableArtists)
+    ).scalar() or 0
+    album_count = database.execute(
+        select(func.count()).select_from(TableAlbums)
+    ).scalar() or 0
     event_stream(type='sync_complete', payload={
-        'message': f'Sync complete: {len(artist_count)} artists, {len(album_count)} albums, {total_synced} tracks',
-        'artists_synced': len(artist_count),
-        'albums_synced': len(album_count),
+        'message': f'Sync complete: {artist_count} artists, {album_count} albums, {total_synced} tracks',
+        'artists_synced': artist_count,
+        'albums_synced': album_count,
     })
