@@ -5,7 +5,18 @@ import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
-import { getArtist, getAlbums, getProfiles, massAssignProfile } from '../api';
+import { getArtist, getAlbums, getProfiles, massAssignProfile, updateArtist } from '../api';
+
+const LANGUAGES = [
+  { value: '', label: 'Use profile default' },
+  { value: 'en', label: 'English' }, { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' }, { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' }, { value: 'pt', label: 'Portuguese' },
+  { value: 'ja', label: 'Japanese' }, { value: 'ko', label: 'Korean' },
+  { value: 'zh-cn', label: 'Chinese (Simplified)' }, { value: 'ru', label: 'Russian' },
+  { value: 'ar', label: 'Arabic' }, { value: 'hi', label: 'Hindi' },
+  { value: 'tr', label: 'Turkish' }, { value: 'nl', label: 'Dutch' },
+];
 
 export default function ArtistDetailPage() {
   const { artistId } = useParams();
@@ -115,6 +126,33 @@ export default function ArtistDetailPage() {
                 Set Profile
               </Button>
             </Group>
+
+            {/* Per-artist language override */}
+            <div style={{
+              marginTop: 16, padding: 12, borderRadius: 10,
+              background: 'rgba(139,61,255,0.06)', border: '1px solid rgba(139,61,255,0.15)',
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--accent-primary)' }}>
+                🌐 Language Override
+              </div>
+              <Group gap="sm">
+                <Select
+                  placeholder="Translation target..."
+                  description="Override profile's target language for this artist"
+                  data={LANGUAGES}
+                  value={artist.translate_target_override || ''}
+                  onChange={(v) => {
+                    updateArtist(Number(artistId), { translate_target_override: v || null });
+                    queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
+                    notifications.show({ title: 'Updated', message: 'Language override saved', color: 'green' });
+                  }}
+                  size="xs"
+                  w={200}
+                  clearable
+                  styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+                />
+              </Group>
+            </div>
 
             {artist.overview && (
               <p style={{ marginTop: 12, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>

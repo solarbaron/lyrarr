@@ -2,7 +2,7 @@
 
 from flask import request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import database, TableArtists, TableProfiles, select, func
+from lyrarr.app.database import database, TableArtists, TableProfiles, select, update, func
 
 api_ns_artists = Namespace('artists', description='Artist operations')
 
@@ -79,3 +79,20 @@ class ArtistItem(Resource):
             d['profileName'] = profiles.get(row.profileId, 'None')
             return d
         return {'message': 'Artist not found'}, 404
+
+    def put(self, artist_id):
+        """Update artist settings (language override, profile, etc.)."""
+        from datetime import datetime
+        data = request.get_json() or {}
+        allowed = ['language_override', 'translate_target_override', 'profileId']
+        values = {k: data[k] for k in allowed if k in data}
+        if not values:
+            return {'message': 'No valid fields to update'}, 400
+
+        values['updated_at_timestamp'] = datetime.now()
+        database.execute(
+            update(TableArtists)
+            .where(TableArtists.lidarrArtistId == artist_id)
+            .values(**values)
+        )
+        return {'message': 'Artist updated'}

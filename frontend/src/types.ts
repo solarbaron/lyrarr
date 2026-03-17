@@ -12,6 +12,8 @@ export interface Artist {
   poster: string;
   tags: string;
   metadata_status: string;
+  language_override: string | null;
+  translate_target_override: string | null;
   profileId: number | null;
   created_at_timestamp: string | null;
   updated_at_timestamp: string | null;
@@ -56,6 +58,8 @@ export interface Track {
   path: string;
   hasLyrics: boolean;
   lyrics_status: 'missing' | 'available' | 'manual' | 'blacklisted';
+  detected_language: string | null;
+  is_synced: boolean;
   created_at_timestamp: string | null;
   updated_at_timestamp: string | null;
 }
@@ -69,6 +73,12 @@ export interface Profile {
   cover_providers: string;
   lyrics_providers: string;
   prefer_synced_lyrics: boolean;
+  lyrics_selection_mode: string;
+  auto_detect_language: boolean;
+  auto_translate: string;
+  translate_target_lang: string;
+  translate_only_foreign: boolean;
+  score_threshold: number;
   cover_format: string;
   overwrite_existing: boolean;
   embed_cover_art: boolean;

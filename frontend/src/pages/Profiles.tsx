@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Button, TextInput, Modal, Checkbox, Group, Menu, MultiSelect, Select } from '@mantine/core';
+import { Loader, Button, TextInput, NumberInput, Modal, Checkbox, Group, Menu, MultiSelect, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignProfile } from '../api';
@@ -16,6 +16,7 @@ interface ProfileForm {
   auto_translate: string;
   translate_target_lang: string;
   translate_only_foreign: boolean;
+  score_threshold: number;
   cover_format: string;
   overwrite_existing: boolean;
   embed_cover_art: boolean;
@@ -68,6 +69,7 @@ const DEFAULT_FORM: ProfileForm = {
   auto_translate: 'off',
   translate_target_lang: 'en',
   translate_only_foreign: true,
+  score_threshold: 0,
   cover_format: 'jpg',
   overwrite_existing: false,
   embed_cover_art: false,
@@ -154,6 +156,7 @@ export default function ProfilesPage() {
       auto_translate: profile.auto_translate || 'off',
       translate_target_lang: profile.translate_target_lang || 'en',
       translate_only_foreign: profile.translate_only_foreign ?? true,
+      score_threshold: profile.score_threshold ?? 0,
       cover_format: profile.cover_format || 'jpg',
       overwrite_existing: profile.overwrite_existing ?? false,
       embed_cover_art: profile.embed_cover_art ?? false,
@@ -315,6 +318,17 @@ export default function ProfilesPage() {
             ]}
             value={form.lyrics_selection_mode}
             onChange={(v) => setForm({ ...form, lyrics_selection_mode: v || 'best_score' })}
+            mb="md"
+            styles={inputStyle}
+          />
+          <NumberInput
+            label="Minimum Score Threshold"
+            description="Reject lyrics below this match % (0 = accept all)"
+            value={form.score_threshold}
+            onChange={(v) => setForm({ ...form, score_threshold: Number(v) || 0 })}
+            min={0}
+            max={100}
+            step={5}
             mb="md"
             styles={inputStyle}
           />

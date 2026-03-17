@@ -2,9 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SimpleGrid, Loader, Button, Progress } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate } from '@fortawesome/free-solid-svg-icons';
+import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate, faLanguage } from '@fortawesome/free-solid-svg-icons';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { getArtists, getAlbums, getTracks, getWantedCovers, getWantedLyrics, getSystemStatus, triggerSync, getDashboardStats } from '../api';
+import { getArtists, getAlbums, getTracks, getWantedCovers, getWantedLyrics, getSystemStatus, triggerSync, getDashboardStats, getLanguageStats, batchRedetectLanguages } from '../api';
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -15,6 +15,7 @@ export default function DashboardPage() {
   const { data: wantedLyricsResult } = useQuery({ queryKey: ['wanted-lyrics'], queryFn: () => getWantedLyrics({ page: 1, pageSize: 1 }) });
   const { data: status } = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus });
   const { data: chartData } = useQuery({ queryKey: ['dashboard-stats'], queryFn: getDashboardStats });
+  const { data: langStats } = useQuery({ queryKey: ['language-stats'], queryFn: getLanguageStats });
 
   const syncMutation = useMutation({
     mutationFn: triggerSync,
@@ -30,6 +31,14 @@ export default function DashboardPage() {
     },
   });
 
+  const redetectMutation = useMutation({
+    mutationFn: batchRedetectLanguages,
+    onSuccess: () => {
+      notifications.show({ title: 'Started', message: 'Re-detecting languages for all lyrics...', color: 'violet' });
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 10000);
+    },
+  });
+
   const stats = [
     { label: 'Artists', value: artistsResult?.total || 0, icon: faUser, color: '#8b3dff' },
     { label: 'Albums', value: albumsResult?.total || 0, icon: faCompactDisc, color: '#6a1bfa' },
@@ -37,6 +46,11 @@ export default function DashboardPage() {
     { label: 'Missing Covers', value: wantedCoversResult?.total || 0, icon: faMagnifyingGlass, color: '#f87171' },
     { label: 'Missing Lyrics', value: wantedLyricsResult?.total || 0, icon: faMagnifyingGlass, color: '#fbbf24' },
   ];
+
+  // Prepare language chart data
+  const langEntries = langStats?.languages ? Object.entries(langStats.languages as Record<string, number>)
+    .sort((a, b) => b[1] - a[1]) : [];
+  const langColors = ['#8b3dff', '#6a1bfa', '#f87171', '#fbbf24', '#34d399', '#38bdf8', '#fb923c', '#a78bfa', '#e879f9', '#94a3b8'];
 
   return (
     <div className="fade-in">
@@ -78,6 +92,92 @@ export default function DashboardPage() {
           </div>
         ))}
       </SimpleGrid>
+
+      {/* Lyrics Intelligence Stats */}
+      {langStats && langStats.total_available > 0 && (
+        <div className="stat-card" style={{ marginTop: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <FontAwesomeIcon icon={faLanguage} style={{ color: '#8b3dff' }} />
+              Lyrics Intelligence
+            </h3>
+            <Button
+              variant="light" color="violet" size="xs"
+              onClick={() => redetectMutation.mutate()}
+              loading={redetectMutation.isPending}
+            >
+              Re-detect Languages
+            </Button>
+          </div>
+
+          {/* Quick Stats Row */}
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" mb="lg">
+            <div style={{ textAlign: 'center', padding: 12, borderRadius: 10, background: 'rgba(139,61,255,0.06)' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent-primary)' }}>{langStats.total_available}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Available</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 12, borderRadius: 10, background: 'rgba(52,211,153,0.06)' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#34d399' }}>{langStats.synced}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Synced (LRC)</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 12, borderRadius: 10, background: 'rgba(251,191,36,0.06)' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#fbbf24' }}>{langStats.plain}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Plain Text</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 12, borderRadius: 10, background: 'rgba(248,113,113,0.06)' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#f87171' }}>{langStats.total_missing}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Missing</div>
+            </div>
+          </SimpleGrid>
+
+          {/* Language Distribution + Provider Distribution side by side */}
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            {/* Language Distribution */}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>
+                Language Distribution
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {langEntries.slice(0, 10).map(([lang, count], i) => (
+                  <div key={lang}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase' }}>{lang}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                        {count} ({Math.round((count as number) / langStats.total_available * 100)}%)
+                      </span>
+                    </div>
+                    <Progress value={(count as number) / langStats.total_available * 100}
+                      color={langColors[i % langColors.length]} size="sm" radius="xl" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Provider Distribution */}
+            {langStats.providers && Object.keys(langStats.providers).length > 0 && (
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>
+                  Provider Distribution
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {Object.entries(langStats.providers as Record<string, number>)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([provider, count], i) => (
+                    <div key={provider}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 500 }}>{provider}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{count} tracks</span>
+                      </div>
+                      <Progress value={Math.min(100, (count as number) / Math.max(1, ...Object.values(langStats.providers as Record<string, number>)) * 100)}
+                        color={langColors[i % langColors.length]} size="sm" radius="xl" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </SimpleGrid>
+        </div>
+      )}
 
       {/* Downloads Over Time Chart */}
       {(chartData?.downloadHistory?.length ?? 0) > 0 && (

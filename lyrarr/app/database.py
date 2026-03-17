@@ -84,6 +84,7 @@ class TableProfiles(Base):
     auto_translate = mapped_column(Text, default='off')  # 'off' | 'dual' | 'replace'
     translate_target_lang = mapped_column(Text, default='en')
     translate_only_foreign = mapped_column(Boolean, default=True)
+    score_threshold = mapped_column(Integer, default=0)  # minimum match score 0-100, 0 = accept all
     cover_format = mapped_column(Text, default='jpg')
     overwrite_existing = mapped_column(Boolean, default=False)
     embed_cover_art = mapped_column(Boolean, default=False)
@@ -108,6 +109,8 @@ class TableArtists(Base):
     poster = mapped_column(Text)
     tags = mapped_column(Text)
     metadata_status = mapped_column(Text, default='unknown')
+    language_override = mapped_column(Text, nullable=True)  # per-artist language override (ISO 639-1)
+    translate_target_override = mapped_column(Text, nullable=True)  # per-artist translation target
     profileId = mapped_column(Integer, ForeignKey('table_profiles.id', ondelete='SET NULL'), nullable=True)
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
@@ -210,6 +213,7 @@ class TableLyricsVersions(Base):
     content = mapped_column(Text, nullable=False)
     lyrics_type = mapped_column(Text, nullable=False)  # 'synced' or 'plain'
     provider = mapped_column(Text)
+    translated_from = mapped_column(Text, nullable=True)  # source language if this is a translation
     timestamp = mapped_column(DateTime, default=datetime.now)
 
     def to_dict(self):

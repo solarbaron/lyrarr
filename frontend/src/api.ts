@@ -95,6 +95,9 @@ export const testNotification = () => api.post('/system/test/notification').then
 export const getProviderStats = () => api.get('/system/provider-stats').then(r => r.data);
 export const exportBackup = () => api.get('/system/backup').then(r => r.data);
 export const importBackup = (data: Record<string, unknown>) => api.post('/system/restore', data).then(r => r.data);
+export const batchRedetectLanguages = () => api.post('/metadata/lyrics/batch-redetect').then(r => r.data);
+export const getLanguageStats = () => api.get('/metadata/lyrics/language-stats').then(r => r.data);
+export const updateArtist = (id: number, data: Record<string, unknown>) => api.put(`/artists/${id}`, data).then(r => r.data);
 
 // ---------- Search ----------
 export const globalSearch = (q: string) => api.get('/search', { params: { q } }).then(r => r.data);

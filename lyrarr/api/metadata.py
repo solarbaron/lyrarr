@@ -505,3 +505,109 @@ class BatchDownload(Resource):
         thread.start()
 
         return {'message': f'Batch download started for {count} album(s)', 'albumCount': count}
+
+
+@api_ns_metadata.route('/metadata/lyrics/batch-redetect')
+class LyricsBatchRedetect(Resource):
+    def post(self):
+        """Re-detect language and synced status for all existing lyrics files."""
+        import os
+        from lyrarr.app.database import update
+        from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+        from threading import Thread
+
+        def _run():
+            import logging
+            logger = logging.getLogger(__name__)
+            tracks = database.execute(
+                select(TableTracks).where(TableTracks.lyrics_status == 'available')
+            ).scalars().all()
+
+            updated = 0
+            for track in tracks:
+                if not track.path:
+                    continue
+                track_base = os.path.splitext(track.path)[0]
+                content = None
+                synced = False
+
+                for ext in ['.lrc', '.txt']:
+                    fpath = track_base + ext
+                    if os.path.isfile(fpath):
+                        try:
+                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            synced = ext == '.lrc'
+                        except Exception:
+                            pass
+                        break
+
+                if content:
+                    lang = detect_language(content)
+                    database.execute(
+                        update(TableTracks)
+                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                        .values(detected_language=lang, is_synced=synced)
+                    )
+                    updated += 1
+
+            logger.info(f"Batch re-detect complete: {updated}/{len(tracks)} tracks updated")
+
+        thread = Thread(target=_run, daemon=True)
+        thread.start()
+
+        return {'message': 'Batch language re-detection started'}
+
+
+@api_ns_metadata.route('/metadata/lyrics/language-stats')
+class LyricsLanguageStats(Resource):
+    def get(self):
+        """Get language distribution, synced/plain breakdown, and provider stats."""
+        from lyrarr.app.database import func, TableHistory
+
+        # Language distribution
+        lang_rows = database.execute(
+            select(TableTracks.detected_language, func.count())
+            .where(TableTracks.lyrics_status == 'available')
+            .group_by(TableTracks.detected_language)
+        ).all()
+        languages = {(row[0] or 'unknown'): row[1] for row in lang_rows}
+
+        # Synced vs plain
+        total_available = database.execute(
+            select(func.count()).select_from(TableTracks)
+            .where(TableTracks.lyrics_status == 'available')
+        ).scalar() or 0
+        total_synced = database.execute(
+            select(func.count()).select_from(TableTracks)
+            .where(TableTracks.lyrics_status == 'available')
+            .where(TableTracks.is_synced == True)
+        ).scalar() or 0
+        total_plain = total_available - total_synced
+
+        # Provider distribution (from history)
+        provider_rows = database.execute(
+            select(TableHistory.provider, func.count())
+            .where(TableHistory.metadata_type == 'lyrics')
+            .group_by(TableHistory.provider)
+        ).all()
+        providers = {(row[0] or 'unknown'): row[1] for row in provider_rows}
+
+        # Total tracks
+        total_tracks = database.execute(
+            select(func.count()).select_from(TableTracks)
+        ).scalar() or 0
+        total_missing = database.execute(
+            select(func.count()).select_from(TableTracks)
+            .where(TableTracks.lyrics_status == 'missing')
+        ).scalar() or 0
+
+        return {
+            'languages': languages,
+            'synced': total_synced,
+            'plain': total_plain,
+            'total_available': total_available,
+            'total_tracks': total_tracks,
+            'total_missing': total_missing,
+            'providers': providers,
+        }

@@ -76,6 +76,7 @@ def _effective_settings(album, profile):
         'auto_translate': getattr(profile, 'auto_translate', 'off') or 'off',
         'translate_target_lang': getattr(profile, 'translate_target_lang', 'en') or 'en',
         'translate_only_foreign': getattr(profile, 'translate_only_foreign', True),
+        'score_threshold': getattr(profile, 'score_threshold', 0) or 0,
         'cover_providers': profile.cover_providers or '["musicbrainz","deezer","itunes","fanart","theaudiodb"]',
         'lyrics_providers': profile.lyrics_providers or '["lrclib","musixmatch","netease","genius"]',
         'overwrite_existing': profile.overwrite_existing or False,
@@ -368,6 +369,12 @@ def download_missing_lyrics(album_ids=None):
         lyrics_data = all_results[0]
         used_provider = lyrics_data.get('_provider', 'unknown')
 
+        # Score threshold: reject if best result is below minimum
+        score_threshold = eff.get('score_threshold', 0)
+        if score_threshold > 0 and lyrics_data.get('score', 0) < score_threshold:
+            logger.debug(f"Skipping '{track.title}' — best score {lyrics_data.get('score', 0)} below threshold {score_threshold}")
+            continue
+
         if lyrics_data and track.path:
             try:
                 synced = lyrics_data.get('synced_lyrics')
@@ -471,6 +478,10 @@ def download_missing_lyrics(album_ids=None):
                     target_lang = eff.get('translate_target_lang', 'en')
                     only_foreign = eff.get('translate_only_foreign', True)
 
+                    # Per-artist override takes priority
+                    if artist and getattr(artist, 'translate_target_override', None):
+                        target_lang = artist.translate_target_override
+
                     should_translate = not only_foreign or (detected_lang != target_lang)
                     if should_translate:
                         try:
@@ -479,6 +490,19 @@ def download_missing_lyrics(album_ids=None):
                                 content, target_lang, auto_translate
                             )
                             if translated:
+                                # Cache original as a version before overwriting
+                                from lyrarr.app.database import TableLyricsVersions
+                                from sqlalchemy.dialects.sqlite import insert as ver_insert
+                                database.execute(
+                                    ver_insert(TableLyricsVersions).values(
+                                        lidarrTrackId=track.lidarrTrackId,
+                                        content=content,
+                                        lyrics_type='synced' if is_synced_file else 'plain',
+                                        provider=used_provider,
+                                        translated_from=detected_lang,
+                                        timestamp=datetime.now(),
+                                    )
+                                )
                                 with open(filepath, 'w', encoding='utf-8') as f:
                                     f.write(translated)
                                 logger.info(f"  → Auto-translated '{track.title}' ({detected_lang} → {target_lang}, mode={auto_translate})")
