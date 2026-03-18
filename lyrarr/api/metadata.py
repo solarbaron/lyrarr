@@ -217,14 +217,16 @@ class LyricsRead(Resource):
         content = None
         lyrics_type = None
 
-        # Try .lrc first, then .txt
-        for ext, ltype in [('.lrc', 'synced'), ('.txt', 'plain')]:
+        # Try .lrc first, then legacy .txt
+        for ext in ['.lrc', '.txt']:
             filepath = track_base + ext
             if os.path.exists(filepath):
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         content = f.read()
-                    lyrics_type = ltype
+                    # Determine sync type from content, not extension
+                    from lyrarr.metadata.language_detect import is_synced_lyrics
+                    lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
                     break
                 except Exception:
                     pass
@@ -263,8 +265,8 @@ class LyricsUpload(Resource):
 
         content = file.read().decode('utf-8', errors='replace')
 
-        # Determine if synced or plain using proper detection
-        is_synced = (ext == 'lrc') or is_synced_lyrics(content)
+        # Determine if synced or plain from content, not extension
+        is_synced = is_synced_lyrics(content)
         lyrics_data = {}
         if is_synced:
             lyrics_data['synced_lyrics'] = content
@@ -571,7 +573,8 @@ class LyricsBatchRedetect(Resource):
                             try:
                                 with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
                                     content = f.read()
-                                synced = ext == '.lrc'
+                                # Determine sync status from content, not extension
+                                synced = is_synced_lyrics(content)
                             except Exception:
                                 pass
                             break
@@ -688,7 +691,7 @@ class LyricsSidecarImport(Resource):
                                     content = f.read()
                                 if content.strip():
                                     lang = detect_language(content)
-                                    synced = is_synced_lyrics(content) if ext == '.lrc' else False
+                                    synced = is_synced_lyrics(content)
                                     db_session.execute(
                                         update(TableTracks)
                                         .where(TableTracks.lidarrTrackId == track.lidarrTrackId)

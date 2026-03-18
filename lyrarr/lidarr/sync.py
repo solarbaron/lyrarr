@@ -333,12 +333,12 @@ def update_tracks(force=False):
                         lyrics_path = track_base + ext
                         if os.path.isfile(lyrics_path):
                             lyrics_exist = True
-                            is_synced_flag = ext == '.lrc'
-                            # Detect language from existing lyrics
+                            # Detect sync status from content, not extension
                             try:
-                                from lyrarr.metadata.language_detect import detect_language
+                                from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
                                 with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as lf:
                                     lyrics_content = lf.read()
+                                is_synced_flag = is_synced_lyrics(lyrics_content)
                                 detected_lang = detect_language(lyrics_content)
                             except Exception:
                                 pass

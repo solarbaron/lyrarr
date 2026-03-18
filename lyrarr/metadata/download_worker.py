@@ -384,23 +384,21 @@ def download_missing_lyrics(album_ids=None):
                 # Determine content based on what's available and selection mode
                 if synced and (selection_mode != 'prefer_plain'):
                     content = synced
-                    ext = '.lrc'
-                    is_synced_file = True
                 elif plain:
                     content = plain
-                    ext = '.txt'
-                    is_synced_file = False
                 elif synced:  # prefer_plain but only synced available
                     content = synced
-                    ext = '.lrc'
-                    is_synced_file = True
                 else:
                     continue
 
-                track_base = os.path.splitext(track.path)[0]
-                filepath = track_base + ext
+                # Always save as .lrc — sync status determined from content
+                from lyrarr.metadata.language_detect import is_synced_lyrics
+                is_synced_file = is_synced_lyrics(content)
 
-                # Check if lyrics file already exists on disk
+                track_base = os.path.splitext(track.path)[0]
+                filepath = track_base + '.lrc'
+
+                # Check if lyrics file already exists on disk (.lrc or legacy .txt)
                 lrc_exists = os.path.isfile(track_base + '.lrc')
                 txt_exists = os.path.isfile(track_base + '.txt')
                 if (lrc_exists or txt_exists) and not eff['overwrite_existing']:
@@ -417,7 +415,7 @@ def download_missing_lyrics(album_ids=None):
                     logger.debug(f"Lyrics already exist on disk for '{track.title}', updated DB status")
                     continue
 
-                # Remove old lyrics file with different extension
+                # Remove any old lyrics file (including legacy .txt)
                 for old_ext in ['.lrc', '.txt']:
                     old_path = track_base + old_ext
                     if os.path.isfile(old_path) and old_path != filepath:

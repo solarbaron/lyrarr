@@ -151,11 +151,11 @@ def save_cover_art(album_id, image_data, provider_name):
 
 
 def save_lyrics(track_id, lyrics_data, provider_name):
-    """Save lyrics to disk for a track.
+    """Save lyrics to disk as .lrc for a track.
 
     - Archives the previous version in the database (TableLyricsVersions)
-    - Removes any old lyrics file with a different extension (.lrc/.txt)
-    - Writes only one lyrics file per track
+    - Removes any legacy .txt lyrics file
+    - Always saves as .lrc; sync status determined from content
     """
     from lyrarr.app.database import TableLyricsVersions
 
@@ -168,23 +168,23 @@ def save_lyrics(track_id, lyrics_data, provider_name):
         return False
 
     try:
-        # Determine file extension and content
+        # Determine content (prefer synced over plain)
         synced = lyrics_data.get('synced_lyrics')
         plain = lyrics_data.get('plain_lyrics')
 
         if synced:
             content = synced
-            ext = '.lrc'
-            lyrics_type = 'synced'
         elif plain:
             content = plain
-            ext = '.txt'
-            lyrics_type = 'plain'
         else:
             return False
 
+        # Always save as .lrc — sync status is determined from content
+        from lyrarr.metadata.language_detect import is_synced_lyrics
+        lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
+
         track_base = os.path.splitext(track.path)[0]
-        filepath = track_base + ext
+        filepath = track_base + '.lrc'
 
         # Archive previous version if a lyrics file already exists
         for old_ext in ['.lrc', '.txt']:
@@ -195,7 +195,7 @@ def save_lyrics(track_id, lyrics_data, provider_name):
                         old_content = f.read()
 
                     if old_content.strip():
-                        old_type = 'synced' if old_ext == '.lrc' and old_content.strip().startswith('[') else 'plain'
+                        old_type = 'synced' if is_synced_lyrics(old_content) else 'plain'
                         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
                         database.execute(
                             sqlite_insert(TableLyricsVersions).values(
