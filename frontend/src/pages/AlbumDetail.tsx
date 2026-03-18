@@ -168,6 +168,8 @@ export default function AlbumDetailPage() {
                 onClick={() => {
                   batchDownload({ albumIds: [Number(albumId)], type: 'lyrics' }).then(() => {
                     notifications.show({ title: 'Started', message: 'Downloading missing lyrics for this album...', color: 'violet' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start lyrics download', color: 'red' });
                   });
                 }}
               >
@@ -180,11 +182,13 @@ export default function AlbumDetailPage() {
                 leftSection={<FontAwesomeIcon icon={faLanguage} />}
                 onClick={() => {
                   batchTranslate({ albumIds: [Number(albumId)] }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || 'Translating undetected lyrics...', color: 'cyan' });
+                    notifications.show({ title: 'Started', message: r.message || 'Translating lyrics...', color: 'cyan' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start translation', color: 'red' });
                   });
                 }}
               >
-                Translate Undetected
+                Translate Lyrics
               </Button>
               <Button
                 variant="light"
@@ -194,6 +198,8 @@ export default function AlbumDetailPage() {
                 onClick={() => {
                   batchSyncGenerate({ albumIds: [Number(albumId)] }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start timing generation', color: 'red' });
                   });
                 }}
               >

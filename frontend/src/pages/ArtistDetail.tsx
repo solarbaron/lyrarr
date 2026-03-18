@@ -133,6 +133,8 @@ export default function ArtistDetailPage() {
                 onClick={() => {
                   batchDownload({ artistIds: [Number(artistId)], type: 'lyrics' }).then(() => {
                     notifications.show({ title: 'Started', message: 'Downloading missing lyrics for all albums by this artist...', color: 'violet' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start download', color: 'red' });
                   });
                 }}
               >
@@ -146,6 +148,8 @@ export default function ArtistDetailPage() {
                 onClick={() => {
                   batchDownload({ artistIds: [Number(artistId)], type: 'all' }).then(() => {
                     notifications.show({ title: 'Started', message: 'Downloading missing covers + lyrics for this artist...', color: 'violet' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start download', color: 'red' });
                   });
                 }}
               >
@@ -158,11 +162,13 @@ export default function ArtistDetailPage() {
                 leftSection={<FontAwesomeIcon icon={faLanguage} />}
                 onClick={() => {
                   batchTranslate({ artistIds: [Number(artistId)] }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || 'Translating undetected lyrics...', color: 'cyan' });
+                    notifications.show({ title: 'Started', message: r.message || 'Translating lyrics...', color: 'cyan' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start translation', color: 'red' });
                   });
                 }}
               >
-                Translate Undetected
+                Translate Lyrics
               </Button>
               <Button
                 variant="light"
@@ -172,6 +178,8 @@ export default function ArtistDetailPage() {
                 onClick={() => {
                   batchSyncGenerate({ artistIds: [Number(artistId)] }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start timing generation', color: 'red' });
                   });
                 }}
               >

@@ -316,6 +316,10 @@ export default function WantedPage() {
                   batchSyncGenerate({ trackIds: Array.from(selectedTracks) }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || `Syncing ${selectedTracks.size} track(s)...`, color: 'teal' });
                     setSelectedTracks(new Set());
+                    queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start sync generation', color: 'red' });
                   });
                 }}
               >
@@ -328,6 +332,10 @@ export default function WantedPage() {
                   const allIds = untimedTracks.map((t: any) => t.lidarrTrackId);
                   batchSyncGenerate({ trackIds: allIds }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || `Syncing all ${allIds.length} track(s)...`, color: 'teal' });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start sync generation', color: 'red' });
                   });
                 }}
               >
@@ -452,6 +460,9 @@ export default function WantedPage() {
                     notifications.show({ title: 'Started', message: `Detecting language for ${selectedLangTracks.size} track(s)...`, color: 'cyan' });
                     setSelectedLangTracks(new Set());
                     queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start language detection', color: 'red' });
                   });
                 }}
               >
@@ -465,6 +476,9 @@ export default function WantedPage() {
                   batchRedetectLanguages({ trackIds: allIds }).then(() => {
                     notifications.show({ title: 'Started', message: `Detecting language for all ${allIds.length} track(s)...`, color: 'cyan' });
                     queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start language detection', color: 'red' });
                   });
                 }}
               >
