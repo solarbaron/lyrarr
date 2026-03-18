@@ -542,6 +542,353 @@ class BatchDownload(Resource):
         return {'message': f'Batch download started for {count} album(s)', 'albumCount': count}
 
 
+@api_ns_metadata.route('/metadata/lyrics/batch-translate')
+class BatchTranslate(Resource):
+    def post(self):
+        """Translate lyrics in bulk for tracks with no detected_language.
+
+        Body: { albumIds?: int[], artistIds?: int[], targetLang?: str }
+        Only processes tracks where lyrics_status='available' AND detected_language IS NULL.
+        Runs in a background thread.
+        """
+        from threading import Thread
+        from lyrarr.app.event_handler import event_stream
+        from lyrarr.app.database import update
+
+        data = request.get_json() or {}
+        album_ids = data.get('albumIds', [])
+        artist_ids = data.get('artistIds', [])
+        target_lang = data.get('targetLang', 'en')
+
+        if not album_ids and not artist_ids:
+            return {'message': 'albumIds or artistIds required'}, 400
+
+        # Resolve artist → album IDs
+        if artist_ids:
+            albums = database.execute(
+                select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
+            ).scalars().all()
+            album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
+
+        # Find eligible tracks: available lyrics but no detected language
+        tracks = database.execute(
+            select(TableTracks).where(
+                TableTracks.lidarrAlbumId.in_(album_ids),
+                TableTracks.lyrics_status == 'available',
+                TableTracks.detected_language.is_(None),
+            )
+        ).scalars().all()
+
+        track_list = [(t.lidarrTrackId, t.path, t.title) for t in tracks]
+        count = len(track_list)
+
+        if count == 0:
+            return {'message': 'No eligible tracks found (all tracks already have detected language)'}, 200
+
+        def _run():
+            import os
+            import logging
+            log = logging.getLogger(__name__)
+            translated = 0
+            failed = 0
+
+            try:
+                from deep_translator import GoogleTranslator
+                from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+
+                event_stream(type='batch_translate_start', payload={
+                    'message': f'Translating lyrics for {count} track(s)',
+                    'total': count,
+                })
+
+                for track_id, track_path, track_title in track_list:
+                    try:
+                        if not track_path:
+                            continue
+
+                        # Read current lyrics file
+                        track_base = os.path.splitext(track_path)[0]
+                        lyrics_path = None
+                        content = None
+                        for ext in ['.lrc', '.txt']:
+                            p = track_base + ext
+                            if os.path.isfile(p):
+                                lyrics_path = p
+                                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read()
+                                break
+
+                        if not content or not content.strip():
+                            continue
+
+                        # Detect language first
+                        lang = detect_language(content)
+                        if lang:
+                            # Language detected — update DB and skip translation
+                            database.execute(
+                                update(TableTracks)
+                                .where(TableTracks.lidarrTrackId == track_id)
+                                .values(detected_language=lang)
+                            )
+                            continue
+
+                        # Translate line by line
+                        translator = GoogleTranslator(source='auto', target=target_lang)
+                        lines = content.split('\n')
+                        translated_lines = []
+
+                        for line in lines:
+                            stripped = line.strip()
+                            if not stripped:
+                                translated_lines.append('')
+                                continue
+
+                            # Handle LRC timestamp lines
+                            if stripped.startswith('[') and ']' in stripped:
+                                bracket_end = stripped.index(']') + 1
+                                tag = stripped[:bracket_end]
+                                text = stripped[bracket_end:].strip()
+
+                                if text and not tag.startswith('[ti:') and not tag.startswith('[ar:') and not tag.startswith('[al:'):
+                                    try:
+                                        t = translator.translate(text)
+                                        translated_lines.append(f"{tag} {t}")
+                                    except Exception:
+                                        translated_lines.append(stripped)
+                                else:
+                                    translated_lines.append(stripped)
+                            else:
+                                try:
+                                    t = translator.translate(stripped)
+                                    translated_lines.append(t)
+                                except Exception:
+                                    translated_lines.append(stripped)
+
+                        translated_content = '\n'.join(translated_lines)
+
+                        # Save translated lyrics using save_lyrics for versioning
+                        is_synced = is_synced_lyrics(translated_content)
+                        lyrics_data = {
+                            'synced_lyrics': translated_content if is_synced else None,
+                            'plain_lyrics': None if is_synced else translated_content,
+                        }
+                        save_lyrics(track_id, lyrics_data, f'batch-translate-{target_lang}')
+
+                        # Update language in DB
+                        database.execute(
+                            update(TableTracks)
+                            .where(TableTracks.lidarrTrackId == track_id)
+                            .values(detected_language=target_lang)
+                        )
+
+                        translated += 1
+                        log.debug(f"Batch translate: translated '{track_title}' → {target_lang}")
+
+                    except Exception as e:
+                        failed += 1
+                        log.warning(f"Batch translate failed for '{track_title}': {e}")
+
+                event_stream(type='batch_translate_complete', payload={
+                    'translated': translated,
+                    'failed': failed,
+                    'message': f'Batch translate: {translated} translated, {failed} failed',
+                })
+
+            except ImportError:
+                log.error("Batch translate requires deep-translator. Install with: pip install deep-translator")
+            except Exception as e:
+                log.error(f"Batch translate error: {e}")
+            finally:
+                database.remove()
+
+        thread = Thread(target=_run, daemon=True)
+        thread.start()
+
+        return {'message': f'Batch translate started for {count} track(s)', 'trackCount': count}
+
+
+@api_ns_metadata.route('/metadata/lyrics/batch-sync-generate')
+class BatchSyncGenerate(Resource):
+    def post(self):
+        """Generate synced LRC in bulk for tracks with untimed lyrics.
+
+        Body: { albumIds?: int[], artistIds?: int[] }
+        Only processes tracks where lyrics_status='available' AND is_synced=False.
+        Uses Whisper to transcribe audio and align with existing plain lyrics.
+        Runs in a background thread.
+        """
+        from threading import Thread
+        from lyrarr.app.event_handler import event_stream
+        from lyrarr.app.database import update
+        from lyrarr.app.config import settings
+
+        data = request.get_json() or {}
+        album_ids = data.get('albumIds', [])
+        artist_ids = data.get('artistIds', [])
+
+        if not album_ids and not artist_ids:
+            return {'message': 'albumIds or artistIds required'}, 400
+
+        # Resolve artist → album IDs
+        if artist_ids:
+            albums = database.execute(
+                select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
+            ).scalars().all()
+            album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
+
+        # Find eligible tracks: available lyrics but not synced
+        tracks = database.execute(
+            select(TableTracks).where(
+                TableTracks.lidarrAlbumId.in_(album_ids),
+                TableTracks.lyrics_status == 'available',
+                TableTracks.is_synced == False,
+            )
+        ).scalars().all()
+
+        track_list = [(t.lidarrTrackId, t.path, t.title) for t in tracks]
+        count = len(track_list)
+
+        if count == 0:
+            return {'message': 'No eligible tracks found (all available lyrics are already synced)'}, 200
+
+        model_size = settings.metadata.whisper.model
+        device = settings.metadata.whisper.device
+        compute_type = settings.metadata.whisper.compute_type
+
+        def _run():
+            import os
+            import logging
+            from difflib import SequenceMatcher
+            log = logging.getLogger(__name__)
+            synced = 0
+            failed = 0
+
+            try:
+                from faster_whisper import WhisperModel
+
+                event_stream(type='batch_sync_start', payload={
+                    'message': f'Generating synced lyrics for {count} track(s)',
+                    'total': count,
+                })
+
+                # Load model once for the entire batch
+                model = WhisperModel(model_size, device=device, compute_type=compute_type)
+
+                for track_id, track_path, track_title in track_list:
+                    try:
+                        if not track_path or not os.path.isfile(track_path):
+                            continue
+
+                        # Read current lyrics file
+                        track_base = os.path.splitext(track_path)[0]
+                        content = None
+                        for ext in ['.lrc', '.txt']:
+                            p = track_base + ext
+                            if os.path.isfile(p):
+                                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read()
+                                break
+
+                        if not content or not content.strip():
+                            continue
+
+                        # Parse lyrics into non-empty lines
+                        lyric_lines = [line.strip() for line in content.split('\n') if line.strip()]
+                        if not lyric_lines:
+                            continue
+
+                        # Transcribe audio
+                        segments_iter, info = model.transcribe(
+                            track_path,
+                            word_timestamps=True,
+                            language=None,
+                        )
+
+                        transcribed_segments = []
+                        for segment in segments_iter:
+                            transcribed_segments.append({
+                                'start': segment.start,
+                                'end': segment.end,
+                                'text': segment.text.strip(),
+                            })
+
+                        if not transcribed_segments:
+                            log.debug(f"Batch sync: no transcription for '{track_title}'")
+                            continue
+
+                        # Align lyrics to transcription using fuzzy matching
+                        lrc_lines = []
+                        used_segments = set()
+
+                        for line_idx, lyric_line in enumerate(lyric_lines):
+                            best_score = 0
+                            best_idx = -1
+                            lyric_lower = lyric_line.lower()
+
+                            for idx, seg in enumerate(transcribed_segments):
+                                if idx in used_segments:
+                                    continue
+                                score = SequenceMatcher(None, lyric_lower, seg['text'].lower()).ratio()
+                                if score > best_score:
+                                    best_score = score
+                                    best_idx = idx
+
+                            if best_idx >= 0 and best_score > 0.3:
+                                seg = transcribed_segments[best_idx]
+                                used_segments.add(best_idx)
+                                minutes = int(seg['start'] // 60)
+                                seconds = seg['start'] % 60
+                                lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {lyric_line}")
+                            else:
+                                # Estimate from position
+                                if transcribed_segments:
+                                    total_duration = transcribed_segments[-1]['end']
+                                    ratio = line_idx / max(len(lyric_lines), 1)
+                                    estimated_time = ratio * total_duration
+                                    minutes = int(estimated_time // 60)
+                                    seconds = estimated_time % 60
+                                    lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {lyric_line}")
+
+                        lrc_lines.sort()
+                        synced_content = '\n'.join(lrc_lines)
+
+                        # Save synced lyrics
+                        lyrics_data = {'synced_lyrics': synced_content, 'plain_lyrics': None}
+                        save_lyrics(track_id, lyrics_data, 'batch-sync-generate')
+
+                        # Update DB
+                        database.execute(
+                            update(TableTracks)
+                            .where(TableTracks.lidarrTrackId == track_id)
+                            .values(is_synced=True)
+                        )
+
+                        synced += 1
+                        log.debug(f"Batch sync: generated timing for '{track_title}'")
+
+                    except Exception as e:
+                        failed += 1
+                        log.warning(f"Batch sync failed for '{track_title}': {e}")
+
+                event_stream(type='batch_sync_complete', payload={
+                    'synced': synced,
+                    'failed': failed,
+                    'message': f'Batch sync: {synced} synced, {failed} failed',
+                })
+
+            except ImportError:
+                log.error("Batch sync requires faster-whisper. Install with: pip install faster-whisper")
+            except Exception as e:
+                log.error(f"Batch sync error: {e}")
+            finally:
+                database.remove()
+
+        thread = Thread(target=_run, daemon=True)
+        thread.start()
+
+        return {'message': f'Batch sync generation started for {count} track(s)', 'trackCount': count}
+
+
 @api_ns_metadata.route('/metadata/lyrics/batch-redetect')
 class LyricsBatchRedetect(Resource):
     def post(self):

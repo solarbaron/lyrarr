@@ -4,8 +4,8 @@ import { Loader, Button, Select, Group, Badge, Pagination } from '@mantine/core'
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faDownload } from '@fortawesome/free-solid-svg-icons';
-import { getArtist, getAlbums, getProfiles, massAssignProfile, updateArtist, batchDownload } from '../api';
+import { faArrowLeft, faDownload, faLanguage, faClock } from '@fortawesome/free-solid-svg-icons';
+import { getArtist, getAlbums, getProfiles, massAssignProfile, updateArtist, batchDownload, batchTranslate, batchSyncGenerate } from '../api';
 
 const LANGUAGES = [
   { value: '', label: 'Use profile default' },
@@ -150,6 +150,32 @@ export default function ArtistDetailPage() {
                 }}
               >
                 Download All Missing
+              </Button>
+              <Button
+                variant="light"
+                color="cyan"
+                size="sm"
+                leftSection={<FontAwesomeIcon icon={faLanguage} />}
+                onClick={() => {
+                  batchTranslate({ artistIds: [Number(artistId)] }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || 'Translating undetected lyrics...', color: 'cyan' });
+                  });
+                }}
+              >
+                Translate Undetected
+              </Button>
+              <Button
+                variant="light"
+                color="teal"
+                size="sm"
+                leftSection={<FontAwesomeIcon icon={faClock} />}
+                onClick={() => {
+                  batchSyncGenerate({ artistIds: [Number(artistId)] }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
+                  });
+                }}
+              >
+                Generate Timing
               </Button>
             </Group>
 

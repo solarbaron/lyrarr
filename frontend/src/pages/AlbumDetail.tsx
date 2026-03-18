@@ -4,8 +4,8 @@ import { Loader, Button, Select, Group, Badge, FileButton } from '@mantine/core'
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faMagnifyingGlass, faUpload, faPenToSquare, faBan, faRotateLeft } from '@fortawesome/free-solid-svg-icons';
-import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover, updateTrack } from '../api';
+import { faArrowLeft, faMagnifyingGlass, faUpload, faPenToSquare, faBan, faRotateLeft, faDownload, faLanguage, faClock } from '@fortawesome/free-solid-svg-icons';
+import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover, updateTrack, batchDownload, batchTranslate, batchSyncGenerate } from '../api';
 import CoverSearchModal from '../components/CoverSearchModal';
 import LyricsSearchModal from '../components/LyricsSearchModal';
 import LyricsEditorModal from '../components/LyricsEditorModal';
@@ -156,6 +156,48 @@ export default function AlbumDetailPage() {
                 loading={assignMutation.isPending}
               >
                 Set Profile
+              </Button>
+            </Group>
+
+            <Group gap="xs" mt="sm">
+              <Button
+                variant="light"
+                color="violet"
+                size="xs"
+                leftSection={<FontAwesomeIcon icon={faDownload} />}
+                onClick={() => {
+                  batchDownload({ albumIds: [Number(albumId)], type: 'lyrics' }).then(() => {
+                    notifications.show({ title: 'Started', message: 'Downloading missing lyrics for this album...', color: 'violet' });
+                  });
+                }}
+              >
+                Download Missing Lyrics
+              </Button>
+              <Button
+                variant="light"
+                color="cyan"
+                size="xs"
+                leftSection={<FontAwesomeIcon icon={faLanguage} />}
+                onClick={() => {
+                  batchTranslate({ albumIds: [Number(albumId)] }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || 'Translating undetected lyrics...', color: 'cyan' });
+                  });
+                }}
+              >
+                Translate Undetected
+              </Button>
+              <Button
+                variant="light"
+                color="teal"
+                size="xs"
+                leftSection={<FontAwesomeIcon icon={faClock} />}
+                onClick={() => {
+                  batchSyncGenerate({ albumIds: [Number(albumId)] }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
+                  });
+                }}
+              >
+                Generate Timing
               </Button>
             </Group>
 
