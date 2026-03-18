@@ -4,7 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate, faLanguage, faFileImport } from '@fortawesome/free-solid-svg-icons';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { getArtists, getAlbums, getTracks, getWantedCovers, getWantedLyrics, getSystemStatus, triggerSync, getDashboardStats, getLanguageStats, batchRedetectLanguages, importSidecarLyrics } from '../api';
+import { getArtists, getAlbums, getTracks, getWantedCovers, getWantedLyrics, getSystemStatus, triggerSync, getDashboardStats, getLanguageStats, batchRedetectLanguages, importSidecarLyrics, auditLyricsState } from '../api';
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -113,12 +113,29 @@ export default function DashboardPage() {
               leftSection={<FontAwesomeIcon icon={faFileImport} />}
               onClick={() => {
                 importSidecarLyrics().then(() => {
-                  notifications.show({ title: 'Started', message: 'Scanning for existing .lrc/.txt sidecar files...', color: 'violet' });
+                  notifications.show({ title: 'Started', message: 'Scanning for existing .lrc sidecar files...', color: 'violet' });
                   setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 15000);
                 });
               }}
             >
               Import Sidecar Files
+            </Button>
+            <Button
+              variant="light" color="orange" size="xs"
+              leftSection={<FontAwesomeIcon icon={faFileImport} />}
+              onClick={() => {
+                auditLyricsState().then(() => {
+                  notifications.show({ title: 'Started', message: 'Auditing lyrics state — checking all tracks against disk...', color: 'orange' });
+                  setTimeout(() => {
+                    queryClient.invalidateQueries({ queryKey: ['language-stats'] });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                  }, 15000);
+                }).catch(() => {
+                  notifications.show({ title: 'Error', message: 'Failed to start lyrics audit', color: 'red' });
+                });
+              }}
+            >
+              Audit Lyrics State
             </Button>
           </div>
 

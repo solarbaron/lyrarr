@@ -217,19 +217,16 @@ class LyricsRead(Resource):
         content = None
         lyrics_type = None
 
-        # Try .lrc first, then legacy .txt
-        for ext in ['.lrc', '.txt']:
-            filepath = track_base + ext
-            if os.path.exists(filepath):
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    # Determine sync type from content, not extension
-                    from lyrarr.metadata.language_detect import is_synced_lyrics
-                    lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
-                    break
-                except Exception:
-                    pass
+        # Read .lrc file
+        filepath = track_base + '.lrc'
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                from lyrarr.metadata.language_detect import is_synced_lyrics
+                lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
+            except Exception:
+                pass
 
         return {
             'trackId': track_id,
@@ -242,7 +239,7 @@ class LyricsRead(Resource):
 @api_ns_metadata.route('/metadata/lyrics/upload/<int:track_id>')
 class LyricsUpload(Resource):
     def post(self, track_id):
-        """Upload a lyrics file (.lrc or .txt) for a track."""
+        """Upload a lyrics file (.lrc) for a track."""
         track = database.execute(
             select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
         ).scalars().first()
@@ -256,10 +253,9 @@ class LyricsUpload(Resource):
         if not file.filename:
             return {'message': 'No file selected'}, 400
 
-        allowed = {'lrc', 'txt'}
         ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-        if ext not in allowed:
-            return {'message': f'Invalid format. Allowed: .lrc, .txt'}, 400
+        if ext != 'lrc':
+            return {'message': 'Invalid format. Only .lrc files are accepted'}, 400
 
         from lyrarr.metadata.language_detect import is_synced_lyrics
 
@@ -608,15 +604,11 @@ class BatchTranslate(Resource):
 
                         # Read current lyrics file
                         track_base = os.path.splitext(track_path)[0]
-                        lyrics_path = None
+                        lyrics_path = track_base + '.lrc'
                         content = None
-                        for ext in ['.lrc', '.txt']:
-                            p = track_base + ext
-                            if os.path.isfile(p):
-                                lyrics_path = p
-                                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
-                                    content = f.read()
-                                break
+                        if os.path.isfile(lyrics_path):
+                            with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
 
                         if not content or not content.strip():
                             continue
@@ -793,12 +785,10 @@ class BatchSyncGenerate(Resource):
                         # Read current lyrics file
                         track_base = os.path.splitext(track_path)[0]
                         content = None
-                        for ext in ['.lrc', '.txt']:
-                            p = track_base + ext
-                            if os.path.isfile(p):
-                                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
-                                    content = f.read()
-                                break
+                        lyrics_path = track_base + '.lrc'
+                        if os.path.isfile(lyrics_path):
+                            with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
 
                         if not content or not content.strip():
                             continue
@@ -933,17 +923,14 @@ class LyricsBatchRedetect(Resource):
                     content = None
                     synced = False
 
-                    for ext in ['.lrc', '.txt']:
-                        fpath = track_base + ext
-                        if os.path.isfile(fpath):
-                            try:
-                                with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                                    content = f.read()
-                                # Determine sync status from content, not extension
-                                synced = is_synced_lyrics(content)
-                            except Exception:
-                                pass
-                            break
+                    fpath = track_base + '.lrc'
+                    if os.path.isfile(fpath):
+                        try:
+                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            synced = is_synced_lyrics(content)
+                        except Exception:
+                            pass
 
                     if content:
                         lang = detect_language(content)
@@ -1021,9 +1008,9 @@ class LyricsLanguageStats(Resource):
 @api_ns_metadata.route('/metadata/lyrics/import-sidecar')
 class LyricsSidecarImport(Resource):
     def post(self):
-        """Scan for existing .lrc/.txt sidecar files on disk and import into DB.
+        """Scan for existing .lrc sidecar files on disk and import into DB.
 
-        For each track with lyrics_status='missing', checks if a .lrc or .txt
+        For each track with lyrics_status='missing', checks if a .lrc
         file already exists alongside the audio file. If found, updates the DB
         with detected language and synced status.
         """
@@ -1049,29 +1036,27 @@ class LyricsSidecarImport(Resource):
                         continue
                     track_base = os.path.splitext(track.path)[0]
 
-                    for ext in ['.lrc', '.txt']:
-                        fpath = track_base + ext
-                        if os.path.isfile(fpath):
-                            try:
-                                with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                                    content = f.read()
-                                if content.strip():
-                                    lang = detect_language(content)
-                                    synced = is_synced_lyrics(content)
-                                    db_session.execute(
-                                        update(TableTracks)
-                                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
-                                        .values(
-                                            lyrics_status='available',
-                                            hasLyrics=True,
-                                            detected_language=lang,
-                                            is_synced=synced,
-                                        )
+                    fpath = track_base + '.lrc'
+                    if os.path.isfile(fpath):
+                        try:
+                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            if content.strip():
+                                lang = detect_language(content)
+                                synced = is_synced_lyrics(content)
+                                db_session.execute(
+                                    update(TableTracks)
+                                    .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                                    .values(
+                                        lyrics_status='available',
+                                        hasLyrics=True,
+                                        detected_language=lang,
+                                        is_synced=synced,
                                     )
-                                    imported += 1
-                            except Exception as e:
-                                log.warning(f"Failed to import sidecar for track {track.lidarrTrackId}: {e}")
-                            break  # Found a file, stop checking
+                                )
+                                imported += 1
+                        except Exception as e:
+                            log.warning(f"Failed to import sidecar for track {track.lidarrTrackId}: {e}")
 
                 log.info(f"Sidecar import complete: {imported}/{len(tracks)} tracks updated")
             finally:
@@ -1080,6 +1065,146 @@ class LyricsSidecarImport(Resource):
         thread = Thread(target=_run, daemon=True)
         thread.start()
         return {'message': 'Sidecar import started — scanning for existing lyrics files'}
+
+
+@api_ns_metadata.route('/metadata/lyrics/audit')
+class LyricsAudit(Resource):
+    def post(self):
+        """Comprehensive lyrics state audit.
+
+        Checks ALL tracks and reconciles DB state with what's on disk:
+        - If .lrc exists but DB says 'missing' → set to 'available'
+        - If DB says 'available' but no .lrc found → set to 'missing'
+        - Re-detects language and sync status for all available tracks
+        Runs in a background thread with SSE progress events.
+        """
+        from threading import Thread
+        from lyrarr.app.event_handler import event_stream
+        from lyrarr.app.database import update, database as db_session
+        from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+
+        def _run():
+            import os
+            import logging
+            log = logging.getLogger(__name__)
+
+            try:
+                tracks = db_session.execute(
+                    select(TableTracks).where(
+                        TableTracks.lyrics_status.notin_(['blacklisted'])
+                    )
+                ).scalars().all()
+
+                total = len(tracks)
+                fixed_to_available = 0
+                fixed_to_missing = 0
+                updated_metadata = 0
+
+                event_stream(type='lyrics_audit_start', payload={
+                    'message': f'Auditing lyrics state for {total} tracks...',
+                    'total': total,
+                })
+
+                for i, track in enumerate(tracks):
+                    if not track.path:
+                        continue
+
+                    track_base = os.path.splitext(track.path)[0]
+                    lrc_path = track_base + '.lrc'
+                    file_exists = os.path.isfile(lrc_path)
+
+                    if file_exists:
+                        # File exists — ensure DB is correct
+                        try:
+                            with open(lrc_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+
+                            if content.strip():
+                                lang = detect_language(content)
+                                synced = is_synced_lyrics(content)
+
+                                updates = {
+                                    'detected_language': lang,
+                                    'is_synced': synced,
+                                    'hasLyrics': True,
+                                }
+
+                                if track.lyrics_status != 'available':
+                                    updates['lyrics_status'] = 'available'
+                                    fixed_to_available += 1
+
+                                # Only count as metadata update if something changed
+                                if (track.detected_language != lang or
+                                    track.is_synced != synced or
+                                    track.lyrics_status != 'available'):
+                                    db_session.execute(
+                                        update(TableTracks)
+                                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                                        .values(**updates)
+                                    )
+                                    updated_metadata += 1
+                            else:
+                                # Empty file — treat as missing
+                                if track.lyrics_status == 'available':
+                                    db_session.execute(
+                                        update(TableTracks)
+                                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                                        .values(
+                                            lyrics_status='missing',
+                                            hasLyrics=False,
+                                            detected_language=None,
+                                            is_synced=False,
+                                        )
+                                    )
+                                    fixed_to_missing += 1
+                        except Exception as e:
+                            log.warning(f"Audit error for track {track.lidarrTrackId}: {e}")
+                    else:
+                        # No file on disk — ensure DB reflects missing
+                        if track.lyrics_status == 'available':
+                            db_session.execute(
+                                update(TableTracks)
+                                .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                                .values(
+                                    lyrics_status='missing',
+                                    hasLyrics=False,
+                                    detected_language=None,
+                                    is_synced=False,
+                                )
+                            )
+                            fixed_to_missing += 1
+
+                    # Progress event every 50 tracks
+                    if (i + 1) % 50 == 0 or (i + 1) == total:
+                        event_stream(type='lyrics_audit_progress', payload={
+                            'current': i + 1,
+                            'total': total,
+                            'message': f'Audited {i + 1}/{total} tracks...',
+                        })
+
+                summary = (
+                    f"Lyrics audit complete: {total} tracks checked. "
+                    f"{fixed_to_available} fixed to available, "
+                    f"{fixed_to_missing} fixed to missing, "
+                    f"{updated_metadata} metadata updated."
+                )
+                log.info(summary)
+                event_stream(type='lyrics_audit_complete', payload={
+                    'message': summary,
+                    'fixed_to_available': fixed_to_available,
+                    'fixed_to_missing': fixed_to_missing,
+                    'updated_metadata': updated_metadata,
+                })
+
+            except Exception as e:
+                log.error(f"Lyrics audit error: {e}")
+                event_stream(type='lyrics_audit_error', payload={'message': str(e)})
+            finally:
+                db_session.remove()
+
+        thread = Thread(target=_run, daemon=True)
+        thread.start()
+        return {'message': 'Lyrics state audit started — checking all tracks against disk'}
 
 
 @api_ns_metadata.route('/metadata/providers/health')

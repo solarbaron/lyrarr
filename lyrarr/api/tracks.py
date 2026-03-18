@@ -94,13 +94,12 @@ class TrackItem(Resource):
                 import os
                 if row.path:
                     track_base = os.path.splitext(row.path)[0]
-                    for ext in ['.lrc', '.txt']:
-                        fpath = track_base + ext
-                        if os.path.isfile(fpath):
-                            try:
-                                os.remove(fpath)
-                            except Exception:
-                                pass
+                    fpath = track_base + '.lrc'
+                    if os.path.isfile(fpath):
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
                 updates['hasLyrics'] = False
             elif new_status == 'missing':
                 # Un-blacklist: set to missing so downloader picks it up

@@ -398,10 +398,9 @@ def download_missing_lyrics(album_ids=None):
                 track_base = os.path.splitext(track.path)[0]
                 filepath = track_base + '.lrc'
 
-                # Check if lyrics file already exists on disk (.lrc or legacy .txt)
+                # Check if lyrics file already exists on disk
                 lrc_exists = os.path.isfile(track_base + '.lrc')
-                txt_exists = os.path.isfile(track_base + '.txt')
-                if (lrc_exists or txt_exists) and not eff['overwrite_existing']:
+                if lrc_exists and not eff['overwrite_existing']:
                     # File exists but DB says missing — fix the DB status
                     database.execute(
                         update(TableTracks)
@@ -415,14 +414,13 @@ def download_missing_lyrics(album_ids=None):
                     logger.debug(f"Lyrics already exist on disk for '{track.title}', updated DB status")
                     continue
 
-                # Remove any old lyrics file (including legacy .txt)
-                for old_ext in ['.lrc', '.txt']:
-                    old_path = track_base + old_ext
-                    if os.path.isfile(old_path) and old_path != filepath:
-                        try:
-                            os.remove(old_path)
-                        except Exception:
-                            pass
+                # Remove old lyrics file before writing new one
+                old_path = track_base + '.lrc'
+                if os.path.isfile(old_path) and old_path != filepath:
+                    try:
+                        os.remove(old_path)
+                    except Exception:
+                        pass
 
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
 

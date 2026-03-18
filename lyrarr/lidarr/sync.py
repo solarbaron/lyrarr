@@ -329,20 +329,17 @@ def update_tracks(force=False):
                 is_synced_flag = False
                 if track_path:
                     track_base = os.path.splitext(track_path)[0]
-                    for ext in ['.lrc', '.txt']:
-                        lyrics_path = track_base + ext
-                        if os.path.isfile(lyrics_path):
-                            lyrics_exist = True
-                            # Detect sync status from content, not extension
-                            try:
-                                from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
-                                with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as lf:
-                                    lyrics_content = lf.read()
-                                is_synced_flag = is_synced_lyrics(lyrics_content)
-                                detected_lang = detect_language(lyrics_content)
-                            except Exception:
-                                pass
-                            break
+                    lyrics_path = track_base + '.lrc'
+                    if os.path.isfile(lyrics_path):
+                        lyrics_exist = True
+                        try:
+                            from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+                            with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as lf:
+                                lyrics_content = lf.read()
+                            is_synced_flag = is_synced_lyrics(lyrics_content)
+                            detected_lang = detect_language(lyrics_content)
+                        except Exception:
+                            pass
 
                 # Determine lyrics_status: preserve 'blacklisted' if already set
                 if existing and existing.lyrics_status == 'blacklisted':

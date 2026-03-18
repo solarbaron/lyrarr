@@ -124,6 +124,7 @@ export const getLanguageStats = () => api.get('/metadata/lyrics/language-stats')
 export const getWantedUndetected = (params?: PaginationParams & { search?: string }) =>
   api.get('/wanted/undetected', { params }).then(r => r.data as PaginatedResponse<Track & { artistName?: string; albumTitle?: string }>);
 export const importSidecarLyrics = () => api.post('/metadata/lyrics/import-sidecar').then(r => r.data);
+export const auditLyricsState = () => api.post('/metadata/lyrics/audit').then(r => r.data);
 export const getProviderHealth = () => api.get('/metadata/providers/health').then(r => r.data);
 export const resetProviderHealth = (provider?: string) => api.post('/metadata/providers/health', { provider }).then(r => r.data);
 export const updateTrack = (id: number, data: Record<string, unknown>) => api.put(`/tracks/${id}`, data).then(r => r.data);
