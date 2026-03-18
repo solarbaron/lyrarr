@@ -1,25 +1,39 @@
 # coding=utf-8
 
 import logging
-import re
-import requests
 
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
 
 logger = logging.getLogger(__name__)
 
-GENIUS_API_BASE = 'https://api.genius.com'
-
 
 class GeniusProvider(LyricsProvider):
-    """Fetch plain lyrics from Genius (requires API key)."""
+    """Fetch plain lyrics from Genius using the lyricsgenius library."""
 
     name = 'genius'
 
     @property
     def _api_key(self):
         return settings.genius.apikey
+
+    def _get_client(self):
+        """Create a lyricsgenius client instance."""
+        import lyricsgenius
+
+        genius = lyricsgenius.Genius(
+            self._api_key,
+            verbose=False,
+            remove_section_headers=False,  # Keep [Chorus], [Verse] etc.
+            retries=2,
+        )
+        genius.timeout = 15
+        # Skip non-song results (articles, interviews, book excerpts)
+        genius.skip_non_songs = True
+        genius.excluded_terms = [
+            "(Remix)", "(Live)", "(Demo)",
+        ]
+        return genius
 
     def search(self, track_name=None, artist_name=None, **kwargs):
         """
@@ -36,64 +50,66 @@ class GeniusProvider(LyricsProvider):
             return []
 
         results = []
-        query = f"{artist_name} {track_name}" if artist_name else track_name
 
         try:
-            response = requests.get(
-                f"{GENIUS_API_BASE}/search",
-                params={'q': query},
-                headers={
-                    'Authorization': f'Bearer {self._api_key}',
-                },
-                timeout=15
+            genius = self._get_client()
+            song = genius.search_song(track_name, artist_name)
+
+            if song and song.lyrics:
+                lyrics = song.lyrics
+
+                # lyricsgenius sometimes prepends the song title + "Lyrics" header
+                # and appends an embed/contributor count suffix — clean those
+                lyrics = self._clean_lyrics(lyrics, song.title)
+
+                if lyrics and len(lyrics.strip()) > 10:
+                    results.append({
+                        'synced_lyrics': None,  # Genius doesn't provide synced lyrics
+                        'plain_lyrics': lyrics,
+                        'provider': self.name,
+                        'score': 0.6,
+                        'source_url': song.url or '',
+                        'title': song.title or '',
+                        'artist': song.artist or '',
+                    })
+
+        except ImportError:
+            logger.error(
+                "lyricsgenius package not installed. "
+                "Install with: pip install lyricsgenius"
             )
-            if response.status_code == 200:
-                data = response.json()
-                hits = data.get('response', {}).get('hits', [])
-
-                for hit in hits[:3]:  # Limit to top 3
-                    result = hit.get('result', {})
-                    song_url = result.get('url', '')
-
-                    if song_url:
-                        lyrics = self._scrape_lyrics(song_url)
-                        if lyrics:
-                            results.append({
-                                'synced_lyrics': None,  # Genius doesn't provide synced lyrics
-                                'plain_lyrics': lyrics,
-                                'provider': self.name,
-                                'score': 0.6,
-                                'source_url': song_url,
-                                'title': result.get('title', ''),
-                                'artist': result.get('primary_artist', {}).get('name', ''),
-                            })
-            else:
-                logger.warning(f"Genius API returned {response.status_code}")
-
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             logger.error(f"Genius search error: {e}")
 
         return results
 
-    def _scrape_lyrics(self, song_url):
-        """Scrape lyrics from a Genius song page. Returns plain text lyrics or None."""
-        try:
-            response = requests.get(song_url, timeout=15, headers={
-                'User-Agent': 'Mozilla/5.0 (compatible; Lyrarr/1.0)'
-            })
-            if response.status_code == 200:
-                # Simple regex-based extraction from Genius page
-                # Look for lyrics in the data-lyrics-container divs
-                pattern = r'<div[^>]*data-lyrics-container="true"[^>]*>(.*?)</div>'
-                matches = re.findall(pattern, response.text, re.DOTALL)
-                if matches:
-                    lyrics_html = ''.join(matches)
-                    # Clean HTML tags
-                    lyrics = re.sub(r'<br\s*/?>', '\n', lyrics_html)
-                    lyrics = re.sub(r'<[^>]+>', '', lyrics)
-                    lyrics = lyrics.strip()
-                    if lyrics:
-                        return lyrics
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Genius scrape error: {e}")
-        return None
+    @staticmethod
+    def _clean_lyrics(lyrics, title=None):
+        """Clean up lyrics text returned by lyricsgenius.
+
+        The library sometimes includes:
+        - A title header line like "Song Title Lyrics" at the top
+        - A contributor/embed suffix like "123Embed" at the end
+        - "You might also like" text injected between sections
+        """
+        import re
+
+        lines = lyrics.split('\n')
+
+        # Strip leading title line (e.g. "Song Title Lyrics" or "ContributorsSong Title Lyrics")
+        if lines and lines[0].rstrip().endswith('Lyrics'):
+            lines = lines[1:]
+
+        # Strip trailing embed line (e.g. "123Embed" or "42Embed")
+        if lines and re.match(r'^\d*Embed\s*$', lines[-1]):
+            lines = lines[:-1]
+
+        # Remove "You might also like" injections
+        lines = [line for line in lines if line.strip() != 'You might also like']
+
+        lyrics = '\n'.join(lines).strip()
+
+        # Collapse excessive blank lines
+        lyrics = re.sub(r'\n{3,}', '\n\n', lyrics)
+
+        return lyrics
