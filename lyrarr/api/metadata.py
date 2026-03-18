@@ -712,7 +712,7 @@ class BatchSyncGenerate(Resource):
     def post(self):
         """Generate synced LRC in bulk for tracks with untimed lyrics.
 
-        Body: { albumIds?: int[], artistIds?: int[] }
+        Body: { albumIds?: int[], artistIds?: int[], trackIds?: int[] }
         Only processes tracks where lyrics_status='available' AND is_synced=False.
         Uses Whisper to transcribe audio and align with existing plain lyrics.
         Runs in a background thread.
@@ -725,25 +725,36 @@ class BatchSyncGenerate(Resource):
         data = request.get_json() or {}
         album_ids = data.get('albumIds', [])
         artist_ids = data.get('artistIds', [])
+        track_ids = data.get('trackIds', [])
 
-        if not album_ids and not artist_ids:
-            return {'message': 'albumIds or artistIds required'}, 400
+        if not album_ids and not artist_ids and not track_ids:
+            return {'message': 'albumIds, artistIds, or trackIds required'}, 400
 
-        # Resolve artist → album IDs
-        if artist_ids:
-            albums = database.execute(
-                select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
+        if track_ids:
+            # Direct track selection
+            tracks = database.execute(
+                select(TableTracks).where(
+                    TableTracks.lidarrTrackId.in_(track_ids),
+                    TableTracks.lyrics_status == 'available',
+                    TableTracks.is_synced == False,
+                )
             ).scalars().all()
-            album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
+        else:
+            # Resolve artist → album IDs
+            if artist_ids:
+                albums = database.execute(
+                    select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
+                ).scalars().all()
+                album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
 
-        # Find eligible tracks: available lyrics but not synced
-        tracks = database.execute(
-            select(TableTracks).where(
-                TableTracks.lidarrAlbumId.in_(album_ids),
-                TableTracks.lyrics_status == 'available',
-                TableTracks.is_synced == False,
-            )
-        ).scalars().all()
+            # Find eligible tracks: available lyrics but not synced
+            tracks = database.execute(
+                select(TableTracks).where(
+                    TableTracks.lidarrAlbumId.in_(album_ids),
+                    TableTracks.lyrics_status == 'available',
+                    TableTracks.is_synced == False,
+                )
+            ).scalars().all()
 
         track_list = [(t.lidarrTrackId, t.path, t.title) for t in tracks]
         count = len(track_list)

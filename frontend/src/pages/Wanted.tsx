@@ -1,17 +1,21 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress } from '@mantine/core';
+import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress, Checkbox } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getWantedCovers, getWantedLyrics, getWantedStats, searchCovers, searchLyrics } from '../api';
+import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate } from '../api';
 
 export default function WantedPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [coversPage, setCoversPage] = useState(1);
   const [lyricsPage, setLyricsPage] = useState(1);
+  const [untimedPage, setUntimedPage] = useState(1);
   const [coversSearch, setCoversSearch] = useState('');
   const [lyricsSearch, setLyricsSearch] = useState('');
+  const [untimedSearch, setUntimedSearch] = useState('');
+  const [selectedTracks, setSelectedTracks] = useState<Set<number>>(new Set());
+  const [syncingTrackId, setSyncingTrackId] = useState<number | null>(null);
   const pageSize = 25;
 
   const { data: stats } = useQuery({ queryKey: ['wanted-stats'], queryFn: getWantedStats });
@@ -24,6 +28,10 @@ export default function WantedPage() {
     queryKey: ['wanted-lyrics', lyricsPage, lyricsSearch],
     queryFn: () => getWantedLyrics({ page: lyricsPage, pageSize, search: lyricsSearch || undefined }),
   });
+  const { data: untimedResult, isLoading: loadingUntimed } = useQuery({
+    queryKey: ['wanted-untimed', untimedPage, untimedSearch],
+    queryFn: () => getWantedUntimed({ page: untimedPage, pageSize, search: untimedSearch || undefined }),
+  });
 
   const wantedCovers = coversResult?.data || [];
   const coversTotal = coversResult?.total || 0;
@@ -32,6 +40,10 @@ export default function WantedPage() {
   const wantedLyrics = lyricsResult?.data || [];
   const lyricsTotal = lyricsResult?.total || 0;
   const lyricsTotalPages = Math.ceil(lyricsTotal / pageSize);
+
+  const untimedTracks = untimedResult?.data || [];
+  const untimedTotal = untimedResult?.total || 0;
+  const untimedTotalPages = Math.ceil(untimedTotal / pageSize);
 
   // Re-search mutations
   const [searchingCoverId, setSearchingCoverId] = useState<number | null>(null);
@@ -115,8 +127,9 @@ export default function WantedPage() {
         tab: { color: 'var(--text-secondary)', '&[data-active]': { color: 'var(--text-primary)' } }
       }}>
         <Tabs.List mb="lg">
-          <Tabs.Tab value="covers">Missing Covers ({coversTotal})</Tabs.Tab>
+        <Tabs.Tab value="covers">Missing Covers ({coversTotal})</Tabs.Tab>
           <Tabs.Tab value="lyrics">Missing Lyrics ({lyricsTotal})</Tabs.Tab>
+          <Tabs.Tab value="untimed">Untimed Lyrics ({untimedTotal})</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="covers">
@@ -236,6 +249,141 @@ export default function WantedPage() {
               {lyricsTotalPages > 1 && (
                 <Group justify="center" mt="xl">
                   <Pagination total={lyricsTotalPages} value={lyricsPage} onChange={setLyricsPage} color="violet" />
+                </Group>
+              )}
+            </>
+          )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="untimed">
+          <Group mb="md" justify="space-between">
+            <TextInput
+              placeholder="Search tracks..."
+              value={untimedSearch}
+              onChange={(e) => { setUntimedSearch(e.currentTarget.value); setUntimedPage(1); setSelectedTracks(new Set()); }}
+              style={{ flex: 1 }}
+              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+            />
+            <Group gap="xs">
+              <Button
+                size="xs" variant="light" color="teal"
+                disabled={selectedTracks.size === 0}
+                onClick={() => {
+                  batchSyncGenerate({ trackIds: Array.from(selectedTracks) }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || `Syncing ${selectedTracks.size} track(s)...`, color: 'teal' });
+                    setSelectedTracks(new Set());
+                  });
+                }}
+              >
+                ⏱ Sync Selected ({selectedTracks.size})
+              </Button>
+              <Button
+                size="xs" variant="filled" color="teal"
+                disabled={untimedTracks.length === 0}
+                onClick={() => {
+                  const allIds = untimedTracks.map((t: any) => t.lidarrTrackId);
+                  batchSyncGenerate({ trackIds: allIds }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || `Syncing all ${allIds.length} track(s)...`, color: 'teal' });
+                  });
+                }}
+              >
+                ⏱ Sync All on Page
+              </Button>
+            </Group>
+          </Group>
+
+          {loadingUntimed ? (
+            <div className="empty-state"><Loader color="violet" /></div>
+          ) : untimedTracks.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">⏱</div>
+              <div className="empty-state-title">No Untimed Lyrics</div>
+              <div className="empty-state-message">
+                {untimedSearch ? 'No tracks match your search.' : 'All available lyrics are synced.'}
+              </div>
+            </div>
+          ) : (
+            <>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}>
+                      <Checkbox
+                        checked={selectedTracks.size === untimedTracks.length && untimedTracks.length > 0}
+                        indeterminate={selectedTracks.size > 0 && selectedTracks.size < untimedTracks.length}
+                        onChange={(e) => {
+                          if (e.currentTarget.checked) {
+                            setSelectedTracks(new Set(untimedTracks.map((t: any) => t.lidarrTrackId)));
+                          } else {
+                            setSelectedTracks(new Set());
+                          }
+                        }}
+                        color="teal"
+                      />
+                    </th>
+                    <th>Track</th>
+                    <th>Artist</th>
+                    <th>Album</th>
+                    <th>Language</th>
+                    <th style={{ width: 100 }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {untimedTracks.map((track: any) => (
+                    <tr key={track.lidarrTrackId}>
+                      <td>
+                        <Checkbox
+                          checked={selectedTracks.has(track.lidarrTrackId)}
+                          onChange={(e) => {
+                            const next = new Set(selectedTracks);
+                            if (e.currentTarget.checked) {
+                              next.add(track.lidarrTrackId);
+                            } else {
+                              next.delete(track.lidarrTrackId);
+                            }
+                            setSelectedTracks(next);
+                          }}
+                          color="teal"
+                        />
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{track.title}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{track.artistName || '—'}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{track.albumTitle || '—'}</td>
+                      <td>
+                        {track.detected_language ? (
+                          <span style={{
+                            fontSize: 10, padding: '1px 5px', borderRadius: 4,
+                            background: 'rgba(139,61,255,0.15)', color: 'var(--accent-primary)',
+                            fontWeight: 600, textTransform: 'uppercase',
+                          }}>
+                            {track.detected_language}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        <Button
+                          size="xs" variant="light" color="teal"
+                          loading={syncingTrackId === track.lidarrTrackId}
+                          onClick={() => {
+                            setSyncingTrackId(track.lidarrTrackId);
+                            batchSyncGenerate({ trackIds: [track.lidarrTrackId] }).then((r: any) => {
+                              notifications.show({ title: 'Started', message: r.message || 'Generating timing...', color: 'teal' });
+                              setSyncingTrackId(null);
+                            }).catch(() => setSyncingTrackId(null));
+                          }}
+                        >
+                          ⏱ Sync
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {untimedTotalPages > 1 && (
+                <Group justify="center" mt="xl">
+                  <Pagination total={untimedTotalPages} value={untimedPage} onChange={(p) => { setUntimedPage(p); setSelectedTracks(new Set()); }} color="violet" />
                 </Group>
               )}
             </>
