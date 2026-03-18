@@ -32,7 +32,7 @@ export default function DashboardPage() {
   });
 
   const redetectMutation = useMutation({
-    mutationFn: batchRedetectLanguages,
+    mutationFn: () => batchRedetectLanguages(),
     onSuccess: () => {
       notifications.show({ title: 'Started', message: 'Re-detecting languages for all lyrics...', color: 'violet' });
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 10000);

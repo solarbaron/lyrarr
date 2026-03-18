@@ -118,8 +118,11 @@ export const testNotification = () => api.post('/system/test/notification').then
 export const getProviderStats = () => api.get('/system/provider-stats').then(r => r.data);
 export const exportBackup = () => api.get('/system/backup').then(r => r.data);
 export const importBackup = (data: Record<string, unknown>) => api.post('/system/restore', data).then(r => r.data);
-export const batchRedetectLanguages = () => api.post('/metadata/lyrics/batch-redetect').then(r => r.data);
+export const batchRedetectLanguages = (data?: { trackIds?: number[] }) =>
+  api.post('/metadata/lyrics/batch-redetect', data || {}).then(r => r.data);
 export const getLanguageStats = () => api.get('/metadata/lyrics/language-stats').then(r => r.data);
+export const getWantedUndetected = (params?: PaginationParams & { search?: string }) =>
+  api.get('/wanted/undetected', { params }).then(r => r.data as PaginatedResponse<Track & { artistName?: string; albumTitle?: string }>);
 export const importSidecarLyrics = () => api.post('/metadata/lyrics/import-sidecar').then(r => r.data);
 export const getProviderHealth = () => api.get('/metadata/providers/health').then(r => r.data);
 export const resetProviderHealth = (provider?: string) => api.post('/metadata/providers/health', { provider }).then(r => r.data);

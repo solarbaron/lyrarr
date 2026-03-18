@@ -1,9 +1,40 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress, Checkbox } from '@mantine/core';
+import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress, Checkbox, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate } from '../api';
+import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedUndetected, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate, batchRedetectLanguages, updateTrack } from '../api';
+
+const LANG_OPTIONS = [
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'zh', label: 'Chinese' },
+  { value: 'ru', label: 'Russian' },
+  { value: 'ar', label: 'Arabic' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'nl', label: 'Dutch' },
+  { value: 'sv', label: 'Swedish' },
+  { value: 'pl', label: 'Polish' },
+  { value: 'tr', label: 'Turkish' },
+  { value: 'da', label: 'Danish' },
+  { value: 'fi', label: 'Finnish' },
+  { value: 'no', label: 'Norwegian' },
+  { value: 'el', label: 'Greek' },
+  { value: 'he', label: 'Hebrew' },
+  { value: 'th', label: 'Thai' },
+  { value: 'vi', label: 'Vietnamese' },
+  { value: 'id', label: 'Indonesian' },
+  { value: 'uk', label: 'Ukrainian' },
+  { value: 'cs', label: 'Czech' },
+  { value: 'ro', label: 'Romanian' },
+  { value: 'hu', label: 'Hungarian' },
+];
 
 export default function WantedPage() {
   const navigate = useNavigate();
@@ -11,11 +42,15 @@ export default function WantedPage() {
   const [coversPage, setCoversPage] = useState(1);
   const [lyricsPage, setLyricsPage] = useState(1);
   const [untimedPage, setUntimedPage] = useState(1);
+  const [undetectedPage, setUndetectedPage] = useState(1);
   const [coversSearch, setCoversSearch] = useState('');
   const [lyricsSearch, setLyricsSearch] = useState('');
   const [untimedSearch, setUntimedSearch] = useState('');
+  const [undetectedSearch, setUndetectedSearch] = useState('');
   const [selectedTracks, setSelectedTracks] = useState<Set<number>>(new Set());
+  const [selectedLangTracks, setSelectedLangTracks] = useState<Set<number>>(new Set());
   const [syncingTrackId, setSyncingTrackId] = useState<number | null>(null);
+  const [detectingTrackId, setDetectingTrackId] = useState<number | null>(null);
   const pageSize = 25;
 
   const { data: stats } = useQuery({ queryKey: ['wanted-stats'], queryFn: getWantedStats });
@@ -32,6 +67,10 @@ export default function WantedPage() {
     queryKey: ['wanted-untimed', untimedPage, untimedSearch],
     queryFn: () => getWantedUntimed({ page: untimedPage, pageSize, search: untimedSearch || undefined }),
   });
+  const { data: undetectedResult, isLoading: loadingUndetected } = useQuery({
+    queryKey: ['wanted-undetected', undetectedPage, undetectedSearch],
+    queryFn: () => getWantedUndetected({ page: undetectedPage, pageSize, search: undetectedSearch || undefined }),
+  });
 
   const wantedCovers = coversResult?.data || [];
   const coversTotal = coversResult?.total || 0;
@@ -44,6 +83,10 @@ export default function WantedPage() {
   const untimedTracks = untimedResult?.data || [];
   const untimedTotal = untimedResult?.total || 0;
   const untimedTotalPages = Math.ceil(untimedTotal / pageSize);
+
+  const undetectedTracks = undetectedResult?.data || [];
+  const undetectedTotal = undetectedResult?.total || 0;
+  const undetectedTotalPages = Math.ceil(undetectedTotal / pageSize);
 
   // Re-search mutations
   const [searchingCoverId, setSearchingCoverId] = useState<number | null>(null);
@@ -130,6 +173,7 @@ export default function WantedPage() {
         <Tabs.Tab value="covers">Missing Covers ({coversTotal})</Tabs.Tab>
           <Tabs.Tab value="lyrics">Missing Lyrics ({lyricsTotal})</Tabs.Tab>
           <Tabs.Tab value="untimed">Untimed Lyrics ({untimedTotal})</Tabs.Tab>
+          <Tabs.Tab value="undetected">Undetected Language ({undetectedTotal})</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="covers">
@@ -384,6 +428,160 @@ export default function WantedPage() {
               {untimedTotalPages > 1 && (
                 <Group justify="center" mt="xl">
                   <Pagination total={untimedTotalPages} value={untimedPage} onChange={(p) => { setUntimedPage(p); setSelectedTracks(new Set()); }} color="violet" />
+                </Group>
+              )}
+            </>
+          )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="undetected">
+          <Group mb="md" justify="space-between">
+            <TextInput
+              placeholder="Search tracks..."
+              value={undetectedSearch}
+              onChange={(e) => { setUndetectedSearch(e.currentTarget.value); setUndetectedPage(1); setSelectedLangTracks(new Set()); }}
+              style={{ flex: 1 }}
+              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+            />
+            <Group gap="xs">
+              <Button
+                size="xs" variant="light" color="cyan"
+                disabled={selectedLangTracks.size === 0}
+                onClick={() => {
+                  batchRedetectLanguages({ trackIds: Array.from(selectedLangTracks) }).then(() => {
+                    notifications.show({ title: 'Started', message: `Detecting language for ${selectedLangTracks.size} track(s)...`, color: 'cyan' });
+                    setSelectedLangTracks(new Set());
+                    queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
+                  });
+                }}
+              >
+                🌐 Detect Selected ({selectedLangTracks.size})
+              </Button>
+              <Button
+                size="xs" variant="filled" color="cyan"
+                disabled={undetectedTracks.length === 0}
+                onClick={() => {
+                  const allIds = undetectedTracks.map((t: any) => t.lidarrTrackId);
+                  batchRedetectLanguages({ trackIds: allIds }).then(() => {
+                    notifications.show({ title: 'Started', message: `Detecting language for all ${allIds.length} track(s)...`, color: 'cyan' });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
+                  });
+                }}
+              >
+                🌐 Detect All on Page
+              </Button>
+            </Group>
+          </Group>
+
+          {loadingUndetected ? (
+            <div className="empty-state"><Loader color="violet" /></div>
+          ) : undetectedTracks.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">🌐</div>
+              <div className="empty-state-title">No Undetected Languages</div>
+              <div className="empty-state-message">
+                {undetectedSearch ? 'No tracks match your search.' : 'All available lyrics have a detected language.'}
+              </div>
+            </div>
+          ) : (
+            <>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}>
+                      <Checkbox
+                        checked={selectedLangTracks.size === undetectedTracks.length && undetectedTracks.length > 0}
+                        indeterminate={selectedLangTracks.size > 0 && selectedLangTracks.size < undetectedTracks.length}
+                        onChange={(e) => {
+                          if (e.currentTarget.checked) {
+                            setSelectedLangTracks(new Set(undetectedTracks.map((t: any) => t.lidarrTrackId)));
+                          } else {
+                            setSelectedLangTracks(new Set());
+                          }
+                        }}
+                        color="cyan"
+                      />
+                    </th>
+                    <th>Track</th>
+                    <th>Artist</th>
+                    <th>Album</th>
+                    <th>Synced</th>
+                    <th style={{ width: 160 }}>Set Language</th>
+                    <th style={{ width: 100 }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {undetectedTracks.map((track: any) => (
+                    <tr key={track.lidarrTrackId}>
+                      <td>
+                        <Checkbox
+                          checked={selectedLangTracks.has(track.lidarrTrackId)}
+                          onChange={(e) => {
+                            const next = new Set(selectedLangTracks);
+                            if (e.currentTarget.checked) {
+                              next.add(track.lidarrTrackId);
+                            } else {
+                              next.delete(track.lidarrTrackId);
+                            }
+                            setSelectedLangTracks(next);
+                          }}
+                          color="cyan"
+                        />
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{track.title}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{track.artistName || '—'}</td>
+                      <td style={{ color: 'var(--text-secondary)' }}>{track.albumTitle || '—'}</td>
+                      <td>
+                        {track.is_synced ? (
+                          <span className="status-badge available" style={{ fontSize: 10, padding: '1px 5px' }}>LRC</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Plain</span>
+                        )}
+                      </td>
+                      <td>
+                        <Select
+                          placeholder="Set..."
+                          data={LANG_OPTIONS}
+                          size="xs"
+                          w={130}
+                          searchable
+                          clearable
+                          onChange={(val) => {
+                            if (val) {
+                              updateTrack(track.lidarrTrackId, { detected_language: val }).then(() => {
+                                notifications.show({ title: 'Updated', message: `Set language to ${val.toUpperCase()}`, color: 'green' });
+                                queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
+                                queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                              });
+                            }
+                          }}
+                          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', minHeight: 28, height: 28 } }}
+                        />
+                      </td>
+                      <td>
+                        <Button
+                          size="xs" variant="light" color="cyan"
+                          loading={detectingTrackId === track.lidarrTrackId}
+                          onClick={() => {
+                            setDetectingTrackId(track.lidarrTrackId);
+                            batchRedetectLanguages({ trackIds: [track.lidarrTrackId] }).then(() => {
+                              notifications.show({ title: 'Started', message: 'Detecting language...', color: 'cyan' });
+                              setDetectingTrackId(null);
+                              queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
+                              queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                            }).catch(() => setDetectingTrackId(null));
+                          }}
+                        >
+                          🌐 Detect
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {undetectedTotalPages > 1 && (
+                <Group justify="center" mt="xl">
+                  <Pagination total={undetectedTotalPages} value={undetectedPage} onChange={(p) => { setUndetectedPage(p); setSelectedLangTracks(new Set()); }} color="violet" />
                 </Group>
               )}
             </>

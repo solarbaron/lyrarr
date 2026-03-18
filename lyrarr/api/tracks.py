@@ -106,6 +106,15 @@ class TrackItem(Resource):
                 # Un-blacklist: set to missing so downloader picks it up
                 updates['lyrics_status'] = 'missing'
 
+        if 'detected_language' in data:
+            lang = data['detected_language']
+            if lang is None or lang == '':
+                updates['detected_language'] = None
+            elif isinstance(lang, str) and len(lang) <= 5:
+                updates['detected_language'] = lang.lower()
+            else:
+                return {'message': 'Invalid detected_language value'}, 400
+
         if updates:
             updates['updated_at_timestamp'] = datetime.now()
             database.execute(

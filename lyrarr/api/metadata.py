@@ -903,19 +903,27 @@ class BatchSyncGenerate(Resource):
 @api_ns_metadata.route('/metadata/lyrics/batch-redetect')
 class LyricsBatchRedetect(Resource):
     def post(self):
-        """Re-detect language and synced status for all existing lyrics files."""
+        """Re-detect language and synced status for lyrics files.
+
+        Body (optional): { trackIds?: int[] }
+        If trackIds provided, only processes those tracks. Otherwise processes all available.
+        """
         import os
         from lyrarr.app.database import update
         from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
         from threading import Thread
 
+        data = request.get_json() or {}
+        track_ids = data.get('trackIds', [])
+
         def _run():
             import logging
             logger = logging.getLogger(__name__)
             try:
-                tracks = database.execute(
-                    select(TableTracks).where(TableTracks.lyrics_status == 'available')
-                ).scalars().all()
+                query = select(TableTracks).where(TableTracks.lyrics_status == 'available')
+                if track_ids:
+                    query = query.where(TableTracks.lidarrTrackId.in_(track_ids))
+                tracks = database.execute(query).scalars().all()
 
                 updated = 0
                 for track in tracks:
