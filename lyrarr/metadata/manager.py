@@ -67,6 +67,7 @@ def search_lyrics(track):
                 artist_name=track.get('artistName'),
                 album_name=track.get('albumTitle'),
                 duration=track.get('duration'),
+                mb_recording_id=track.get('mbId'),
             )
             results.extend(provider_results)
         except Exception as e:

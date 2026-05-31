@@ -9,8 +9,10 @@ No API key required. Excellent coverage for both Western and Asian music.
 import logging
 import re
 import requests
+from difflib import SequenceMatcher
 
 from lyrarr.metadata.base import LyricsProvider
+from lyrarr.metadata.normalize import clean_for_search, normalize_title, normalize_artist
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,11 @@ NETEASE_API_BASE = 'https://music.163.com'
 
 
 class NetEaseProvider(LyricsProvider):
-    """Fetch synced and plain lyrics from NetEase Cloud Music (free, no API key)."""
+    """Fetch synced and plain lyrics from NetEase Cloud Music (free, no API key).
+
+    Uses normalized queries and proper fuzzy matching to find the best song
+    match, with a title-only fallback search.
+    """
 
     name = 'netease'
 
@@ -28,33 +34,75 @@ class NetEaseProvider(LyricsProvider):
         'Content-Type': 'application/x-www-form-urlencoded',
     }
 
-    def search(self, track_name=None, artist_name=None, **kwargs):
+    def search(self, track_name=None, artist_name=None, duration=None, **kwargs):
         """
-        Search for lyrics on NetEase Cloud Music.
+        Search for lyrics on NetEase Cloud Music with normalized queries.
 
-        Returns a list of lyrics results:
-        [{'synced_lyrics': str|None, 'plain_lyrics': str|None, 'provider': str, 'score': float}]
+        Returns a list of lyrics results with computed match scores:
+        [{'synced_lyrics': str|None, 'plain_lyrics': str|None, 'provider': str,
+          'score': float, 'match_details': dict}]
         """
         if not track_name:
             return []
 
+        meta = clean_for_search(track_name, artist_name or '')
         results = []
 
-        # Step 1: Search for the song
-        song_id = self._find_song(track_name, artist_name)
-        if not song_id:
+        # Strategy 1: Search with artist + title
+        song_info = self._find_best_song(
+            meta['artist_clean'], meta['title_clean'],
+            track_name, artist_name, duration
+        )
+
+        # Strategy 2: Fallback — search with title only
+        if not song_info:
+            song_info = self._find_best_song(
+                None, meta['title_clean'],
+                track_name, artist_name, duration
+            )
+
+        # Strategy 3: Try title variants
+        if not song_info:
+            for variant in meta.get('title_variants', [])[1:]:
+                song_info = self._find_best_song(
+                    meta['artist_primary'], variant,
+                    track_name, artist_name, duration
+                )
+                if song_info:
+                    break
+
+        if not song_info:
             return results
 
-        # Step 2: Get lyrics by song ID
-        lyrics_data = self._get_lyrics(song_id)
+        # Get lyrics by song ID
+        lyrics_data = self._get_lyrics(song_info['id'])
         if lyrics_data:
+            # Compute real match score
+            match = self.score_result(
+                track_name, artist_name, duration,
+                song_info.get('name', ''),
+                song_info.get('artist_name', ''),
+                song_info.get('duration')
+            )
+
+            lyrics_data['score'] = match['score']
+            lyrics_data['match_details'] = match
+            lyrics_data['track_name'] = song_info.get('name', '')
+            lyrics_data['artist_name'] = song_info.get('artist_name', '')
             results.append(lyrics_data)
 
         return results
 
-    def _find_song(self, track_name, artist_name=None):
-        """Search for a song and return its NetEase song ID."""
-        query = f"{artist_name} {track_name}" if artist_name else track_name
+    def _find_best_song(self, artist_clean, title_clean,
+                        orig_title=None, orig_artist=None, orig_duration=None):
+        """Search for a song and return the best-scoring match.
+
+        Uses fuzzy matching instead of substring checks to find the
+        best match from search results.
+        """
+        query = f"{artist_clean} {title_clean}".strip() if artist_clean else title_clean
+        if not query:
+            return None
 
         try:
             response = requests.post(
@@ -62,7 +110,7 @@ class NetEaseProvider(LyricsProvider):
                 data={
                     's': query,
                     'type': 1,  # 1 = songs
-                    'limit': 5,
+                    'limit': 10,
                     'offset': 0,
                 },
                 headers=self._headers,
@@ -72,23 +120,41 @@ class NetEaseProvider(LyricsProvider):
                 data = response.json()
                 songs = data.get('result', {}).get('songs', [])
 
-                # Try to find a good match
+                if not songs:
+                    return None
+
+                # Score all results and pick the best
+                best = None
+                best_score = -1
+
                 for song in songs:
-                    song_name = song.get('name', '').lower()
-                    artists = [a.get('name', '').lower() for a in song.get('artists', [])]
+                    song_name = song.get('name', '')
+                    artists = [a.get('name', '') for a in song.get('artists', [])]
+                    combined_artist = ', '.join(artists) if artists else ''
+                    # NetEase duration is in milliseconds
+                    song_duration_ms = song.get('duration')
+                    song_duration_s = song_duration_ms / 1000 if song_duration_ms else None
 
-                    # Check if track name matches
-                    if track_name.lower() in song_name or song_name in track_name.lower():
-                        # If artist specified, verify it matches
-                        if artist_name:
-                            if any(artist_name.lower() in a or a in artist_name.lower() for a in artists):
-                                return song.get('id')
-                        else:
-                            return song.get('id')
+                    match = self.score_result(
+                        orig_title or title_clean, orig_artist or artist_clean,
+                        orig_duration,
+                        song_name, combined_artist,
+                        song_duration_s
+                    )
 
-                # If no good match, return first result
-                if songs:
-                    return songs[0].get('id')
+                    if match['score'] > best_score:
+                        best_score = match['score']
+                        best = {
+                            'id': song.get('id'),
+                            'name': song_name,
+                            'artist_name': combined_artist,
+                            'duration': song_duration_s,
+                            'match_score': match['score'],
+                        }
+
+                # Only return if score is reasonable (> 0.3)
+                if best and best_score > 0.3:
+                    return best
 
         except requests.exceptions.RequestException as e:
             logger.error(f"NetEase search error: {e}")
@@ -135,7 +201,7 @@ class NetEaseProvider(LyricsProvider):
                         'synced_lyrics': synced_lyrics,
                         'plain_lyrics': plain_lyrics,
                         'provider': self.name,
-                        'score': 0.85 if synced_lyrics else 0.6,
+                        'score': 0.0,  # Will be replaced by computed score
                     }
 
         except requests.exceptions.RequestException as e:

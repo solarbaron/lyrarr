@@ -129,6 +129,15 @@ export const getProviderHealth = () => api.get('/metadata/providers/health').the
 export const resetProviderHealth = (provider?: string) => api.post('/metadata/providers/health', { provider }).then(r => r.data);
 export const updateTrack = (id: number, data: Record<string, unknown>) => api.put(`/tracks/${id}`, data).then(r => r.data);
 export const updateArtist = (id: number, data: Record<string, unknown>) => api.put(`/artists/${id}`, data).then(r => r.data);
+export const getTrackStreamUrl = (trackId: number) => `/api/tracks/${trackId}/stream`;
+export const resetLyricsRetry = (data: { trackIds?: number[]; all?: boolean }) =>
+  api.post('/metadata/lyrics/reset-retry', data).then(r => r.data);
+export const checkLyricsCoherence = (albumId: number) =>
+  api.get(`/metadata/lyrics/coherence/${albumId}`).then(r => r.data);
+export const validateTrackLrc = (trackId: number) =>
+  api.get(`/metadata/lyrics/validate-lrc/${trackId}`).then(r => r.data);
+export const repairTrackLrc = (trackId: number) =>
+  api.post(`/metadata/lyrics/validate-lrc/${trackId}`).then(r => r.data);
 
 // ---------- Search ----------
 export const globalSearch = (q: string) => api.get('/search', { params: { q } }).then(r => r.data);

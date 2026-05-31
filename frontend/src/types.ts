@@ -160,8 +160,29 @@ export interface CoverResult {
 export interface LyricsResult {
   synced_lyrics?: string;
   plain_lyrics?: string;
+  synced_preview?: string;
+  plain_preview?: string;
   provider: string;
   score?: number;
   title?: string;
   artist?: string;
+  track_name?: string;
+  artist_name?: string;
+  source_id?: number;
+  source_url?: string;
+  duration?: number;
+  match_details?: {
+    score?: number;
+    title_score?: number;
+    artist_score?: number;
+    duration_score?: number;
+    title_query?: string;
+    title_result?: string;
+    artist_query?: string;
+    artist_result?: string;
+    duration_diff?: number;
+  };
+  providers_agree?: number;
+  is_composite?: boolean;
+  agreement_providers?: string[];
 }

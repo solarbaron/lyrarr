@@ -5,12 +5,13 @@ from flask_restx import Namespace, Resource
 
 from lyrarr.app.database import (
     database, TableAlbums, TableTracks, TableArtists,
-    select
+    select, func
 )
 from lyrarr.metadata.manager import (
     cover_providers, lyrics_providers,
     save_cover_art, save_lyrics
 )
+from lyrarr.metadata.merge import merge_provider_results
 
 api_ns_metadata = Namespace('metadata', description='Metadata search and download')
 
@@ -80,7 +81,11 @@ class CoverDownload(Resource):
 @api_ns_metadata.route('/metadata/lyrics/search/<int:track_id>')
 class LyricsSearch(Resource):
     def get(self, track_id):
-        """Search for lyrics for a track across all providers."""
+        """Search for lyrics for a track across all providers.
+
+        Optional query param:
+            custom_query: Override automatic title/artist with a manual search string
+        """
         track = database.execute(
             select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
         ).scalars().first()
@@ -95,49 +100,46 @@ class LyricsSearch(Resource):
             select(TableAlbums).where(TableAlbums.lidarrAlbumId == track.albumId)
         ).scalars().first()
 
-        from difflib import SequenceMatcher
+        # Custom query override: user manually entered a search string
+        custom_query = request.args.get('custom_query', '').strip()
 
         results = []
         for name, provider in lyrics_providers.items():
             try:
-                hits = provider.search(
-                    track_name=track.title,
-                    artist_name=artist.name if artist else None,
-                    album_name=album.title if album else None,
-                    duration=track.duration,
-                )
+                if custom_query:
+                    # Use custom query as track name, no artist filter
+                    hits = provider.search(
+                        track_name=custom_query,
+                        artist_name=None,
+                        album_name=None,
+                        duration=track.duration,
+                    )
+                else:
+                    hits = provider.search(
+                        track_name=track.title,
+                        artist_name=artist.name if artist else None,
+                        album_name=album.title if album else None,
+                        duration=track.duration,
+                        mb_recording_id=track.mbId if track.mbId else None,
+                    )
                 for h in hits:
                     h['provider'] = name
+                    h['_provider'] = name  # Used by merge_provider_results()
                     # Truncate lyrics for preview (first 300 chars)
                     if h.get('synced_lyrics'):
                         h['synced_preview'] = h['synced_lyrics'][:300]
                     if h.get('plain_lyrics'):
                         h['plain_preview'] = h['plain_lyrics'][:300]
 
-                    # Fuzzy match breakdown for confidence display
-                    match_details = {}
-                    result_title = (h.get('title') or h.get('track_name') or '').lower()
-                    result_artist = (h.get('artist') or h.get('artist_name') or '').lower()
+                    # match_details is now computed inside each provider
+                    # via LyricsProvider.score_result() — no duplicate scoring needed
 
-                    if result_title and track.title:
-                        match_details['title_score'] = round(
-                            SequenceMatcher(None, track.title.lower(), result_title).ratio() * 100)
-                        match_details['title_query'] = track.title
-                        match_details['title_result'] = h.get('title') or h.get('track_name') or ''
-                    if result_artist and artist:
-                        match_details['artist_score'] = round(
-                            SequenceMatcher(None, artist.name.lower(), result_artist).ratio() * 100)
-                        match_details['artist_query'] = artist.name
-                        match_details['artist_result'] = h.get('artist') or h.get('artist_name') or ''
-                    if h.get('duration') and track.duration:
-                        duration_diff = abs((h.get('duration') or 0) - track.duration)
-                        match_details['duration_diff'] = duration_diff
-                        match_details['duration_score'] = max(0, round(100 - duration_diff * 10))
-
-                    h['match_details'] = match_details
                 results.extend(hits)
             except Exception as e:
                 pass
+
+        # Merge and de-duplicate cross-provider results
+        results = merge_provider_results(results)
 
         # Sort by score
         results.sort(key=lambda x: x.get('score', 0), reverse=True)
@@ -162,6 +164,110 @@ class LyricsDownload(Resource):
         if success:
             return {'message': 'Lyrics saved successfully'}
         return {'message': 'Failed to save lyrics'}, 500
+
+
+@api_ns_metadata.route('/metadata/lyrics/reset-retry')
+class LyricsResetRetry(Resource):
+    def post(self):
+        """Reset retry backoff state for tracks so they are re-checked immediately.
+
+        Body: { trackIds: [1,2,3] }  OR  { all: true }
+        """
+        from lyrarr.app.database import update
+        from datetime import datetime
+
+        data = request.get_json() or {}
+        track_ids = data.get('trackIds', [])
+        reset_all = data.get('all', False)
+
+        if reset_all:
+            count = database.execute(
+                select(func.count()).select_from(TableTracks)
+                .where(TableTracks.lyrics_retry_count > 0)
+            ).scalar() or 0
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lyrics_retry_count > 0)
+                .values(lyrics_retry_count=0, lyrics_retry_after=None,
+                        updated_at_timestamp=datetime.now())
+            )
+            return {'message': f'Reset retry state for {count} tracks', 'count': count}
+        elif track_ids:
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId.in_(track_ids))
+                .values(lyrics_retry_count=0, lyrics_retry_after=None,
+                        lyrics_status='missing',
+                        updated_at_timestamp=datetime.now())
+            )
+            return {'message': f'Reset retry state for {len(track_ids)} tracks', 'count': len(track_ids)}
+        return {'message': 'trackIds or all=true required'}, 400
+
+
+@api_ns_metadata.route('/metadata/lyrics/coherence/<int:album_id>')
+class LyricsCoherence(Resource):
+    def get(self, album_id):
+        """Run album-level lyrics coherence check."""
+        from lyrarr.metadata.coherence import check_album_coherence
+        return check_album_coherence(album_id)
+
+
+@api_ns_metadata.route('/metadata/lyrics/validate-lrc/<int:track_id>')
+class LyricsValidateLrc(Resource):
+    def get(self, track_id):
+        """Validate LRC timestamps for a track's lyrics."""
+        import os
+        from lyrarr.metadata.lrc_repair import validate_lrc
+
+        track = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not track or not track.path:
+            return {'message': 'Track not found'}, 404
+
+        track_base = os.path.splitext(track.path)[0]
+        filepath = track_base + '.lrc'
+        if not os.path.isfile(filepath):
+            return {'message': 'No lyrics file found'}, 404
+
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        return validate_lrc(content)
+
+    def post(self, track_id):
+        """Validate and repair LRC timestamps, saving the repaired version."""
+        import os
+        from lyrarr.metadata.lrc_repair import validate_lrc, repair_lrc
+        from datetime import datetime
+
+        track = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not track or not track.path:
+            return {'message': 'Track not found'}, 404
+
+        track_base = os.path.splitext(track.path)[0]
+        filepath = track_base + '.lrc'
+        if not os.path.isfile(filepath):
+            return {'message': 'No lyrics file found'}, 404
+
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        validation = validate_lrc(content)
+        if validation.get('valid'):
+            return {'message': 'LRC is already valid', 'validation': validation}
+
+        repaired = repair_lrc(content)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(repaired)
+
+        return {
+            'message': 'LRC repaired and saved',
+            'before': validation,
+            'after': validate_lrc(repaired),
+        }
 
 
 @api_ns_metadata.route('/metadata/lyrics/versions/<int:track_id>')

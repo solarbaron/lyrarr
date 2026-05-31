@@ -10,7 +10,9 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+
+from sqlalchemy import or_
 
 from lyrarr.app.database import (
     database, TableAlbums, TableTracks, TableArtists, TableProfiles, TableHistory,
@@ -20,8 +22,14 @@ from lyrarr.metadata.registry import cover_providers as _cover_providers, lyrics
 from lyrarr.metadata.embed import embed_cover_in_files
 from lyrarr.app.event_handler import event_stream
 from lyrarr.metadata.provider_utils import rate_limiter, health_tracker
+from lyrarr.metadata.validation import validate_lyrics
+from lyrarr.metadata.lrc_repair import validate_lrc, repair_lrc
+from lyrarr.metadata.merge import merge_provider_results
 
 logger = logging.getLogger(__name__)
+
+# Retry backoff schedule (days)
+_BACKOFF_DAYS = [1, 3, 7, 14, 30]
 
 
 def _get_profile(profile_id):
@@ -257,14 +265,20 @@ def download_missing_lyrics(album_ids=None):
     Args:
         album_ids: Optional list of album IDs to scope the download. If None, all missing.
     """
-    query = select(TableTracks).where(TableTracks.lyrics_status == 'missing')
+    query = select(TableTracks).where(
+        TableTracks.lyrics_status == 'missing',
+        or_(
+            TableTracks.lyrics_retry_after.is_(None),
+            TableTracks.lyrics_retry_after <= datetime.now()
+        )
+    )
     if album_ids:
         query = query.where(TableTracks.albumId.in_(album_ids))
     tracks = database.execute(query).scalars().all()
 
     if not tracks:
         logger.info("No tracks with missing lyrics")
-        return
+        return 0
 
     logger.info(f"Processing {len(tracks)} tracks with missing lyrics...")
     downloaded = 0
@@ -331,6 +345,7 @@ def download_missing_lyrics(album_ids=None):
                     artist_name=artist_name,
                     album_name=album.title if album else None,
                     duration=track.duration,
+                    mb_recording_id=track.mbId if track.mbId else None,
                 )
 
                 if results:
@@ -344,7 +359,23 @@ def download_missing_lyrics(album_ids=None):
                 health_tracker.record_failure(provider_name, str(e))
 
         if not all_results:
+            # No results — apply retry backoff
+            retry_count = getattr(track, 'lyrics_retry_count', 0) or 0
+            days = _BACKOFF_DAYS[min(retry_count, len(_BACKOFF_DAYS) - 1)]
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                .values(
+                    lyrics_retry_count=retry_count + 1,
+                    lyrics_retry_after=datetime.now() + timedelta(days=days),
+                    updated_at_timestamp=datetime.now()
+                )
+            )
+            logger.debug(f"No lyrics found for '{track.title}' — retry #{retry_count + 1} in {days}d")
             continue
+
+        # --- Merge and de-duplicate cross-provider results ---
+        all_results = merge_provider_results(all_results, selection_mode)
 
         # Sort based on selection mode
         if selection_mode == 'prefer_synced':
@@ -391,9 +422,66 @@ def download_missing_lyrics(album_ids=None):
                 else:
                     continue
 
-                # Always save as .lrc — sync status determined from content
+                # --- Quality validation ---
+                validation = validate_lyrics(
+                    content,
+                    track_title=track.title,
+                    artist_name=artist_name,
+                    duration_ms=track.duration,
+                    artist_language=getattr(artist, 'language_override', None) if artist else None,
+                )
+
+                if validation.get('is_instrumental'):
+                    database.execute(
+                        update(TableTracks)
+                        .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                        .values(
+                            lyrics_status='instrumental',
+                            lyrics_retry_count=0,
+                            lyrics_retry_after=None,
+                            updated_at_timestamp=datetime.now()
+                        )
+                    )
+                    logger.info(f"⊘ Instrumental: '{track.title}' — skipping lyrics save")
+                    continue
+
+                has_errors = any(i['severity'] == 'error' for i in validation.get('issues', []))
+                if has_errors:
+                    # Check if a non-truncated alternative exists
+                    if validation.get('is_truncated') and len(all_results) > 1:
+                        for alt in all_results[1:]:
+                            alt_content = alt.get('synced_lyrics') or alt.get('plain_lyrics')
+                            if alt_content:
+                                alt_val = validate_lyrics(alt_content, duration_ms=track.duration)
+                                if not any(i['severity'] == 'error' for i in alt_val.get('issues', [])):
+                                    content = alt_content
+                                    lyrics_data = alt
+                                    used_provider = alt.get('_provider', 'unknown')
+                                    has_errors = False
+                                    logger.debug(f"Swapped truncated result for '{track.title}' to alt from {used_provider}")
+                                    break
+
+                if has_errors:
+                    for issue in validation.get('issues', []):
+                        if issue['severity'] == 'error':
+                            logger.warning(f"Validation error for '{track.title}': {issue['message']}")
+                    continue
+
+                # Log warnings (non-blocking)
+                for issue in validation.get('issues', []):
+                    if issue['severity'] == 'warning':
+                        logger.debug(f"Validation warning for '{track.title}': {issue['message']}")
+
+                # --- LRC timestamp repair (for synced content) ---
                 from lyrarr.metadata.language_detect import is_synced_lyrics
                 is_synced_file = is_synced_lyrics(content)
+
+                if is_synced_file:
+                    lrc_validation = validate_lrc(content)
+                    if not lrc_validation.get('valid'):
+                        issue_types = [i['type'] for i in lrc_validation.get('issues', [])]
+                        logger.debug(f"LRC repair for '{track.title}': {issue_types}")
+                        content = repair_lrc(content)
 
                 track_base = os.path.splitext(track.path)[0]
                 filepath = track_base + '.lrc'
@@ -414,6 +502,26 @@ def download_missing_lyrics(album_ids=None):
                     logger.debug(f"Lyrics already exist on disk for '{track.title}', updated DB status")
                     continue
 
+                # Save old lyrics as a version before overwriting
+                if os.path.isfile(filepath) and eff['overwrite_existing']:
+                    try:
+                        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                            old_content = f.read()
+                        if old_content.strip():
+                            from lyrarr.app.database import TableLyricsVersions
+                            from sqlalchemy.dialects.sqlite import insert as ver_insert_old
+                            database.execute(
+                                ver_insert_old(TableLyricsVersions).values(
+                                    lidarrTrackId=track.lidarrTrackId,
+                                    content=old_content,
+                                    lyrics_type='synced' if is_synced_file else 'plain',
+                                    provider='overwritten',
+                                    timestamp=datetime.now(),
+                                )
+                            )
+                    except Exception:
+                        pass  # Non-critical — version saving shouldn't block download
+
                 # Remove old lyrics file before writing new one
                 old_path = track_base + '.lrc'
                 if os.path.isfile(old_path) and old_path != filepath:
@@ -433,7 +541,7 @@ def download_missing_lyrics(album_ids=None):
                     from lyrarr.metadata.language_detect import detect_language
                     detected_lang = detect_language(content)
 
-                # Update database
+                # Update database (also reset retry state on success)
                 database.execute(
                     update(TableTracks)
                     .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
@@ -442,6 +550,8 @@ def download_missing_lyrics(album_ids=None):
                         hasLyrics=True,
                         is_synced=is_synced_file,
                         detected_language=detected_lang,
+                        lyrics_retry_count=0,
+                        lyrics_retry_after=None,
                         updated_at_timestamp=datetime.now()
                     )
                 )
@@ -463,7 +573,13 @@ def download_missing_lyrics(album_ids=None):
                 )
 
                 downloaded += 1
-                logger.info(f"✓ Lyrics: '{track.title}' ({used_provider}, score={lyrics_data.get('score', '?')}, lang={detected_lang}, synced={is_synced_file})")
+                md = lyrics_data.get('match_details', {})
+                score_breakdown = ''
+                if md:
+                    score_breakdown = f" [title={md.get('title_score', '?')} artist={md.get('artist_score', '?')} dur={md.get('duration_score', '?')}]"
+                score_val = lyrics_data.get('score')
+                score_str = f"{score_val:.0%}" if isinstance(score_val, (int, float)) else '?'
+                logger.info(f"✓ Lyrics: '{track.title}' ({used_provider}, score={score_str}{score_breakdown}, lang={detected_lang}, synced={is_synced_file})")
                 event_stream(type='download_progress', payload={
                     'metadata_type': 'lyrics', 'title': track.title, 'provider': used_provider,
                     'language': detected_lang, 'is_synced': is_synced_file,
@@ -512,6 +628,22 @@ def download_missing_lyrics(album_ids=None):
 
 
     logger.info(f"Lyrics download complete: {downloaded}/{len(tracks)} downloaded")
+
+    # --- Album coherence check ---
+    if downloaded > 0:
+        try:
+            from lyrarr.metadata.coherence import check_album_coherence
+            album_ids_processed = set(t.albumId for t in tracks if t.albumId)
+            for aid in album_ids_processed:
+                report = check_album_coherence(aid)
+                if report.get('issues'):
+                    logger.info(f"Coherence check for '{report.get('album_title', '?')}': "
+                                f"{len(report['issues'])} issue(s)")
+                    for issue in report['issues']:
+                        logger.warning(f"  ⚠ [{issue['issue']}] '{issue['track_title']}': {issue['detail']}")
+        except Exception as e:
+            logger.debug(f"Coherence check skipped: {e}")
+
     return downloaded
 
 

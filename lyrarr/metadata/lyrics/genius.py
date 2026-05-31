@@ -4,12 +4,17 @@ import logging
 
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
+from lyrarr.metadata.normalize import clean_for_search
 
 logger = logging.getLogger(__name__)
 
 
 class GeniusProvider(LyricsProvider):
-    """Fetch plain lyrics from Genius using the lyricsgenius library."""
+    """Fetch plain lyrics from Genius using the lyricsgenius library.
+
+    Uses normalized title/artist for search queries and computes real
+    match scores against the returned results.
+    """
 
     name = 'genius'
 
@@ -35,12 +40,13 @@ class GeniusProvider(LyricsProvider):
         ]
         return genius
 
-    def search(self, track_name=None, artist_name=None, **kwargs):
+    def search(self, track_name=None, artist_name=None, duration=None, **kwargs):
         """
         Search for lyrics on Genius.
 
-        Returns a list of lyrics results:
-        [{'plain_lyrics': str, 'synced_lyrics': None, 'provider': str, 'score': float}]
+        Returns a list of lyrics results with computed match scores:
+        [{'plain_lyrics': str, 'synced_lyrics': None, 'provider': str,
+          'score': float, 'match_details': dict}]
         """
         if not self._api_key:
             logger.debug("Genius API key not configured, skipping")
@@ -49,11 +55,22 @@ class GeniusProvider(LyricsProvider):
         if not track_name:
             return []
 
+        meta = clean_for_search(track_name, artist_name or '')
         results = []
 
         try:
             genius = self._get_client()
-            song = genius.search_song(track_name, artist_name)
+
+            # Add featuring artists to excluded terms to avoid matching
+            # a completely different song by a featured artist
+            for feat in meta.get('featuring', []):
+                genius.excluded_terms.append(f"({feat})")
+
+            # Search with normalized title and primary artist
+            song = genius.search_song(
+                meta['title_clean'],
+                meta['artist_primary'] or meta['artist_clean']
+            )
 
             if song and song.lyrics:
                 lyrics = song.lyrics
@@ -63,14 +80,22 @@ class GeniusProvider(LyricsProvider):
                 lyrics = self._clean_lyrics(lyrics, song.title)
 
                 if lyrics and len(lyrics.strip()) > 10:
+                    # Compute real match score (Genius has no duration info)
+                    match = self.score_result(
+                        track_name, artist_name, duration,
+                        song.title or '', song.artist or '',
+                        None  # Genius doesn't provide duration
+                    )
+
                     results.append({
                         'synced_lyrics': None,  # Genius doesn't provide synced lyrics
                         'plain_lyrics': lyrics,
                         'provider': self.name,
-                        'score': 0.6,
+                        'score': match['score'],
+                        'match_details': match,
                         'source_url': song.url or '',
-                        'title': song.title or '',
-                        'artist': song.artist or '',
+                        'track_name': song.title or '',
+                        'artist_name': song.artist or '',
                     })
 
         except ImportError:

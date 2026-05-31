@@ -162,9 +162,11 @@ class TableTracks(Base):
     duration = mapped_column(Integer)  # in milliseconds
     path = mapped_column(Text)
     hasLyrics = mapped_column(Boolean, default=False)  # whether synced lyrics exist
-    lyrics_status = mapped_column(Text, default='missing')  # missing, available, manual, blacklisted
+    lyrics_status = mapped_column(Text, default='missing')  # missing, available, manual, blacklisted, instrumental
     detected_language = mapped_column(Text, nullable=True)  # ISO 639-1 code (e.g. 'en', 'ja')
     is_synced = mapped_column(Boolean, default=False)  # whether current lyrics file is synced LRC
+    lyrics_retry_count = mapped_column(Integer, default=0)  # number of failed lyrics search attempts
+    lyrics_retry_after = mapped_column(DateTime, nullable=True)  # next eligible retry time (exponential backoff)
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
 

@@ -126,3 +126,43 @@ class TrackItem(Resource):
             select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
         ).scalars().first().to_dict()
 
+
+@api_ns_tracks.route('/tracks/<int:track_id>/stream')
+class TrackStream(Resource):
+    def get(self, track_id):
+        """Stream a track's audio file for in-browser playback.
+
+        Supports Range headers for seeking. Used by the synced lyrics preview player.
+        """
+        import os
+        from flask import send_file
+
+        row = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not row or not row.path:
+            return {'message': 'Track not found'}, 404
+
+        if not os.path.isfile(row.path):
+            return {'message': 'Audio file not found on disk'}, 404
+
+        # Map extension to MIME type
+        ext = os.path.splitext(row.path)[1].lower()
+        mime_types = {
+            '.mp3': 'audio/mpeg',
+            '.flac': 'audio/flac',
+            '.m4a': 'audio/mp4',
+            '.ogg': 'audio/ogg',
+            '.opus': 'audio/opus',
+            '.wav': 'audio/wav',
+            '.wma': 'audio/x-ms-wma',
+            '.aac': 'audio/aac',
+        }
+        mimetype = mime_types.get(ext, 'application/octet-stream')
+
+        return send_file(
+            row.path,
+            mimetype=mimetype,
+            conditional=True,  # Enables Range header support
+        )
+

@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Loader, Button, Group, Textarea, Select, FileButton, SegmentedControl, Collapse } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useState, useEffect, useMemo } from 'react';
-import { readLyrics, uploadLyrics, saveLyricsFromEditor, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion } from '../api';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { readLyrics, uploadLyrics, saveLyricsFromEditor, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion, getTrackStreamUrl } from '../api';
 
 interface Props {
   trackId: number;
@@ -31,29 +31,216 @@ const LANGUAGES = [
   { value: 'sv', label: 'Swedish' },
 ];
 
-/** Parse LRC timestamps and render syntax-highlighted preview */
-function LrcPreview({ content }: { content: string }) {
-  const lines = useMemo(() => {
-    const tsRegex = /^(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)/;
-    return content.split('\n').map((line, i) => {
-      const m = tsRegex.exec(line.trim());
-      if (m) {
-        return { key: i, tag: m[1], text: m[2], isTs: true };
+/** Parse LRC timestamp string to seconds */
+function parseLrcTimestamp(ts: string): number {
+  const m = ts.match(/\[(\d{1,2}):(\d{2})[.:](\d{2,3})\]/);
+  if (!m) return -1;
+  const mins = parseInt(m[1]);
+  const secs = parseInt(m[2]);
+  const frac = m[3].length === 3 ? parseInt(m[3]) / 1000 : parseInt(m[3]) / 100;
+  return mins * 60 + secs + frac;
+}
+
+/** Parse LRC content into structured lines */
+function parseLrcLines(content: string) {
+  const tsRegex = /^(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)/;
+  return content.split('\n').map((line, i) => {
+    const m = tsRegex.exec(line.trim());
+    if (m) {
+      return { key: i, tag: m[1], text: m[2], isTs: true, time: parseLrcTimestamp(m[1]) };
+    }
+    return { key: i, tag: '', text: line, isTs: false, time: -1 };
+  });
+}
+
+/** Synced lyrics preview with audio playback */
+function SyncedLyricsPlayer({ content, trackId }: { content: string; trackId: number }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+
+  const lines = useMemo(() => parseLrcLines(content), [content]);
+  const timedLines = useMemo(() => lines.filter(l => l.isTs && l.time >= 0), [lines]);
+
+  // Pre-build a Map from line key -> timedLines index for O(1) lookup
+  const timedIndexMap = useMemo(() => {
+    const map = new Map<number, number>();
+    timedLines.forEach((l, i) => map.set(l.key, i));
+    return map;
+  }, [timedLines]);
+
+  // Find the current active line index
+  const activeIdx = useMemo(() => {
+    let idx = -1;
+    for (let i = 0; i < timedLines.length; i++) {
+      if (timedLines[i].time <= currentTime) idx = i;
+      else break;
+    }
+    return idx;
+  }, [timedLines, currentTime]);
+
+  // Update current time from audio element
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onDurationChange = () => setDuration(audio.duration || 0);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('durationchange', onDurationChange);
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('durationchange', onDurationChange);
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+    };
+  }, []);
+
+  // Pause audio when component unmounts (modal closes)
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
       }
-      return { key: i, tag: '', text: line, isTs: false };
-    });
-  }, [content]);
+    };
+  }, []);
+
+  // Auto-scroll to active line
+  useEffect(() => {
+    if (activeIdx < 0 || !containerRef.current) return;
+    const activeEl = containerRef.current.querySelector(`[data-line-idx="${activeIdx}"]`);
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activeIdx]);
+
+  const seekTo = useCallback((time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+    }
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    if (!audioRef.current) return;
+    if (audioRef.current.paused) audioRef.current.play();
+    else audioRef.current.pause();
+  }, []);
+
+  const formatTime = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const secs = Math.floor(s % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  };
+
+  return (
+    <div>
+      {/* Audio element (hidden) */}
+      <audio ref={audioRef} src={getTrackStreamUrl(trackId)} preload="metadata" />
+
+      {/* Mini player controls */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+        padding: '6px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.3)',
+      }}>
+        <button
+          onClick={togglePlay}
+          style={{
+            background: 'var(--accent-primary)', border: 'none', borderRadius: '50%',
+            width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: '#fff', fontSize: 12, flexShrink: 0,
+          }}
+        >
+          {isPlaying ? '⏸' : '▶'}
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 40, flexShrink: 0 }}>
+          {formatTime(currentTime)}
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          value={currentTime}
+          onChange={(e) => seekTo(parseFloat(e.target.value))}
+          style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+        />
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 40, textAlign: 'right', flexShrink: 0 }}>
+          {formatTime(duration)}
+        </span>
+      </div>
+
+      {/* Synced lyrics display */}
+      <div
+        ref={containerRef}
+        style={{
+          padding: '10px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.25)',
+          fontSize: 12, lineHeight: 1.8, maxHeight: 400, overflow: 'auto',
+          fontFamily: 'monospace', scrollBehavior: 'smooth',
+        }}
+      >
+        {lines.map((l) => {
+          const timedIdx = timedIndexMap.get(l.key) ?? -1;
+          const isActive = timedIdx >= 0 && timedIdx === activeIdx;
+          return (
+            <div
+              key={l.key}
+              data-line-idx={timedIdx >= 0 ? timedIdx : undefined}
+              style={{
+                minHeight: 20,
+                cursor: l.isTs ? 'pointer' : 'default',
+                padding: '1px 4px',
+                borderRadius: 4,
+                background: isActive ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
+                transition: 'all 0.2s',
+              }}
+              onClick={() => l.isTs && l.time >= 0 && seekTo(l.time)}
+            >
+              {l.isTs ? (
+                <>
+                  <span style={{
+                    color: isActive ? '#a78bfa' : '#8b5cf6',
+                    fontWeight: isActive ? 700 : 600,
+                  }}>
+                    {l.tag}
+                  </span>
+                  <span style={{
+                    color: isActive ? '#fff' : 'var(--text-primary)',
+                    marginLeft: 4,
+                    fontWeight: isActive ? 600 : 400,
+                    transition: 'all 0.2s',
+                  }}>
+                    {l.text}
+                  </span>
+                </>
+              ) : (
+                <span style={{ color: l.text.trim() ? 'var(--text-primary)' : 'transparent' }}>
+                  {l.text || '\u00A0'}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Static LRC preview (no audio) — used when track audio is unavailable */
+function LrcPreview({ content }: { content: string }) {
+  const lines = useMemo(() => parseLrcLines(content), [content]);
 
   return (
     <div style={{
-      padding: '10px 12px',
-      borderRadius: 8,
-      background: 'rgba(0,0,0,0.25)',
-      fontSize: 12,
-      lineHeight: 1.8,
-      maxHeight: 400,
-      overflow: 'auto',
-      fontFamily: 'monospace',
+      padding: '10px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.25)',
+      fontSize: 12, lineHeight: 1.8, maxHeight: 400, overflow: 'auto', fontFamily: 'monospace',
     }}>
       {lines.map(l => (
         <div key={l.key} style={{ minHeight: 20 }}>
@@ -230,9 +417,9 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
             {isSynced && showLrcPreview && (
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--text-secondary)' }}>
-                  🎵 LRC Preview
+                  🎵 Synced Preview
                 </div>
-                <LrcPreview content={content} />
+                <SyncedLyricsPlayer content={content} trackId={trackId} />
               </div>
             )}
           </div>
