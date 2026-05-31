@@ -18,6 +18,7 @@ select = ["E", "F", "I", "W", "B", "UP"]
 ignore = [
     "E501",  # line length is handled by the formatter, not enforced hard
     "B008",  # function calls in argument defaults (common in Flask/restx)
+    "E712",  # `== True/False` is required for SQLAlchemy column expressions
 ]
 
 [tool.pytest.ini_options]
