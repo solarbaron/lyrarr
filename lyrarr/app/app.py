@@ -134,7 +134,8 @@ def create_app():
         """Enforce authentication on all requests based on auth.type setting."""
         path = request.path
 
-        # Auth endpoints and webhooks are always accessible
+        # Auth/status/SSE endpoints are always accessible (see AUTH_EXEMPT_PATHS).
+        # The Lidarr webhook is intentionally NOT here — it honors auth below.
         if path in AUTH_EXEMPT_PATHS:
             return
 

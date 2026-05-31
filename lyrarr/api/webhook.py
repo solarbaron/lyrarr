@@ -6,6 +6,13 @@ Alternative to SignalR for environments where direct network access isn't availa
 
 Configure a Lidarr webhook (Settings → Connect → Webhook) pointing to:
     POST http://lyrarr-host:port/api/webhook/lidarr
+
+If authentication is enabled in Lyrarr, this endpoint is NOT exempt — the
+request must carry valid credentials, otherwise anyone could POST to it to
+force repeated Lidarr syncs. Either add an "X-Api-Key" header with your Lyrarr
+API key to the Lidarr webhook connection, or set the webhook's Basic auth
+username/password to your Lyrarr credentials. With no auth configured, it stays
+open, matching the rest of the app.
 """
 
 import logging
