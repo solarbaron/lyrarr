@@ -592,7 +592,7 @@ class BatchDownload(Resource):
     def post(self):
         """Trigger metadata downloads for specific albums/artists in background."""
         from threading import Thread
-        from lyrarr.metadata.download_worker import download_missing_covers, download_missing_lyrics
+        from lyrarr.metadata.download_worker import run_downloads
         from lyrarr.app.event_handler import event_stream
 
         data = request.get_json() or {}
@@ -620,18 +620,26 @@ class BatchDownload(Resource):
                     'total_lyrics': count if dtype in ('lyrics', 'all') else 0,
                 })
 
-                covers = 0
-                lyrics = 0
+                # run_downloads holds the shared lock, so this manual batch can't
+                # run concurrently with the scheduled job (or another batch) and
+                # double-process the same tracks.
+                result = run_downloads(
+                    album_ids=album_ids or None,
+                    do_covers=dtype in ('covers', 'all'),
+                    do_lyrics=dtype in ('lyrics', 'all'),
+                    source='manual batch',
+                )
 
-                if dtype in ('covers', 'all'):
-                    covers = download_missing_covers(album_ids=album_ids) or 0
-                if dtype in ('lyrics', 'all'):
-                    lyrics = download_missing_lyrics(album_ids=album_ids) or 0
-
-                event_stream(type='download_complete', payload={
-                    'covers': covers, 'lyrics': lyrics,
-                    'message': f'Batch: {covers} covers, {lyrics} lyrics downloaded',
-                })
+                if result.get('skipped'):
+                    event_stream(type='download_complete', payload={
+                        'covers': 0, 'lyrics': 0,
+                        'message': 'Another download run is already in progress',
+                    })
+                else:
+                    event_stream(type='download_complete', payload={
+                        'covers': result['covers'], 'lyrics': result['lyrics'],
+                        'message': f"Batch: {result['covers']} covers, {result['lyrics']} lyrics downloaded",
+                    })
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Batch download error: {e}")
