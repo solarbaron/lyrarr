@@ -277,36 +277,43 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
         translator = GoogleTranslator(source='auto', target=target_lang)
 
         lrc_ts = re.compile(r'(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)')
-        lines = content.split('\n')
-        translated_lines = []
-        original_lines = []
 
-        for line in lines:
+        # Parse each line into (tag, text). tag is the LRC timestamp ('' for
+        # plain lyrics); text is the lyric to translate ('' for blank lines).
+        parsed = []   # list of (tag, text)
+        for line in content.split('\n'):
             stripped = line.strip()
             m = lrc_ts.match(stripped)
-
             if m:
-                tag, text = m.group(1), m.group(2)
-                if text:
-                    try:
-                        trans = translator.translate(text)
-                    except Exception:
-                        trans = text
-                    translated_lines.append(f"{tag} {trans}")
-                    original_lines.append(stripped)
-                else:
-                    translated_lines.append(stripped)
-                    original_lines.append(stripped)
+                parsed.append((m.group(1), m.group(2)))
             elif stripped:
-                try:
-                    trans = translator.translate(stripped)
-                except Exception:
-                    trans = stripped
-                translated_lines.append(trans)
-                original_lines.append(stripped)
+                parsed.append(('', stripped))
             else:
-                translated_lines.append('')
+                parsed.append((None, None))  # blank line
+
+        # Translate the *unique* non-empty texts in one batched pass. Lyrics
+        # repeat heavily (choruses), so de-duping avoids re-translating the same
+        # line and turns hundreds of per-line requests into a handful.
+        unique_texts = list({text for tag, text in parsed if text})
+        translations = _translate_texts(translator, unique_texts)
+
+        def _render(text):
+            return translations.get(text, text) if text else text
+
+        original_lines = []
+        translated_lines = []
+        for tag, text in parsed:
+            if tag is None:  # blank line
                 original_lines.append('')
+                translated_lines.append('')
+            elif tag:        # timestamped line
+                orig = f"{tag} {text}" if text else tag
+                trans = f"{tag} {_render(text)}" if text else tag
+                original_lines.append(orig)
+                translated_lines.append(trans)
+            else:            # plain line
+                original_lines.append(text)
+                translated_lines.append(_render(text))
 
         if mode == 'dual':
             dual = []
@@ -324,4 +331,32 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
     except Exception as e:
         logger.error(f"Translation failed: {e}")
         return None
+
+
+def _translate_texts(translator, texts):
+    """Translate a list of strings, returning an {original: translation} map.
+
+    Uses deep-translator's batch API when available and falls back to
+    per-item translation. Individual failures fall back to the original text
+    so a single bad line never aborts the whole song.
+    """
+    result = {}
+    if not texts:
+        return result
+
+    try:
+        batch = translator.translate_batch(texts)
+        if batch and len(batch) == len(texts):
+            for original, translated in zip(texts, batch):
+                result[original] = translated or original
+            return result
+    except Exception as e:
+        logger.debug(f"Batch translation unavailable, falling back per-line: {e}")
+
+    for text in texts:
+        try:
+            result[text] = translator.translate(text) or text
+        except Exception:
+            result[text] = text
+    return result
 
