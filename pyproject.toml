@@ -1,0 +1,26 @@
+[project]
+name = "lyrarr"
+version = "0.1.0"
+description = "Lidarr companion app for music lyrics and cover art metadata"
+requires-python = ">=3.13"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = ["lyrarr/frontend", "lyrarr/migrations/versions", ".venv", "data"]
+
+[tool.ruff.lint]
+# A pragmatic starter set: real bugs (F), import hygiene (I), and common
+# pyflakes/pycodestyle issues. Kept lenient so it can land on an existing
+# codebase without a churn of style-only changes.
+select = ["E", "F", "I", "W", "B", "UP"]
+ignore = [
+    "E501",  # line length is handled by the formatter, not enforced hard
+    "B008",  # function calls in argument defaults (common in Flask/restx)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
