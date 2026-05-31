@@ -2,7 +2,11 @@
 
 """Tests for the lyrics quality validation pipeline."""
 
-from lyrarr.metadata.validation import _is_language_mismatch, validate_lyrics
+from lyrarr.metadata.validation import (
+    _is_language_mismatch,
+    is_instrumental_title,
+    validate_lyrics,
+)
 
 # A realistic, varied block of lyrics that passes the basic quality gates.
 GOOD_LYRICS = "\n".join([
@@ -55,6 +59,40 @@ class TestValidateLyrics:
             detected_language="ja", artist_language="en",
         )
         assert r["language_mismatch"] is True
+
+
+class TestInstrumentalTitle:
+    def test_detects_instrumental_markers(self):
+        for title in [
+            "Song (Instrumental)",
+            "Song [Instrumental]",
+            "Song - Instrumental",
+            "Song (Instrumental Version)",
+            "Song (Karaoke Version)",
+            "Theme (Off Vocal)",
+            "Track (No Vocals)",
+            "Foo (Backing Track)",
+            "Outro Instrumental",
+        ]:
+            assert is_instrumental_title(title) is True, title
+
+    def test_ignores_non_instrumental_titles(self):
+        for title in [
+            "Love Song",
+            "Instrumentality",          # substring, not a real marker
+            "Fundamental",              # contains "mental", not "instrumental"
+            "The Instrumental Band Jam",  # mid-title word, not a marker
+            "",
+            None,
+        ]:
+            assert is_instrumental_title(title) is False, title
+
+    def test_validate_lyrics_marks_instrumental_by_title(self):
+        # Even with real-looking lyrics content, an instrumental title wins so a
+        # wrong vocal-version match isn't saved.
+        r = validate_lyrics(GOOD_LYRICS, track_title="Song (Instrumental)", duration_ms=200000)
+        assert r["is_instrumental"] is True
+        assert r["valid"] is True
 
 
 class TestLanguageMismatch:
