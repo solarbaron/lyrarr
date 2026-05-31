@@ -274,7 +274,12 @@ def _seconds_to_ts(seconds):
     """Convert seconds to LRC timestamp format [mm:ss.xx]."""
     if seconds < 0:
         seconds = 0
-    minutes = int(seconds) // 60
-    secs = int(seconds) % 60
-    centiseconds = int((seconds - int(seconds)) * 100)
+    # Work in integer centiseconds to avoid float truncation. The naive
+    # int((seconds - int(seconds)) * 100) loses small offsets: 5.01 is stored
+    # as 5.00999…, so the centisecond part truncates to 0 and the 10ms offset
+    # repair_lrc adds to disambiguate duplicate timestamps would vanish.
+    total_cs = int(round(seconds * 100))
+    minutes = total_cs // 6000
+    secs = (total_cs % 6000) // 100
+    centiseconds = total_cs % 100
     return f'[{minutes:02d}:{secs:02d}.{centiseconds:02d}]'
