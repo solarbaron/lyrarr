@@ -58,13 +58,18 @@ def _get_auth_type():
     return getattr(settings.auth, 'type', None)
 
 
-# Paths that should never require auth
+# Paths that should never require auth.
+# NOTE: /api/webhook/lidarr is deliberately NOT exempt. When auth is enabled it
+# must be authenticated (via the X-API-KEY header or Basic auth, both handled in
+# check_authentication) so an unauthenticated caller can't spam it to force
+# repeated Lidarr syncs. Configure the Lidarr Webhook connection to send the API
+# key (or Basic credentials). When no auth is configured it stays open, matching
+# the rest of the app.
 AUTH_EXEMPT_PATHS = frozenset([
     '/api/auth/login',
     '/api/auth/status',
     '/api/auth/logout',
     '/api/events',
-    '/api/webhook/lidarr',
 ])
 
 
