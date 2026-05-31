@@ -5,6 +5,9 @@ import requests
 
 from lyrarr.metadata.base import LyricsProvider
 from lyrarr.metadata.normalize import clean_for_search, normalize_title, duration_ms_to_seconds
+from lyrarr.metadata.provider_utils import (
+    is_transient_status, note_transient_error, rate_limiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +237,9 @@ class LRCLIBProvider(LyricsProvider):
             return None
 
         try:
+            # MusicBrainz allows ~1 req/sec; throttle every call, not just the
+            # first one the worker spaced out, so a burst of lookups can't 503.
+            rate_limiter.wait('musicbrainz')
             response = requests.get(
                 f"{MUSICBRAINZ_BASE_URL}/recording/{recording_id}",
                 params={
@@ -250,8 +256,11 @@ class LRCLIBProvider(LyricsProvider):
                 return response.json()
             elif response.status_code == 404:
                 logger.debug(f"MusicBrainz recording not found: {recording_id}")
-            elif response.status_code == 503:
-                logger.warning("MusicBrainz rate limit hit, skipping ISRC lookup")
+            elif is_transient_status(response.status_code):
+                note_transient_error()
+                logger.warning(
+                    f"MusicBrainz transient error {response.status_code}, skipping ISRC lookup"
+                )
             else:
                 logger.debug(
                     f"MusicBrainz API returned {response.status_code} "
@@ -259,6 +268,7 @@ class LRCLIBProvider(LyricsProvider):
                 )
 
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.debug(f"MusicBrainz API error: {e}")
 
         return None
@@ -303,6 +313,7 @@ class LRCLIBProvider(LyricsProvider):
             params['duration'] = duration_s
 
         try:
+            rate_limiter.wait('lrclib')
             response = requests.get(
                 f"{LRCLIB_BASE_URL}/get",
                 params=params,
@@ -325,7 +336,11 @@ class LRCLIBProvider(LyricsProvider):
                         'album_name': data.get('albumName', ''),
                         'duration': data.get('duration'),
                     }
+            elif is_transient_status(response.status_code):
+                note_transient_error()
+                logger.warning(f"LRCLIB transient error {response.status_code} on exact match")
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.error(f"LRCLIB exact match error: {e}")
 
         return None
@@ -335,12 +350,16 @@ class LRCLIBProvider(LyricsProvider):
         results = []
 
         try:
+            rate_limiter.wait('lrclib')
             response = requests.get(
                 f"{LRCLIB_BASE_URL}/search",
                 params={'q': query},
                 timeout=15,
                 headers={'User-Agent': 'Lyrarr/1.0'}
             )
+            if response.status_code != 200 and is_transient_status(response.status_code):
+                note_transient_error()
+                logger.warning(f"LRCLIB transient error {response.status_code} on search")
             if response.status_code == 200:
                 data = response.json()
                 for item in data[:10]:  # Check top 10 for best scored match
@@ -377,6 +396,7 @@ class LRCLIBProvider(LyricsProvider):
                     })
 
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.error(f"LRCLIB search error: {e}")
 
         # Sort by score

@@ -9,7 +9,7 @@ respecting each album's profile settings.
 import json
 import logging
 import os
-import time
+import threading
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_
@@ -21,15 +21,76 @@ from lyrarr.app.database import (
 from lyrarr.metadata.registry import cover_providers as _cover_providers, lyrics_providers as _lyrics_providers
 from lyrarr.metadata.embed import embed_cover_in_files
 from lyrarr.app.event_handler import event_stream
-from lyrarr.metadata.provider_utils import rate_limiter, health_tracker
-from lyrarr.metadata.validation import validate_lyrics
+from lyrarr.metadata.provider_utils import (
+    begin_search, health_tracker, rate_limiter, search_had_transient_error,
+)
+from lyrarr.metadata.validation import is_instrumental_title, validate_lyrics
 from lyrarr.metadata.lrc_repair import validate_lrc, repair_lrc
 from lyrarr.metadata.merge import merge_provider_results
 
 logger = logging.getLogger(__name__)
 
-# Retry backoff schedule (days)
+# Retry backoff schedule (days) for tracks where no lyrics could be found.
 _BACKOFF_DAYS = [1, 3, 7, 14, 30]
+
+# Transient failures (rate limit / timeout / provider cooldown) retry on the next
+# run instead of consuming the multi-day backoff budget above. This is what stops
+# the "run it over and over for days" behaviour: a track that only failed because
+# of a 429 or timeout comes back quickly rather than being benched.
+_TRANSIENT_RETRY = timedelta(minutes=15)
+
+# Minimum composite match score (0..1) to accept lyrics when the user hasn't set
+# a stricter score_threshold on the profile. Rejects clearly-wrong matches (a
+# completely different song) that would otherwise be saved as nonsense.
+# MusicBrainz-verified matches bypass this floor.
+_MIN_ACCEPT_SCORE = 0.5
+
+# Serializes all download runs so the scheduled job and a manual batch trigger
+# can't process the same "missing lyrics/covers" tracks at the same time.
+_downloads_lock = threading.Lock()
+
+
+def downloads_in_progress():
+    """True if a guarded download run currently holds the lock."""
+    return _downloads_lock.locked()
+
+
+def _plan_retry(retry_count, transient):
+    """Decide when to retry a track that produced no usable lyrics.
+
+    Returns (new_retry_count, retry_after).
+
+    - Transient failures keep the same retry_count and come back in minutes, so
+      rate limits / timeouts don't push a findable track onto a multi-day schedule.
+    - Genuine "not found" advances the exponential day-based backoff.
+    """
+    if transient:
+        return retry_count, datetime.now() + _TRANSIENT_RETRY
+    days = _BACKOFF_DAYS[min(retry_count, len(_BACKOFF_DAYS) - 1)]
+    return retry_count + 1, datetime.now() + timedelta(days=days)
+
+
+def run_downloads(album_ids=None, do_covers=True, do_lyrics=True, source='scheduled'):
+    """Guarded entry point for metadata downloads.
+
+    Acquires a process-wide lock so concurrent triggers (the scheduled job and a
+    manual batch download) don't run at the same time and double-process tracks.
+    If a run is already active, this one is skipped rather than queued.
+    """
+    if not _downloads_lock.acquire(blocking=False):
+        logger.warning(f"Skipping {source} download run — another run is already in progress")
+        event_stream(type='download_skipped', payload={
+            'source': source,
+            'message': 'Another download run is already in progress',
+        })
+        return {'skipped': True, 'covers': 0, 'lyrics': 0}
+
+    try:
+        covers = (download_missing_covers(album_ids=album_ids) or 0) if do_covers else 0
+        lyrics = (download_missing_lyrics(album_ids=album_ids) or 0) if do_lyrics else 0
+        return {'skipped': False, 'covers': covers, 'lyrics': lyrics}
+    finally:
+        _downloads_lock.release()
 
 
 def _get_profile(profile_id):
@@ -308,6 +369,23 @@ def download_missing_lyrics(album_ids=None):
                 logger.debug(f"Skipping track '{track.title}' — lyrics disabled in profile '{profile.name}'")
             continue
 
+        # Instrumental tracks (detected by title) can't have lyrics — classify and
+        # skip so a wrong vocal-version match isn't fetched and saved as nonsense.
+        if is_instrumental_title(track.title):
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                .values(
+                    lyrics_status='instrumental',
+                    hasLyrics=False,
+                    lyrics_retry_count=0,
+                    lyrics_retry_after=None,
+                    updated_at_timestamp=datetime.now(),
+                )
+            )
+            logger.info(f"⊘ Instrumental (title): '{track.title}' — skipping lyrics search")
+            continue
+
         providers = _parse_providers_list(eff['lyrics_providers'])
         if not providers:
             continue
@@ -326,6 +404,9 @@ def download_missing_lyrics(album_ids=None):
 
         # Collect results from ALL providers (for best_score mode)
         all_results = []
+        begin_search()  # reset the per-track transient-error flag
+        providers_attempted = 0
+        providers_in_cooldown = 0
 
         for provider_name in providers:
             provider = _lyrics_providers.get(provider_name)
@@ -334,10 +415,12 @@ def download_missing_lyrics(album_ids=None):
 
             # Skip unhealthy providers
             if not health_tracker.is_available(provider_name):
+                providers_in_cooldown += 1
                 logger.debug(f"Skipping '{provider_name}' — currently in cooldown")
                 continue
 
             rate_limiter.wait(provider_name)
+            providers_attempted += 1
 
             try:
                 results = provider.search(
@@ -352,26 +435,40 @@ def download_missing_lyrics(album_ids=None):
                     for r in results:
                         r['_provider'] = provider_name
                     all_results.extend(results)
-                    health_tracker.record_success(provider_name)
+                # A call that returned without raising means the provider is up,
+                # even if it had no match — reset its consecutive-failure streak.
+                health_tracker.record_success(provider_name)
 
             except Exception as e:
                 logger.error(f"Lyrics search error ({provider_name}) for '{track.title}': {e}")
                 health_tracker.record_failure(provider_name, str(e))
 
         if not all_results:
-            # No results — apply retry backoff
+            # Distinguish a genuine "no lyrics exist" from a transient failure
+            # (rate limit / timeout, or every provider being in cooldown). Only
+            # the former advances the multi-day backoff; transient failures retry
+            # shortly so a single bad moment doesn't bench a findable track.
+            transient = search_had_transient_error() or (
+                providers_attempted == 0 and providers_in_cooldown > 0
+            )
             retry_count = getattr(track, 'lyrics_retry_count', 0) or 0
-            days = _BACKOFF_DAYS[min(retry_count, len(_BACKOFF_DAYS) - 1)]
+            new_count, retry_after = _plan_retry(retry_count, transient)
             database.execute(
                 update(TableTracks)
                 .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
                 .values(
-                    lyrics_retry_count=retry_count + 1,
-                    lyrics_retry_after=datetime.now() + timedelta(days=days),
+                    lyrics_retry_count=new_count,
+                    lyrics_retry_after=retry_after,
                     updated_at_timestamp=datetime.now()
                 )
             )
-            logger.debug(f"No lyrics found for '{track.title}' — retry #{retry_count + 1} in {days}d")
+            if transient:
+                logger.info(
+                    f"Transient failure for '{track.title}' (rate limit/timeout/cooldown) — "
+                    f"will retry shortly without advancing backoff"
+                )
+            else:
+                logger.debug(f"No lyrics found for '{track.title}' — retry #{new_count}")
             continue
 
         # --- Merge and de-duplicate cross-provider results ---
@@ -400,11 +497,30 @@ def download_missing_lyrics(album_ids=None):
         lyrics_data = all_results[0]
         used_provider = lyrics_data.get('_provider', 'unknown')
 
-        # Score threshold: reject if best result is below minimum
-        # score_threshold is stored as 0-100 in profile, provider scores are 0.0-1.0
-        score_threshold = eff.get('score_threshold', 0)
-        if score_threshold > 0 and (lyrics_data.get('score', 0) * 100) < score_threshold:
-            logger.debug(f"Skipping '{track.title}' — best score {lyrics_data.get('score', 0):.0%} below threshold {score_threshold}%")
+        # Reject matches below the acceptance bar. The profile's score_threshold
+        # (0-100) takes precedence; otherwise a built-in floor rejects clearly
+        # wrong matches so odd/instrumental tracks don't get a different song's
+        # lyrics. MusicBrainz-verified matches bypass the floor (authoritative).
+        best_score = lyrics_data.get('score', 0) or 0
+        mb_verified = bool((lyrics_data.get('match_details') or {}).get('mb_matched'))
+        min_score = (eff.get('score_threshold', 0) or 0) / 100.0
+        if not mb_verified:
+            min_score = max(min_score, _MIN_ACCEPT_SCORE)
+        if best_score < min_score:
+            retry_count = getattr(track, 'lyrics_retry_count', 0) or 0
+            new_count, retry_after = _plan_retry(retry_count, False)
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                .values(
+                    lyrics_retry_count=new_count,
+                    lyrics_retry_after=retry_after,
+                    updated_at_timestamp=datetime.now()
+                )
+            )
+            logger.debug(
+                f"Skipping '{track.title}' — best match {best_score:.0%} below minimum {min_score:.0%}"
+            )
             continue
 
         if lyrics_data and track.path:
@@ -666,18 +782,14 @@ def run_metadata_downloads():
         'total_lyrics': total_lyrics_count,
     })
 
-    covers_downloaded = 0
-    lyrics_downloaded = 0
+    # run_downloads holds the shared lock so this can't overlap a manual batch run.
+    result = run_downloads(source='scheduled')
+    if result.get('skipped'):
+        logger.info("Scheduled metadata download skipped — another run is in progress")
+        return
 
-    try:
-        covers_downloaded = download_missing_covers() or 0
-    except Exception as e:
-        logger.error(f"Cover art download task failed: {e}")
-
-    try:
-        lyrics_downloaded = download_missing_lyrics() or 0
-    except Exception as e:
-        logger.error(f"Lyrics download task failed: {e}")
+    covers_downloaded = result['covers']
+    lyrics_downloaded = result['lyrics']
 
     event_stream(type='download_complete', payload={
         'covers': covers_downloaded, 'lyrics': lyrics_downloaded,

@@ -184,6 +184,43 @@ def retry_with_backoff(fn, max_retries=2, base_delay=1.0, provider_name=''):
     return None
 
 
+class ProviderTransientError(Exception):
+    """A provider call failed transiently (timeout, rate limit, 5xx, connection
+    error) rather than genuinely finding no result.
+
+    The download worker distinguishes these from "no lyrics exist" so that a
+    rate-limited or timed-out track is retried soon instead of being benched for
+    days on the not-found backoff schedule.
+    """
+
+
+# Per-search transient-error state, kept per-thread so concurrent download
+# threads don't clobber each other. Providers call note_transient_error() when
+# they swallow a transient HTTP failure; the worker brackets each track's search
+# with begin_search() / search_had_transient_error().
+_search_state = threading.local()
+
+
+def begin_search():
+    """Reset the transient-error flag at the start of a track's lyrics search."""
+    _search_state.transient = False
+
+
+def note_transient_error():
+    """Record that the current search hit a transient failure (timeout/429/5xx)."""
+    _search_state.transient = True
+
+
+def search_had_transient_error():
+    """True if note_transient_error() was called since the last begin_search()."""
+    return getattr(_search_state, 'transient', False)
+
+
+def is_transient_status(status_code):
+    """Whether an HTTP status code represents a transient (retryable) failure."""
+    return status_code == 429 or 500 <= status_code < 600
+
+
 # Singleton instances
 rate_limiter = ProviderRateLimiter()
 health_tracker = ProviderHealthTracker()
