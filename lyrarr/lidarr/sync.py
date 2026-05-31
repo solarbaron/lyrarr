@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import threading
 from datetime import datetime
 
 from lyrarr.app.database import (
@@ -14,6 +15,66 @@ from lyrarr.app.config import settings
 from lyrarr.app.event_handler import event_stream
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Sync coalescing
+#
+# Lidarr fires a SignalR/webhook event for every artist/album/track change. A
+# bulk import can emit dozens of events in seconds. update_artists() is a full
+# library sync, so spawning one thread per event would run many heavy syncs
+# concurrently against both SQLite and the Lidarr API. request_sync() collapses
+# bursts into at most one run (plus a single follow-up if events arrived while a
+# sync was in progress), after a short debounce window.
+# ---------------------------------------------------------------------------
+
+_sync_lock = threading.Lock()
+_sync_running = False
+_sync_pending = False
+_sync_timer = None
+_SYNC_DEBOUNCE_SECONDS = 5
+
+
+def request_sync(force=False, debounce=True):
+    """Request a (coalesced) Lidarr sync. Safe to call from any thread."""
+    global _sync_timer
+
+    if debounce:
+        with _sync_lock:
+            if _sync_timer is not None:
+                _sync_timer.cancel()
+            _sync_timer = threading.Timer(
+                _SYNC_DEBOUNCE_SECONDS, lambda: _start_sync(force)
+            )
+            _sync_timer.daemon = True
+            _sync_timer.start()
+    else:
+        _start_sync(force)
+
+
+def _start_sync(force=False):
+    global _sync_running, _sync_pending
+    with _sync_lock:
+        if _sync_running:
+            # A sync is already in flight — remember to run once more afterwards.
+            _sync_pending = True
+            return
+        _sync_running = True
+    threading.Thread(target=_run_sync, kwargs={'force': force}, daemon=True).start()
+
+
+def _run_sync(force=False):
+    global _sync_running, _sync_pending
+    try:
+        update_artists(force=force)
+    except Exception as e:
+        logger.error(f"Coalesced sync failed: {e}")
+    finally:
+        with _sync_lock:
+            _sync_running = False
+            rerun = _sync_pending
+            _sync_pending = False
+        if rerun:
+            _start_sync(force)
 
 
 def _lidarr_image_url(image_path):

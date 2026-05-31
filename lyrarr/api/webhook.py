@@ -9,12 +9,11 @@ Configure a Lidarr webhook (Settings → Connect → Webhook) pointing to:
 """
 
 import logging
-import threading
 
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.lidarr.sync import update_artists
+from lyrarr.lidarr.sync import request_sync
 from lyrarr.app.event_handler import event_stream
 
 logger = logging.getLogger(__name__)
@@ -53,8 +52,7 @@ class LidarrWebhook(Resource):
         sync_events = {'Download', 'ArtistAdd', 'Rename', 'Retag'}
         if event_type in sync_events:
             logger.info(f"Webhook {event_type}: triggering sync")
-            sync_thread = threading.Thread(target=update_artists, daemon=True)
-            sync_thread.start()
+            request_sync()
             return {'message': f'Sync triggered for {event_type}'}
 
         if event_type == 'Test':

@@ -94,10 +94,10 @@ class SystemHealth(Resource):
 class SystemSync(Resource):
     def post(self):
         """Trigger a Lidarr sync now."""
-        from threading import Thread
-        from lyrarr.lidarr.sync import update_artists
-        sync_thread = Thread(target=update_artists, kwargs={'force': True}, daemon=True)
-        sync_thread.start()
+        from lyrarr.lidarr.sync import request_sync
+        # debounce=False so a manual sync starts immediately, but still respects
+        # the single-flight lock so it won't run on top of an in-progress sync.
+        request_sync(force=True, debounce=False)
         return {'message': 'Sync started'}
 
 

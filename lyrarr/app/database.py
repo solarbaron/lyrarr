@@ -30,6 +30,14 @@ from sqlalchemy import event
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers and a writer coexist instead of blocking each other,
+    # which matters because the web server (many threads), the scheduler, and
+    # the SignalR/webhook sync threads all hit SQLite concurrently.
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # Wait up to 5s for a lock instead of immediately raising "database is locked".
+    cursor.execute("PRAGMA busy_timeout=5000")
+    # NORMAL is safe under WAL and much faster than the default FULL fsync.
+    cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
 
 

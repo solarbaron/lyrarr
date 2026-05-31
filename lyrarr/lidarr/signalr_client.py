@@ -1,10 +1,9 @@
 # coding=utf-8
 
 import logging
-import threading
 
 from lyrarr.app.config import settings
-from lyrarr.lidarr.sync import update_artists
+from lyrarr.lidarr.sync import request_sync
 from lyrarr.app.event_handler import event_stream
 
 logger = logging.getLogger(__name__)
@@ -106,8 +105,7 @@ class LidarrSignalRClient:
                 if cmd_name in ('RefreshArtist', 'RescanArtist', 'ArtistSearch'):
                     logger.info(f"Lidarr command completed: {cmd_name}, triggering sync")
                     if settings.lidarr.sync_on_live:
-                        sync_thread = threading.Thread(target=update_artists, daemon=True)
-                        sync_thread.start()
+                        request_sync()
 
         except Exception as e:
             logger.error(f"Error processing Lidarr SignalR message: {e}")
@@ -120,10 +118,8 @@ class LidarrSignalRClient:
 
 def _trigger_sync(event_name, action, body):
     """Trigger an appropriate sync based on the event type."""
-    # For now, trigger a full sync but log what triggered it
     logger.info(f"Triggering sync for {event_name} {action}")
-    sync_thread = threading.Thread(target=update_artists, daemon=True)
-    sync_thread.start()
+    request_sync()
 
 
 lidarr_signalr_client = LidarrSignalRClient()
