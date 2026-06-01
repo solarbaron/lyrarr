@@ -206,6 +206,10 @@ class TableBlacklist(Base):
     id = mapped_column(Integer, primary_key=True)
     metadata_type = mapped_column(Text)  # 'cover' or 'lyrics'
     provider = mapped_column(Text)
+    # Normalized content hash of a rejected lyrics result (timestamps/metadata
+    # stripped, lowercased). Lets the auto-downloader skip a specific wrong match
+    # on re-runs regardless of which provider returns it.
+    content_hash = mapped_column(Text)
     lidarrAlbumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'))
     lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'))
     timestamp = mapped_column(DateTime, default=datetime.now)

@@ -152,12 +152,13 @@ def save_cover_art(album_id, image_data, provider_name):
 
 
 def save_lyrics(track_id, lyrics_data, provider_name):
-    """Save lyrics to disk as .lrc for a track.
+    """Save lyrics to disk as .lrc for a track (manual/interactive path).
 
-    - Archives the previous version in the database (TableLyricsVersions)
-    - Always saves as .lrc; sync status determined from content
+    Thin wrapper over the shared persist path so manual saves, uploads, and the
+    editor behave identically to the scheduled downloader (archiving, status,
+    history, language detection).
     """
-    from lyrarr.app.database import TableLyricsVersions
+    from lyrarr.metadata.lyrics_store import persist_lyrics
 
     track = database.execute(
         select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
@@ -167,93 +168,20 @@ def save_lyrics(track_id, lyrics_data, provider_name):
         logger.error(f"Track {track_id} not found or has no path")
         return False
 
-    try:
-        # Determine content (prefer synced over plain)
-        synced = lyrics_data.get('synced_lyrics')
-        plain = lyrics_data.get('plain_lyrics')
-
-        if synced:
-            content = synced
-        elif plain:
-            content = plain
-        else:
-            return False
-
-        # Always save as .lrc — sync status is determined from content
-        from lyrarr.metadata.language_detect import is_synced_lyrics
-        lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
-
-        track_base = os.path.splitext(track.path)[0]
-        filepath = track_base + '.lrc'
-
-        # Archive previous version if a lyrics file already exists
-        old_path = track_base + '.lrc'
-        if os.path.isfile(old_path):
-            try:
-                with open(old_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    old_content = f.read()
-
-                if old_content.strip():
-                    old_type = 'synced' if is_synced_lyrics(old_content) else 'plain'
-                    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-                    database.execute(
-                        sqlite_insert(TableLyricsVersions).values(
-                            lidarrTrackId=track_id,
-                            content=old_content,
-                            lyrics_type=old_type,
-                            provider=provider_name,
-                            timestamp=datetime.now(),
-                        )
-                    )
-                    logger.debug(f"Archived previous lyrics for track {track_id}")
-            except Exception as e:
-                logger.warning(f"Failed to archive old lyrics: {e}")
-
-        # Write the new lyrics file
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
-
-        # Language detection & synced status
-        from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
-        detected_lang = detect_language(content)
-        synced_flag = is_synced_lyrics(content)
-
-        # Update database
-        database.execute(
-            update(TableTracks)
-            .where(TableTracks.lidarrTrackId == track_id)
-            .values(
-                lyrics_status='available',
-                hasLyrics=True,
-                detected_language=detected_lang,
-                is_synced=synced_flag,
-                updated_at_timestamp=datetime.now()
-            )
-        )
-
-        # Add to history
-        from sqlalchemy.dialects.sqlite import insert
-        database.execute(
-            insert(TableHistory).values(
-                action=1,
-                description=f"Downloaded lyrics for {track.title}",
-                metadata_type='lyrics',
-                provider=provider_name,
-                lidarrTrackId=track_id,
-                lidarrArtistId=track.artistId,
-                lidarrAlbumId=track.albumId,
-                timestamp=datetime.now(),
-                metadata_path=filepath,
-            )
-        )
-
-        logger.info(f"Saved lyrics for track '{track.title}' to {filepath} (lang={detected_lang}, synced={synced_flag})")
-        return True
-
-    except Exception as e:
-        logger.error(f"Error saving lyrics for track {track_id}: {e}")
+    # Prefer synced over plain
+    content = lyrics_data.get('synced_lyrics') or lyrics_data.get('plain_lyrics')
+    if not content:
         return False
+
+    result = persist_lyrics(track, content, provider_name, detect_lang=True)
+    if not result:
+        return False
+
+    logger.info(
+        f"Saved lyrics for track '{track.title}' to {result['filepath']} "
+        f"(lang={result['detected_language']}, synced={result['is_synced']})"
+    )
+    return True
 
 
 def translate_lyrics_content(content, target_lang, mode='replace'):

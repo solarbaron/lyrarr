@@ -27,6 +27,9 @@ from lyrarr.metadata.provider_utils import (
 from lyrarr.metadata.validation import is_instrumental_title, validate_lyrics
 from lyrarr.metadata.lrc_repair import validate_lrc, repair_lrc
 from lyrarr.metadata.merge import merge_provider_results
+from lyrarr.metadata.lyrics_store import (
+    get_blacklisted_hashes, persist_lyrics, result_is_blacklisted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -474,6 +477,33 @@ def download_missing_lyrics(album_ids=None):
         # --- Merge and de-duplicate cross-provider results ---
         all_results = merge_provider_results(all_results, selection_mode)
 
+        # Drop any results the user has blacklisted for this track, so a rejected
+        # wrong match is never re-selected on re-runs (regardless of provider).
+        blacklisted = get_blacklisted_hashes(track.lidarrTrackId)
+        if blacklisted:
+            kept = [r for r in all_results if not result_is_blacklisted(r, blacklisted)]
+            if len(kept) != len(all_results):
+                logger.debug(
+                    f"Filtered {len(all_results) - len(kept)} blacklisted result(s) for '{track.title}'"
+                )
+            all_results = kept
+
+        if not all_results:
+            # Every candidate was blacklisted — treat as not-found (not transient).
+            retry_count = getattr(track, 'lyrics_retry_count', 0) or 0
+            new_count, retry_after = _plan_retry(retry_count, False)
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                .values(
+                    lyrics_retry_count=new_count,
+                    lyrics_retry_after=retry_after,
+                    updated_at_timestamp=datetime.now()
+                )
+            )
+            logger.debug(f"All candidate lyrics blacklisted for '{track.title}' — retry #{new_count}")
+            continue
+
         # Sort based on selection mode
         if selection_mode == 'prefer_synced':
             # Synced always wins, then sort by score
@@ -600,12 +630,10 @@ def download_missing_lyrics(album_ids=None):
                         content = repair_lrc(content)
 
                 track_base = os.path.splitext(track.path)[0]
-                filepath = track_base + '.lrc'
 
-                # Check if lyrics file already exists on disk
-                lrc_exists = os.path.isfile(track_base + '.lrc')
-                if lrc_exists and not eff['overwrite_existing']:
-                    # File exists but DB says missing — fix the DB status
+                # If a lyrics file already exists and overwrite is off, just
+                # reconcile the DB status instead of refetching/replacing.
+                if os.path.isfile(track_base + '.lrc') and not eff['overwrite_existing']:
                     database.execute(
                         update(TableTracks)
                         .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
@@ -618,75 +646,19 @@ def download_missing_lyrics(album_ids=None):
                     logger.debug(f"Lyrics already exist on disk for '{track.title}', updated DB status")
                     continue
 
-                # Save old lyrics as a version before overwriting
-                if os.path.isfile(filepath) and eff['overwrite_existing']:
-                    try:
-                        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                            old_content = f.read()
-                        if old_content.strip():
-                            from lyrarr.app.database import TableLyricsVersions
-                            from sqlalchemy.dialects.sqlite import insert as ver_insert_old
-                            database.execute(
-                                ver_insert_old(TableLyricsVersions).values(
-                                    lidarrTrackId=track.lidarrTrackId,
-                                    content=old_content,
-                                    lyrics_type='synced' if is_synced_file else 'plain',
-                                    provider='overwritten',
-                                    timestamp=datetime.now(),
-                                )
-                            )
-                    except Exception:
-                        pass  # Non-critical — version saving shouldn't block download
-
-                # Remove old lyrics file before writing new one
-                old_path = track_base + '.lrc'
-                if os.path.isfile(old_path) and old_path != filepath:
-                    try:
-                        os.remove(old_path)
-                    except Exception:
-                        pass
-
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(content)
-
-                # Language detection
-                detected_lang = None
-                if eff.get('auto_detect_language', True):
-                    from lyrarr.metadata.language_detect import detect_language
-                    detected_lang = detect_language(content)
-
-                # Update database (also reset retry state on success)
-                database.execute(
-                    update(TableTracks)
-                    .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
-                    .values(
-                        lyrics_status='available',
-                        hasLyrics=True,
-                        is_synced=is_synced_file,
-                        detected_language=detected_lang,
-                        lyrics_retry_count=0,
-                        lyrics_retry_after=None,
-                        updated_at_timestamp=datetime.now()
-                    )
+                # Shared write path: archives any existing file, writes the .lrc,
+                # sets status + history, and (optionally) detects language.
+                result = persist_lyrics(
+                    track, content, used_provider,
+                    detect_lang=eff.get('auto_detect_language', True),
                 )
+                if not result:
+                    logger.error(f"Failed to persist lyrics for '{track.title}'")
+                    continue
 
-                # Add to history
-                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-                database.execute(
-                    sqlite_insert(TableHistory).values(
-                        action=1,
-                        description=f"Downloaded lyrics for {track.title}",
-                        metadata_type='lyrics',
-                        provider=used_provider,
-                        lidarrTrackId=track.lidarrTrackId,
-                        lidarrArtistId=track.artistId,
-                        lidarrAlbumId=track.albumId,
-                        timestamp=datetime.now(),
-                        metadata_path=filepath,
-                    )
-                )
+                filepath = result['filepath']
+                detected_lang = result['detected_language']
+                is_synced_file = result['is_synced']
 
                 downloaded += 1
                 md = lyrics_data.get('match_details', {})
