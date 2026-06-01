@@ -39,6 +39,7 @@ export default function SettingsPage() {
     mutationFn: () => testLidarr({
       ip: form.lidarr?.ip, port: form.lidarr?.port,
       base_url: form.lidarr?.base_url, apikey: form.lidarr?.apikey, ssl: form.lidarr?.ssl,
+      verify_ssl: form.lidarr?.verify_ssl,
     }),
     onSuccess: (data: any) => notifications.show({ title: 'Success', message: data.message || 'Connected!', color: 'green' }),
     onError: (e: any) => notifications.show({ title: 'Error', message: e?.response?.data?.message || 'Failed', color: 'red' }),
@@ -114,6 +115,9 @@ export default function SettingsPage() {
             onChange={(e) => updateField('lidarr', 'apikey', e.currentTarget.value)} styles={inputStyles} />
           <Switch label="SSL" checked={form.lidarr?.ssl || false}
             onChange={(e) => updateField('lidarr', 'ssl', e.currentTarget.checked)}
+            styles={{ label: { color: 'var(--text-secondary)' } }} />
+          <Switch label="Verify SSL Certificate" checked={form.lidarr?.verify_ssl || false}
+            onChange={(e) => updateField('lidarr', 'verify_ssl', e.currentTarget.checked)}
             styles={{ label: { color: 'var(--text-secondary)' } }} />
           <Button variant="light" color="violet" onClick={() => testMutation.mutate()} loading={testMutation.isPending}>
             Test Connection

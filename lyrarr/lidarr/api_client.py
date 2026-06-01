@@ -2,7 +2,6 @@
 
 import logging
 import requests
-from urllib.parse import urljoin
 
 from lyrarr.app.config import settings
 
@@ -37,7 +36,7 @@ class LidarrAPI:
                 headers=self._headers,
                 params=params,
                 timeout=settings.lidarr.http_timeout,
-                verify=False
+                verify=getattr(settings.lidarr, 'verify_ssl', False),
             )
             response.raise_for_status()
             return response.json()

@@ -111,12 +111,13 @@ class TestLidarr(Resource):
         base_url = data.get('base_url', settings.lidarr.base_url)
         apikey = data.get('apikey', settings.lidarr.apikey)
         ssl = data.get('ssl', settings.lidarr.ssl)
+        verify_ssl = data.get('verify_ssl', getattr(settings.lidarr, 'verify_ssl', False))
 
         import requests as req
         protocol = 'https' if ssl else 'http'
         url = f"{protocol}://{ip}:{port}{base_url.rstrip('/')}/api/v1/system/status"
         try:
-            response = req.get(url, headers={'X-Api-Key': apikey}, timeout=10, verify=False)
+            response = req.get(url, headers={'X-Api-Key': apikey}, timeout=10, verify=verify_ssl)
             if response.status_code == 200:
                 version = response.json().get('version', 'unknown')
                 return {'message': f'Connected to Lidarr v{version}'}

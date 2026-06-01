@@ -121,7 +121,7 @@ export const saveSettings = (data: Record<string, unknown>) => api.post('/system
 export const runTask = (taskId: string) => api.post('/system/tasks', { taskId }).then(r => r.data);
 export const getLogs = () => api.get('/system/logs').then(r => r.data);
 export const getHealth = () => api.get('/system/health').then(r => r.data);
-export const testLidarr = (params?: { ip?: string; port?: number; base_url?: string; apikey?: string; ssl?: boolean }) =>
+export const testLidarr = (params?: { ip?: string; port?: number; base_url?: string; apikey?: string; ssl?: boolean; verify_ssl?: boolean }) =>
   api.post('/system/test/lidarr', params || {}).then(r => r.data);
 export const triggerSync = () => api.post('/system/sync').then(r => r.data);
 export const testNotification = () => api.post('/system/test/notification').then(r => r.data);

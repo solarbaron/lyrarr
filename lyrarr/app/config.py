@@ -76,6 +76,7 @@ validators = [
     Validator('lidarr.port', must_exist=True, default=8686, is_type_of=int, gte=1, lte=65535),
     Validator('lidarr.base_url', must_exist=True, default='/', is_type_of=str),
     Validator('lidarr.ssl', must_exist=True, default=False, is_type_of=bool),
+    Validator('lidarr.verify_ssl', must_exist=True, default=False, is_type_of=bool),
     Validator('lidarr.apikey', must_exist=True, default='', is_type_of=str),
     Validator('lidarr.http_timeout', must_exist=True, default=60, is_type_of=int,
               is_in=[60, 120, 180, 240, 300, 600]),
@@ -230,11 +231,20 @@ write_config()
 
 ignore_keys = ['flask_secret_key']
 
+# Subkeys whose values are never sent to the client (login secrets). The UI
+# treats a blank field as "leave unchanged".
+redact_keys = ['password']
+
 array_keys = ['providers', 'exclude', 'path_mappings']
 
 empty_values = ['', 'None', 'null', 'undefined', None, []]
 
 str_keys = ['password']
+
+
+def _is_password_hash(value):
+    """Whether a stored value is already a werkzeug password hash (not plaintext)."""
+    return isinstance(value, str) and value.startswith(('pbkdf2:', 'scrypt:', 'argon2'))
 
 
 def _lowercase_keys(d):
@@ -259,7 +269,11 @@ def get_settings():
             for subk, subv in lowered.items():
                 if subk in ignore_keys:
                     continue
-                if subv in empty_values and subk in array_keys:
+                if subk in redact_keys:
+                    # Never expose login secrets to the client; blank means
+                    # "unchanged" when the form is saved back.
+                    settings_to_return[k][subk] = ''
+                elif subv in empty_values and subk in array_keys:
                     settings_to_return[k][subk] = []
                 else:
                     settings_to_return[k][subk] = subv
@@ -290,6 +304,16 @@ def save_settings(settings_items):
             value = True
         elif value == 'false':
             value = False
+
+        # Password fields: a blank submission means "keep the stored value"
+        # (the client never receives the real value). The auth password is
+        # stored hashed; hash any new plaintext before saving.
+        if settings_keys[-1] == 'password':
+            if value in (None, '', 'None'):
+                continue
+            if key == 'settings-auth-password' and not _is_password_hash(value):
+                from werkzeug.security import generate_password_hash
+                value = generate_password_hash(value)
 
         if key in ['settings-general-base_url', 'settings-lidarr-base_url']:
             value = base_url_slash_cleaner(value)

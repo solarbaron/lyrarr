@@ -31,14 +31,25 @@ class RateLimiter:
 
 def _check_credentials(username, password):
     """Check if username/password match the configured auth credentials.
-    Uses constant-time comparison to prevent timing attacks."""
-    from lyrarr.app.config import settings
+
+    The password is stored as a werkzeug hash; check_password_hash is itself
+    constant-time. A legacy plaintext value (from before hashing) is still
+    accepted via constant-time compare for backward compatibility — it gets
+    upgraded to a hash the next time the password is saved.
+    """
+    from werkzeug.security import check_password_hash
+
+    from lyrarr.app.config import _is_password_hash, settings
     conf_user = getattr(settings.auth, 'username', '') or ''
     conf_pass = getattr(settings.auth, 'password', '') or ''
     if not conf_user or not conf_pass:
         return False
+
     user_match = hmac.compare_digest(username.encode('utf-8'), conf_user.encode('utf-8'))
-    pass_match = hmac.compare_digest(password.encode('utf-8'), conf_pass.encode('utf-8'))
+    if _is_password_hash(conf_pass):
+        pass_match = check_password_hash(conf_pass, password)
+    else:
+        pass_match = hmac.compare_digest(password.encode('utf-8'), conf_pass.encode('utf-8'))
     return user_match and pass_match
 
 

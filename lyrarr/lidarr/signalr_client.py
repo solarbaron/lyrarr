@@ -35,7 +35,7 @@ class LidarrSignalRClient:
             self._connection = HubConnectionBuilder() \
                 .with_url(hub_url, options={
                     "headers": {"X-Api-Key": settings.lidarr.apikey},
-                    "verify_ssl": False,
+                    "verify_ssl": getattr(settings.lidarr, 'verify_ssl', False),
                 }) \
                 .with_automatic_reconnect({
                     "type": "interval",

@@ -12,6 +12,24 @@ from lyrarr.app.config import settings
 
 api_ns_backup = Namespace('backup', description='Backup and restore')
 
+# Sensitive subkeys removed from exported settings so a shared/stored backup
+# file doesn't leak login secrets. (API keys are kept so a restore is useful.)
+_SENSITIVE_SUBKEYS = {'flask_secret_key', 'password'}
+
+
+def _redact_settings(settings_data):
+    """Strip login secrets (flask secret key, passwords) from settings sections."""
+    redacted = {}
+    for section, values in settings_data.items():
+        if isinstance(values, dict):
+            redacted[section] = {
+                k: v for k, v in values.items()
+                if k.lower() not in _SENSITIVE_SUBKEYS
+            }
+        else:
+            redacted[section] = values
+    return redacted
+
 
 @api_ns_backup.route('/system/backup')
 class BackupExport(Resource):
@@ -34,7 +52,7 @@ class BackupExport(Resource):
         backup = {
             'version': 1,
             'profiles': profiles_data,
-            'settings': settings_data,
+            'settings': _redact_settings(settings_data),
         }
 
         data = json.dumps(backup, indent=2, default=str)
@@ -156,7 +174,7 @@ def run_scheduled_backup():
             'version': 1,
             'timestamp': datetime.now().isoformat(),
             'profiles': profiles_data,
-            'settings': settings_data,
+            'settings': _redact_settings(settings_data),
         }
 
         # Write backup file
