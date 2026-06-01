@@ -1,14 +1,15 @@
-# coding=utf-8
 
 """
 Backup and restore endpoints for profiles and settings.
 """
 
 import json
-from flask import request, Response
+
+from flask import Response, request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import database, TableProfiles, select
+
 from lyrarr.app.config import settings
+from lyrarr.app.database import TableProfiles, database, select
 
 api_ns_backup = Namespace('backup', description='Backup and restore')
 
@@ -76,9 +77,11 @@ class BackupRestore(Resource):
 
         # Restore profiles
         if 'profiles' in data:
-            from sqlalchemy.dialects.sqlite import insert
-            from lyrarr.app.database import update
             from datetime import datetime
+
+            from sqlalchemy.dialects.sqlite import insert
+
+            from lyrarr.app.database import update
 
             for p in data['profiles']:
                 existing = database.execute(
@@ -120,12 +123,14 @@ class BackupRestore(Resource):
         # Restore settings (write to config file)
         if 'settings' in data:
             import os
+
             import yaml
+
             from lyrarr.app.get_args import args
 
             config_path = os.path.join(args.config_dir, 'config', 'config.yaml')
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path) as f:
                     current_config = yaml.safe_load(f) or {}
             except Exception:
                 current_config = {}
@@ -145,8 +150,8 @@ class BackupRestore(Resource):
 
 def run_scheduled_backup():
     """Standalone backup function for scheduler — saves a backup to disk and cleans old ones."""
-    import os
     import logging
+    import os
     from datetime import datetime, timedelta
 
     logger = logging.getLogger(__name__)

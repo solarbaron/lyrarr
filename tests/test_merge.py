@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """Tests for cross-provider lyrics result merging and de-duplication."""
 

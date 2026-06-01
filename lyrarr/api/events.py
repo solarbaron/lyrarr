@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 SSE (Server-Sent Events) endpoint for real-time activity feed.
@@ -6,6 +5,7 @@ Uses per-client pub/sub so all connected browsers receive every event.
 """
 
 from flask import Blueprint, Response
+
 from lyrarr.app.event_handler import subscribe, unsubscribe
 
 events_bp = Blueprint('events', __name__)

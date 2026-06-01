@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Album-level lyrics coherence analysis.
@@ -15,10 +14,7 @@ import os
 import re
 from collections import Counter
 
-from lyrarr.app.database import (
-    database, TableTracks, TableAlbums, TableArtists,
-    select
-)
+from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, select
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +51,7 @@ def check_album_coherence(album_id):
         return {'album_id': album_id, 'album_title': '?', 'total_tracks': 0,
                 'tracks_with_lyrics': 0, 'issues': []}
 
-    artist = database.execute(
+    database.execute(
         select(TableArtists).where(TableArtists.lidarrArtistId == album.artistId)
     ).scalars().first()
 
@@ -80,7 +76,7 @@ def check_album_coherence(album_id):
 
         if os.path.isfile(filepath):
             try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(filepath, encoding='utf-8', errors='ignore') as f:
                     content = f.read()
                 line_count = _count_text_lines(content)
             except Exception:

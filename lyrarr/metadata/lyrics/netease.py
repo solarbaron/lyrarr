@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 NetEase Cloud Music Lyrics Provider.
@@ -8,11 +7,11 @@ No API key required. Excellent coverage for both Western and Asian music.
 
 import logging
 import re
+
 import requests
-from difflib import SequenceMatcher
 
 from lyrarr.metadata.base import LyricsProvider
-from lyrarr.metadata.normalize import clean_for_search, normalize_title, normalize_artist
+from lyrarr.metadata.normalize import clean_for_search
 
 logger = logging.getLogger(__name__)
 

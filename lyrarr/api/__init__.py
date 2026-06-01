@@ -1,19 +1,18 @@
-# coding=utf-8
 
 from flask import Blueprint
 from flask_restx import Api
 
-from .artists import api_ns_artists
 from .albums import api_ns_albums
-from .tracks import api_ns_tracks
-from .metadata import api_ns_metadata
+from .artists import api_ns_artists
+from .backup import api_ns_backup
+from .dashboard import api_ns_dashboard
 from .history import api_ns_history
-from .wanted import api_ns_wanted
-from .system import api_ns_system
+from .metadata import api_ns_metadata
 from .profiles import api_ns_profiles
 from .search import api_ns_search
-from .dashboard import api_ns_dashboard
-from .backup import api_ns_backup
+from .system import api_ns_system
+from .tracks import api_ns_tracks
+from .wanted import api_ns_wanted
 from .webhook import api_ns_webhook
 
 api_ns_list = [

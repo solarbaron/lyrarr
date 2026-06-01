@@ -1,7 +1,7 @@
-# coding=utf-8
 
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import database, TableHistory, select
+
+from lyrarr.app.database import TableHistory, database, select
 
 api_ns_history = Namespace('history', description='History operations')
 

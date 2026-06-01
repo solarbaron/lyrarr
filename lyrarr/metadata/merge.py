@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Cross-provider lyrics result merging and duplicate detection.

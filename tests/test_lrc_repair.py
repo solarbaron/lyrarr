@@ -1,11 +1,10 @@
-# coding=utf-8
 
 """Tests for LRC timestamp validation and repair."""
 
 from lyrarr.metadata.lrc_repair import (
+    _TS_PATTERN,
     _parse_ts_to_seconds,
     _seconds_to_ts,
-    _TS_PATTERN,
     repair_lrc,
     validate_lrc,
 )

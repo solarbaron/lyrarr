@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """Tests for the fuzzy match scorer used to rank lyrics provider results."""
 

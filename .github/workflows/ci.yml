@@ -25,10 +25,7 @@ jobs:
       - name: Install tooling
         run: pip install pytest ruff
 
-      - name: Lint (informational)
-        # Existing code has pre-existing findings being cleaned up
-        # incrementally; surface them without failing the build for now.
-        continue-on-error: true
+      - name: Lint
         run: ruff check lyrarr tests
 
       - name: Run tests

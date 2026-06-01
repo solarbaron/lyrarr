@@ -1,4 +1,3 @@
-# coding=utf-8
 
 APP_NAME = 'Lyrarr'
 DEFAULT_PORT = 6868

@@ -1,16 +1,9 @@
-# coding=utf-8
 
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.app.database import (
-    database, TableAlbums, TableTracks, TableArtists,
-    select, func
-)
-from lyrarr.metadata.manager import (
-    cover_providers, lyrics_providers,
-    save_cover_art, save_lyrics
-)
+from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, func, select
+from lyrarr.metadata.manager import cover_providers, lyrics_providers, save_cover_art, save_lyrics
 from lyrarr.metadata.merge import merge_provider_results
 
 api_ns_metadata = Namespace('metadata', description='Metadata search and download')
@@ -47,7 +40,7 @@ class CoverSearch(Resource):
                 for h in hits:
                     h['provider'] = name
                 results.extend(hits)
-            except Exception as e:
+            except Exception:
                 pass
 
         return {'results': results, 'albumId': album_id}
@@ -135,7 +128,7 @@ class LyricsSearch(Resource):
                     # via LyricsProvider.score_result() — no duplicate scoring needed
 
                 results.extend(hits)
-            except Exception as e:
+            except Exception:
                 pass
 
         # Merge and de-duplicate cross-provider results
@@ -307,8 +300,9 @@ class LyricsResetRetry(Resource):
 
         Body: { trackIds: [1,2,3] }  OR  { all: true }
         """
-        from lyrarr.app.database import update
         from datetime import datetime
+
+        from lyrarr.app.database import update
 
         data = request.get_json() or {}
         track_ids = data.get('trackIds', [])
@@ -351,6 +345,7 @@ class LyricsValidateLrc(Resource):
     def get(self, track_id):
         """Validate LRC timestamps for a track's lyrics."""
         import os
+
         from lyrarr.metadata.lrc_repair import validate_lrc
 
         track = database.execute(
@@ -364,7 +359,7 @@ class LyricsValidateLrc(Resource):
         if not os.path.isfile(filepath):
             return {'message': 'No lyrics file found'}, 404
 
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(filepath, encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
         return validate_lrc(content)
@@ -372,8 +367,8 @@ class LyricsValidateLrc(Resource):
     def post(self, track_id):
         """Validate and repair LRC timestamps, saving the repaired version."""
         import os
-        from lyrarr.metadata.lrc_repair import validate_lrc, repair_lrc
-        from datetime import datetime
+
+        from lyrarr.metadata.lrc_repair import repair_lrc, validate_lrc
 
         track = database.execute(
             select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
@@ -386,7 +381,7 @@ class LyricsValidateLrc(Resource):
         if not os.path.isfile(filepath):
             return {'message': 'No lyrics file found'}, 404
 
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(filepath, encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
         validation = validate_lrc(content)
@@ -461,7 +456,7 @@ class LyricsRead(Resource):
         filepath = track_base + '.lrc'
         if os.path.exists(filepath):
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
+                with open(filepath, encoding='utf-8') as f:
                     content = f.read()
                 from lyrarr.metadata.language_detect import is_synced_lyrics
                 lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
@@ -511,7 +506,7 @@ class LyricsUpload(Resource):
 
         success = save_lyrics(track_id, lyrics_data, 'upload')
         if success:
-            return {'message': f'Lyrics uploaded for track'}
+            return {'message': 'Lyrics uploaded for track'}
         return {'message': 'Failed to save lyrics'}, 500
 
 
@@ -608,6 +603,7 @@ class LyricsSyncGenerate(Resource):
         """
         import os
         from difflib import SequenceMatcher
+
         from lyrarr.app.config import settings
 
         data = request.get_json() or {}
@@ -726,8 +722,9 @@ class BatchDownload(Resource):
     def post(self):
         """Trigger metadata downloads for specific albums/artists in background."""
         from threading import Thread
-        from lyrarr.metadata.download_worker import run_downloads
+
         from lyrarr.app.event_handler import event_stream
+        from lyrarr.metadata.download_worker import run_downloads
 
         data = request.get_json() or {}
         album_ids = data.get('albumIds', [])
@@ -796,8 +793,9 @@ class BatchTranslate(Resource):
         Runs in a background thread.
         """
         from threading import Thread
-        from lyrarr.app.event_handler import event_stream
+
         from lyrarr.app.database import update
+        from lyrarr.app.event_handler import event_stream
 
         data = request.get_json() or {}
         album_ids = data.get('albumIds', [])
@@ -830,14 +828,15 @@ class BatchTranslate(Resource):
             return {'message': 'No eligible tracks found (all tracks already have detected language)'}, 200
 
         def _run():
-            import os
             import logging
+            import os
             log = logging.getLogger(__name__)
             translated = 0
             failed = 0
 
             try:
                 from deep_translator import GoogleTranslator
+
                 from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
 
                 event_stream(type='batch_translate_start', payload={
@@ -855,7 +854,7 @@ class BatchTranslate(Resource):
                         lyrics_path = track_base + '.lrc'
                         content = None
                         if os.path.isfile(lyrics_path):
-                            with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            with open(lyrics_path, encoding='utf-8', errors='ignore') as f:
                                 content = f.read()
 
                         if not content or not content.strip():
@@ -958,9 +957,10 @@ class BatchSyncGenerate(Resource):
         Runs in a background thread.
         """
         from threading import Thread
-        from lyrarr.app.event_handler import event_stream
-        from lyrarr.app.database import update
+
         from lyrarr.app.config import settings
+        from lyrarr.app.database import update
+        from lyrarr.app.event_handler import event_stream
 
         data = request.get_json() or {}
         album_ids = data.get('albumIds', [])
@@ -1007,8 +1007,8 @@ class BatchSyncGenerate(Resource):
         compute_type = settings.metadata.whisper.compute_type
 
         def _run():
-            import os
             import logging
+            import os
             from difflib import SequenceMatcher
             log = logging.getLogger(__name__)
             synced = 0
@@ -1035,7 +1035,7 @@ class BatchSyncGenerate(Resource):
                         content = None
                         lyrics_path = track_base + '.lrc'
                         if os.path.isfile(lyrics_path):
-                            with open(lyrics_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            with open(lyrics_path, encoding='utf-8', errors='ignore') as f:
                                 content = f.read()
 
                         if not content or not content.strip():
@@ -1147,9 +1147,10 @@ class LyricsBatchRedetect(Resource):
         If trackIds provided, only processes those tracks. Otherwise processes all available.
         """
         import os
+        from threading import Thread
+
         from lyrarr.app.database import update
         from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
-        from threading import Thread
 
         data = request.get_json() or {}
         track_ids = data.get('trackIds', [])
@@ -1174,7 +1175,7 @@ class LyricsBatchRedetect(Resource):
                     fpath = track_base + '.lrc'
                     if os.path.isfile(fpath):
                         try:
-                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                            with open(fpath, encoding='utf-8', errors='ignore') as f:
                                 content = f.read()
                             synced = is_synced_lyrics(content)
                         except Exception:
@@ -1203,7 +1204,7 @@ class LyricsBatchRedetect(Resource):
 class LyricsLanguageStats(Resource):
     def get(self):
         """Get language distribution, synced/plain breakdown, and provider stats."""
-        from lyrarr.app.database import func, TableHistory
+        from lyrarr.app.database import TableHistory, func
 
         # Language distribution
         lang_rows = database.execute(
@@ -1263,12 +1264,14 @@ class LyricsSidecarImport(Resource):
         with detected language and synced status.
         """
         from threading import Thread
-        from lyrarr.app.database import update, database as db_session
+
+        from lyrarr.app.database import database as db_session
+        from lyrarr.app.database import update
         from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
 
         def _run():
-            import os
             import logging
+            import os
             log = logging.getLogger(__name__)
 
             try:
@@ -1287,7 +1290,7 @@ class LyricsSidecarImport(Resource):
                     fpath = track_base + '.lrc'
                     if os.path.isfile(fpath):
                         try:
-                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                            with open(fpath, encoding='utf-8', errors='ignore') as f:
                                 content = f.read()
                             if content.strip():
                                 lang = detect_language(content)
@@ -1327,13 +1330,15 @@ class LyricsAudit(Resource):
         Runs in a background thread with SSE progress events.
         """
         from threading import Thread
+
+        from lyrarr.app.database import database as db_session
+        from lyrarr.app.database import update
         from lyrarr.app.event_handler import event_stream
-        from lyrarr.app.database import update, database as db_session
         from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
 
         def _run():
-            import os
             import logging
+            import os
             log = logging.getLogger(__name__)
 
             try:
@@ -1364,7 +1369,7 @@ class LyricsAudit(Resource):
                     if file_exists:
                         # File exists — ensure DB is correct
                         try:
-                            with open(lrc_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            with open(lrc_path, encoding='utf-8', errors='ignore') as f:
                                 content = f.read()
 
                             if content.strip():

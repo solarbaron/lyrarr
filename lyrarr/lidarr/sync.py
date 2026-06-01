@@ -1,4 +1,3 @@
-# coding=utf-8
 
 import logging
 import os
@@ -6,13 +5,10 @@ import re
 import threading
 from datetime import datetime
 
-from lyrarr.app.database import (
-    database, TableArtists, TableAlbums, TableTracks,
-    select, update
-)
-from lyrarr.lidarr.api_client import lidarr_api
 from lyrarr.app.config import settings
+from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, select, update
 from lyrarr.app.event_handler import event_stream
+from lyrarr.lidarr.api_client import lidarr_api
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +495,7 @@ def update_albums(force=False):
 
 def update_tracks(force=False):
     """Sync track files from Lidarr to the local database.
-    
+
     Joins the /trackfile endpoint (file paths) with /track endpoint
     (real metadata: title, trackNumber, discNumber, duration).
     """

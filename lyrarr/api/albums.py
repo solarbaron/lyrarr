@@ -1,8 +1,8 @@
-# coding=utf-8
 
 from flask import request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import database, TableAlbums, TableArtists, TableTracks, TableProfiles, select, update, func
+
+from lyrarr.app.database import TableAlbums, TableArtists, TableProfiles, TableTracks, database, func, select, update
 
 api_ns_albums = Namespace('albums', description='Album operations')
 
@@ -195,8 +195,9 @@ class AlbumUploadCover(Resource):
         )
 
         # Log to history
-        from lyrarr.app.database import TableHistory
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from lyrarr.app.database import TableHistory
         database.execute(
             sqlite_insert(TableHistory).values(
                 action=1,

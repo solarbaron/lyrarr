@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Webhook endpoints for receiving notifications from Lidarr.
@@ -20,8 +19,8 @@ import logging
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.lidarr.sync import request_artist_sync, request_sync
 from lyrarr.app.event_handler import event_stream
+from lyrarr.lidarr.sync import request_artist_sync, request_sync
 
 logger = logging.getLogger(__name__)
 

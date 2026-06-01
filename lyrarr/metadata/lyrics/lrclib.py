@@ -1,12 +1,14 @@
-# coding=utf-8
 
 import logging
+
 import requests
 
 from lyrarr.metadata.base import LyricsProvider
-from lyrarr.metadata.normalize import clean_for_search, normalize_title, duration_ms_to_seconds
+from lyrarr.metadata.normalize import clean_for_search, duration_ms_to_seconds, normalize_title
 from lyrarr.metadata.provider_utils import (
-    is_transient_status, note_transient_error, rate_limiter,
+    is_transient_status,
+    note_transient_error,
+    rate_limiter,
 )
 
 logger = logging.getLogger(__name__)

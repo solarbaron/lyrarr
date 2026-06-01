@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Lightweight language detection for lyrics text.
@@ -66,7 +65,6 @@ def detect_language(text: str, min_confidence: float = 0.5) -> str | None:
 
     try:
         from langdetect import detect_langs
-        from langdetect.detector_factory import LangDetectException
 
         # Strip LRC formatting before detection
         clean_text = strip_lrc_formatting(text)

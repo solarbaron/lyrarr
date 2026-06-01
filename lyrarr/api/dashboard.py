@@ -1,11 +1,9 @@
-# coding=utf-8
+
+from datetime import datetime, timedelta
 
 from flask_restx import Namespace, Resource
-from datetime import datetime, timedelta
-from lyrarr.app.database import (
-    database, TableHistory, TableAlbums, TableTracks, TableArtists,
-    select, func
-)
+
+from lyrarr.app.database import TableAlbums, TableArtists, TableHistory, TableTracks, database, func, select
 
 api_ns_dashboard = Namespace('dashboard', description='Dashboard statistics')
 

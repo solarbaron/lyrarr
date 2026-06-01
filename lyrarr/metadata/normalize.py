@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Track title and artist name normalization for lyrics matching.
@@ -15,8 +14,6 @@ match accuracy. Handles:
 
 import re
 import unicodedata
-from typing import Optional
-
 
 # ---------- Constants ----------
 
@@ -333,7 +330,7 @@ def clean_for_search(title: str, artist: str) -> dict:
     }
 
 
-def duration_ms_to_seconds(duration) -> Optional[int]:
+def duration_ms_to_seconds(duration) -> int | None:
     """Safely convert a track duration to seconds.
 
     Handles the ambiguity of Lidarr's duration field which stores

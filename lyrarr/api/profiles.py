@@ -1,12 +1,10 @@
-# coding=utf-8
 
 from datetime import datetime
+
 from flask import request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import (
-    database, TableProfiles, TableArtists, TableAlbums,
-    select, update, delete
-)
+
+from lyrarr.app.database import TableAlbums, TableArtists, TableProfiles, database, delete, select, update
 
 api_ns_profiles = Namespace('profiles', description='Metadata profile operations')
 

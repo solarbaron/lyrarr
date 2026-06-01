@@ -1,10 +1,10 @@
-# coding=utf-8
 
 """
 Notification system: Discord webhooks and Telegram bot messages.
 """
 
 import logging
+
 import requests
 
 from lyrarr.app.config import settings

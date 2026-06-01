@@ -1,4 +1,3 @@
-# coding=utf-8
 
 import os
 import platform
@@ -6,7 +5,7 @@ import platform
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.app.config import settings, get_settings, save_settings
+from lyrarr.app.config import get_settings, save_settings, settings
 
 api_ns_system = Namespace('system', description='System operations')
 
@@ -74,7 +73,7 @@ class SystemLogs(Resource):
             return []
 
         try:
-            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(log_file, encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
                 # Return last 500 lines
                 return [line.rstrip() for line in lines[-500:]]

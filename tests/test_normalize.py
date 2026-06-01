@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """Tests for track/artist normalization used in lyrics matching."""
 

@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 LRC timestamp validation and repair.
@@ -12,8 +11,8 @@ automatically repairs them when possible:
   - Malformed timestamp formats
 """
 
-import re
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -207,15 +206,12 @@ def repair_lrc(content):
 
     # --- Repair 3: Interpolate timestamps for plain lines ---
     if plain_lines and ts_lines:
-        # Build a map of content_index → timestamp for known lines
-        ts_map = {idx: ts for ts, text, idx in ts_lines}
-
         for plain_idx, plain_text in plain_lines:
             # Find surrounding timestamps
             prev_ts = None
             next_ts = None
 
-            for ts, text, idx in ts_lines:
+            for ts, _text, idx in ts_lines:
                 if idx < plain_idx:
                     prev_ts = ts
                 elif idx > plain_idx and next_ts is None:

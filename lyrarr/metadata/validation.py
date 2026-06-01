@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Lyrics quality validation pipeline.
@@ -12,8 +11,8 @@ Catches common quality issues in downloaded lyrics before saving to disk:
   - LRC files with only metadata tags but no actual lyrics
 """
 
-import re
 import logging
+import re
 from collections import Counter
 
 logger = logging.getLogger(__name__)

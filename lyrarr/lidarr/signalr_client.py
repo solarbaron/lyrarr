@@ -1,10 +1,9 @@
-# coding=utf-8
 
 import logging
 
 from lyrarr.app.config import settings
-from lyrarr.lidarr.sync import request_artist_sync, request_sync
 from lyrarr.app.event_handler import event_stream
+from lyrarr.lidarr.sync import request_artist_sync, request_sync
 
 logger = logging.getLogger(__name__)
 

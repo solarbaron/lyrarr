@@ -1,16 +1,12 @@
-# coding=utf-8
 
 import logging
 import os
 from datetime import datetime
 
 from lyrarr.app.config import settings
-from lyrarr.app.database import (
-    database, TableAlbums, TableTracks, TableHistory, TableProfiles,
-    select, update
-)
-from lyrarr.metadata.registry import cover_providers, lyrics_providers
+from lyrarr.app.database import TableAlbums, TableHistory, TableProfiles, TableTracks, database, select, update
 from lyrarr.metadata.embed import embed_cover_in_files
+from lyrarr.metadata.registry import cover_providers, lyrics_providers
 
 logger = logging.getLogger(__name__)
 

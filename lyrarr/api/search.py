@@ -1,8 +1,8 @@
-# coding=utf-8
 
 from flask import request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import database, TableArtists, TableAlbums, TableTracks, select
+
+from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, select
 
 api_ns_search = Namespace('search', description='Global search')
 

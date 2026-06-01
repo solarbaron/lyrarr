@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Provider utilities: per-provider rate limiting, retry with exponential backoff,
@@ -6,8 +5,8 @@ and provider health tracking.
 """
 
 import logging
-import time
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 

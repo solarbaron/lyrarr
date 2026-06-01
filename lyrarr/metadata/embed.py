@@ -1,13 +1,12 @@
-# coding=utf-8
 
 """
 Embed cover art into audio files using mutagen.
 Supports MP3 (ID3 APIC), FLAC (Picture), and M4A (covr).
 """
 
+import glob
 import logging
 import os
-import glob
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +28,12 @@ def _get_mime_type(image_format):
 def embed_cover_in_files(album_path, image_data, image_format='jpg'):
     """
     Embed cover art into all audio files in the given album directory.
-    
+
     Args:
         album_path: Path to the album directory
         image_data: Raw image bytes
         image_format: Image format string (jpg, png, etc.)
-    
+
     Returns:
         Number of files successfully updated
     """
@@ -80,8 +79,8 @@ def embed_cover_in_files(album_path, image_data, image_format='jpg'):
 
 def _embed_mp3(filepath, image_data, mime_type):
     """Embed cover art in MP3 file using ID3 APIC tag."""
+    from mutagen.id3 import APIC, ID3, ID3NoHeaderError
     from mutagen.mp3 import MP3
-    from mutagen.id3 import ID3, APIC, ID3NoHeaderError
 
     try:
         audio = MP3(filepath, ID3=ID3)
@@ -149,8 +148,9 @@ def _embed_m4a(filepath, image_data, image_format):
 def _embed_ogg(filepath, image_data, mime_type):
     """Embed cover art in OGG Vorbis file."""
     import base64
-    from mutagen.oggvorbis import OggVorbis
+
     from mutagen.flac import Picture
+    from mutagen.oggvorbis import OggVorbis
 
     audio = OggVorbis(filepath)
 

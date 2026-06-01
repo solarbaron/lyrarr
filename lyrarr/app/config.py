@@ -1,17 +1,16 @@
-# coding=utf-8
 
-import os
 import logging
-
-import yaml
-from dynaconf import Dynaconf, Validator as OriginalValidator
-from dynaconf.loaders.yaml_loader import write
-from dynaconf.validator import ValidationError
-from dynaconf.utils.functional import empty
+import os
 from binascii import hexlify
 from ipaddress import ip_address
 from shutil import move
 from types import MappingProxyType
+
+from dynaconf import Dynaconf
+from dynaconf import Validator as OriginalValidator
+from dynaconf.loaders.yaml_loader import write
+from dynaconf.utils.functional import empty
+from dynaconf.validator import ValidationError
 
 from .get_args import args
 
@@ -197,7 +196,7 @@ while failed_validator:
         else:
             logging.critical(f"Value for {current_validator_details.names[0]} doesn't pass validation and there's no "
                              f"default value. Lyrarr won't work until it's been fixed.")
-            raise SystemExit(4)
+            raise SystemExit(4) from None
 
 
 def write_config():

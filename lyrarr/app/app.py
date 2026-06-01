@@ -1,11 +1,9 @@
-# coding=utf-8
 
-import time
 import hmac
-import secrets
+import time
 from collections import defaultdict
-from flask import Flask, request, jsonify, session
-from functools import wraps
+
+from flask import Flask, jsonify, request, session
 
 
 class RateLimiter:

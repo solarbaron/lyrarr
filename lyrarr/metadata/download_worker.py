@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Scheduled metadata download worker.
@@ -15,21 +14,34 @@ from datetime import datetime, timedelta
 from sqlalchemy import or_
 
 from lyrarr.app.database import (
-    database, TableAlbums, TableTracks, TableArtists, TableProfiles, TableHistory,
-    select, update
+    TableAlbums,
+    TableArtists,
+    TableHistory,
+    TableProfiles,
+    TableTracks,
+    database,
+    select,
+    update,
 )
-from lyrarr.metadata.registry import cover_providers as _cover_providers, lyrics_providers as _lyrics_providers
-from lyrarr.metadata.embed import embed_cover_in_files
 from lyrarr.app.event_handler import event_stream
-from lyrarr.metadata.provider_utils import (
-    begin_search, health_tracker, rate_limiter, search_had_transient_error,
-)
-from lyrarr.metadata.validation import is_instrumental_title, validate_lyrics
-from lyrarr.metadata.lrc_repair import validate_lrc, repair_lrc
-from lyrarr.metadata.merge import merge_provider_results
+from lyrarr.metadata.embed import embed_cover_in_files
+from lyrarr.metadata.lrc_repair import repair_lrc, validate_lrc
 from lyrarr.metadata.lyrics_store import (
-    get_blacklisted_hashes, persist_lyrics, pick_best_synced, result_is_blacklisted,
+    get_blacklisted_hashes,
+    persist_lyrics,
+    pick_best_synced,
+    result_is_blacklisted,
 )
+from lyrarr.metadata.merge import merge_provider_results
+from lyrarr.metadata.provider_utils import (
+    begin_search,
+    health_tracker,
+    rate_limiter,
+    search_had_transient_error,
+)
+from lyrarr.metadata.registry import cover_providers as _cover_providers
+from lyrarr.metadata.registry import lyrics_providers as _lyrics_providers
+from lyrarr.metadata.validation import is_instrumental_title, validate_lyrics
 
 logger = logging.getLogger(__name__)
 
@@ -711,8 +723,9 @@ def download_missing_lyrics(album_ids=None):
                             )
                             if translated:
                                 # Cache original as a version before overwriting
-                                from lyrarr.app.database import TableLyricsVersions
                                 from sqlalchemy.dialects.sqlite import insert as ver_insert
+
+                                from lyrarr.app.database import TableLyricsVersions
                                 database.execute(
                                     ver_insert(TableLyricsVersions).values(
                                         lidarrTrackId=track.lidarrTrackId,

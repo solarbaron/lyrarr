@@ -1,8 +1,8 @@
-# coding=utf-8
 
 from flask import request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import database, TableTracks, select, func
+
+from lyrarr.app.database import TableTracks, database, func, select
 
 api_ns_tracks = Namespace('tracks', description='Track operations')
 
@@ -72,9 +72,11 @@ class TrackItem(Resource):
 
     def put(self, track_id):
         """Update track attributes (e.g., toggle blacklist)."""
-        from flask import request
-        from lyrarr.app.database import update
         from datetime import datetime
+
+        from flask import request
+
+        from lyrarr.app.database import update
 
         data = request.get_json() or {}
         row = database.execute(
@@ -135,6 +137,7 @@ class TrackStream(Resource):
         Supports Range headers for seeking. Used by the synced lyrics preview player.
         """
         import os
+
         from flask import send_file
 
         row = database.execute(
