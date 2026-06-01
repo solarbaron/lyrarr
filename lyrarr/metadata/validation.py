@@ -165,7 +165,6 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     # ------------------------------------------------------------------
     if line_count >= 5:
         line_counts = Counter(clean_lines)
-        most_common_count = line_counts.most_common(1)[0][1] if line_counts else 0
         unique_ratio = len(line_counts) / line_count if line_count > 0 else 1.0
 
         if unique_ratio < DUPLICATE_LINE_THRESHOLD:
