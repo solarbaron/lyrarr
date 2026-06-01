@@ -1,13 +1,10 @@
-# coding=utf-8
 
 import logging
 import os
-import re
 import sys
 from logging.handlers import RotatingFileHandler
 
 from .get_args import args
-from .config import settings
 
 
 def configure_logging(debug=False):

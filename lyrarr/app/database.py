@@ -1,19 +1,27 @@
-# coding=utf-8
 
 import atexit
 import logging
 import os
 import signal
-
 from datetime import datetime
 
-from sqlalchemy import create_engine, DateTime, ForeignKey, Integer, Text, Boolean, func, text
-from sqlalchemy import update, delete, select, func  # noqa W0611
-from sqlalchemy.orm import scoped_session, sessionmaker, mapped_column, close_all_sessions
+from sqlalchemy import (  # noqa W0611
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Text,
+    create_engine,
+    delete,
+    func,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import close_all_sessions, mapped_column, scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from .config import settings
 from .get_args import args
 
 logger = logging.getLogger(__name__)
@@ -22,14 +30,22 @@ url = f'sqlite:///{os.path.join(args.config_dir, "db", "lyrarr.db")}'
 logger.debug(f"Connecting to SQLite database: {url}")
 engine = create_engine(url, poolclass=NullPool, isolation_level="AUTOCOMMIT")
 
-from sqlalchemy.engine import Engine
 from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers and a writer coexist instead of blocking each other,
+    # which matters because the web server (many threads), the scheduler, and
+    # the SignalR/webhook sync threads all hit SQLite concurrently.
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # Wait up to 5s for a lock instead of immediately raising "database is locked".
+    cursor.execute("PRAGMA busy_timeout=5000")
+    # NORMAL is safe under WAL and much faster than the default FULL fsync.
+    cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
 
 
@@ -198,6 +214,10 @@ class TableBlacklist(Base):
     id = mapped_column(Integer, primary_key=True)
     metadata_type = mapped_column(Text)  # 'cover' or 'lyrics'
     provider = mapped_column(Text)
+    # Normalized content hash of a rejected lyrics result (timestamps/metadata
+    # stripped, lowercased). Lets the auto-downloader skip a specific wrong match
+    # on re-runs regardless of which provider returns it.
+    content_hash = mapped_column(Text)
     lidarrAlbumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'))
     lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'))
     timestamp = mapped_column(DateTime, default=datetime.now)
@@ -263,7 +283,8 @@ def init_db():
     metadata.create_all(engine)
 
     # Auto-migrate: add any missing columns to existing tables
-    from sqlalchemy import inspect as sa_inspect, text
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
     inspector = sa_inspect(engine)
     for table in metadata.sorted_tables:
         if not inspector.has_table(table.name):
@@ -272,9 +293,15 @@ def init_db():
         for col in table.columns:
             if col.name not in existing_cols:
                 col_type = col.type.compile(engine.dialect)
+                # Only emit a literal DEFAULT for scalar (non-callable) defaults.
+                # A callable default like datetime.now would render as a Python
+                # repr and produce invalid SQL; columns with such defaults are
+                # simply added without a DEFAULT (existing rows get NULL, and the
+                # ORM applies the default on subsequent writes).
                 default_clause = ''
-                if col.default is not None:
-                    default_clause = f" DEFAULT {col.default.arg!r}"
+                default_arg = getattr(col.default, 'arg', None) if col.default is not None else None
+                if default_arg is not None and not callable(default_arg):
+                    default_clause = f" DEFAULT {default_arg!r}"
                 with engine.begin() as conn:
                     conn.execute(text(
                         f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col_type}{default_clause}'
@@ -290,9 +317,10 @@ def init_db():
     inspector2 = sa_inspect2(engine)
     if not inspector2.has_table('alembic_version'):
         try:
-            from alembic.config import Config as AlembicConfig
-            from alembic import command as alembic_cmd
             import os as _os
+
+            from alembic import command as alembic_cmd
+            from alembic.config import Config as AlembicConfig
             alembic_ini = _os.path.join(_os.path.dirname(__file__), '..', '..', 'alembic.ini')
             if _os.path.exists(alembic_ini):
                 alembic_cfg = AlembicConfig(alembic_ini)

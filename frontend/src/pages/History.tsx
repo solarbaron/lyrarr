@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { Loader } from '@mantine/core';
 import { getHistory } from '../api';
+import PageHeader from '../components/PageHeader';
+import { SkeletonTable } from '../components/Skeleton';
 
 const actionLabels: Record<number, string> = {
   1: 'Downloaded',
@@ -12,26 +13,20 @@ const actionLabels: Record<number, string> = {
 export default function HistoryPage() {
   const { data: history = [], isLoading } = useQuery({ queryKey: ['history'], queryFn: getHistory });
 
-  if (isLoading) {
-    return (
-      <div className="empty-state"><Loader color="violet" size="lg" /></div>
-    );
-  }
-
   return (
     <div className="fade-in">
-      <div className="page-header">
-        <h1 className="page-title">History</h1>
-        <p className="page-subtitle">Recent metadata actions</p>
-      </div>
+      <PageHeader title="History" subtitle="Recent metadata actions" />
 
-      {history.length === 0 ? (
+      {isLoading ? (
+        <SkeletonTable rows={8} />
+      ) : history.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">📋</div>
           <div className="empty-state-title">No History</div>
           <div className="empty-state-message">Metadata actions will appear here.</div>
         </div>
       ) : (
+        <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
@@ -60,6 +55,7 @@ export default function HistoryPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
-# coding=utf-8
 
 import logging
+
 import requests
 
 from lyrarr.metadata.base import CoverProvider

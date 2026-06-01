@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Provider utilities: per-provider rate limiting, retry with exponential backoff,
@@ -6,11 +5,10 @@ and provider health tracking.
 """
 
 import logging
-import time
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from functools import wraps
 
 logger = logging.getLogger(__name__)
 
@@ -36,20 +34,27 @@ class ProviderRateLimiter:
     }
 
     def __init__(self):
-        self._last_call = {}
+        # Per-provider monotonic time at which the next call is permitted.
+        self._next_allowed = {}
         self._lock = threading.Lock()
 
     def wait(self, provider_name):
-        """Block until the rate limit for this provider allows a new call."""
-        rate = self.DEFAULT_RATES.get(provider_name, 1.0)
+        """Block until the rate limit for this provider allows a new call.
 
+        Uses a reservation model: under the lock we only compute and reserve this
+        provider's slot, then sleep *outside* the lock. This keeps the lock from
+        being held during the sleep, so a slow/strict provider can't stall calls
+        to other providers, and concurrent calls to the same provider queue with
+        correct spacing.
+        """
+        rate = self.DEFAULT_RATES.get(provider_name, 1.0)
+        now = time.monotonic()
         with self._lock:
-            last = self._last_call.get(provider_name, 0)
-            elapsed = time.monotonic() - last
-            if elapsed < rate:
-                wait_time = rate - elapsed
-                time.sleep(wait_time)
-            self._last_call[provider_name] = time.monotonic()
+            scheduled = max(now, self._next_allowed.get(provider_name, 0.0))
+            self._next_allowed[provider_name] = scheduled + rate
+        delay = scheduled - now
+        if delay > 0:
+            time.sleep(delay)
 
 
 class ProviderHealthTracker:
@@ -182,6 +187,43 @@ def retry_with_backoff(fn, max_retries=2, base_delay=1.0, provider_name=''):
     if last_error:
         logger.warning(f"[{provider_name}] All {max_retries + 1} attempts failed: {last_error}")
     return None
+
+
+class ProviderTransientError(Exception):
+    """A provider call failed transiently (timeout, rate limit, 5xx, connection
+    error) rather than genuinely finding no result.
+
+    The download worker distinguishes these from "no lyrics exist" so that a
+    rate-limited or timed-out track is retried soon instead of being benched for
+    days on the not-found backoff schedule.
+    """
+
+
+# Per-search transient-error state, kept per-thread so concurrent download
+# threads don't clobber each other. Providers call note_transient_error() when
+# they swallow a transient HTTP failure; the worker brackets each track's search
+# with begin_search() / search_had_transient_error().
+_search_state = threading.local()
+
+
+def begin_search():
+    """Reset the transient-error flag at the start of a track's lyrics search."""
+    _search_state.transient = False
+
+
+def note_transient_error():
+    """Record that the current search hit a transient failure (timeout/429/5xx)."""
+    _search_state.transient = True
+
+
+def search_had_transient_error():
+    """True if note_transient_error() was called since the last begin_search()."""
+    return getattr(_search_state, 'transient', False)
+
+
+def is_transient_status(status_code):
+    """Whether an HTTP status code represents a transient (retryable) failure."""
+    return status_code == 429 or 500 <= status_code < 600
 
 
 # Singleton instances

@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Lightweight language detection for lyrics text.
@@ -9,6 +8,16 @@ import logging
 import re
 
 logger = logging.getLogger(__name__)
+
+# langdetect is non-deterministic by default: it seeds its RNG from the system
+# clock, so the same lyrics can resolve to different languages across runs and
+# keep churning the "undetected language" tab. A fixed seed makes detection
+# reproducible.
+try:
+    from langdetect import DetectorFactory
+    DetectorFactory.seed = 0
+except Exception:  # pragma: no cover - langdetect optional at import time
+    pass
 
 # LRC timestamp pattern: [mm:ss.xx] or [mm:ss:xx]
 _LRC_TIMESTAMP = re.compile(r'\[\d{1,2}:\d{2}[.:]\d{2,3}\]\s*')
@@ -56,7 +65,6 @@ def detect_language(text: str, min_confidence: float = 0.5) -> str | None:
 
     try:
         from langdetect import detect_langs
-        from langdetect.detector_factory import LangDetectException
 
         # Strip LRC formatting before detection
         clean_text = strip_lrc_formatting(text)

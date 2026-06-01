@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Deezer Cover Art Provider.
@@ -7,6 +6,7 @@ No API key required.
 """
 
 import logging
+
 import requests
 
 from lyrarr.metadata.base import CoverProvider

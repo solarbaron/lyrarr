@@ -1,0 +1,37 @@
+[project]
+name = "lyrarr"
+version = "0.1.0"
+description = "Lidarr companion app for music lyrics and cover art metadata"
+requires-python = ">=3.13"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = ["lyrarr/frontend", "lyrarr/migrations/versions", ".venv", "data"]
+
+[tool.ruff.lint]
+# A pragmatic starter set: real bugs (F), import hygiene (I), and common
+# pyflakes/pycodestyle issues.
+select = ["E", "F", "I", "W", "B", "UP"]
+ignore = [
+    "E501",  # line length is handled by the formatter, not enforced hard
+    "B008",  # function calls in argument defaults (common in Flask/restx)
+    "E712",  # `== True/False` is required for SQLAlchemy column expressions
+    "E711",  # `== None` is required for SQLAlchemy column expressions
+    "B905",  # zip() strict= — default (False) is the intended behavior here
+]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules intentionally import after top-of-file code runs:
+# database.py registers a SQLAlchemy event after the engine is created; main.py
+# sets sys.path and configures logging before importing app modules; alembic's
+# env.py follows the generated template.
+"lyrarr/app/database.py" = ["E402"]
+"lyrarr/main.py" = ["E402"]
+"lyrarr/migrations/env.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

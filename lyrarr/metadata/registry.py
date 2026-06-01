@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Provider plugin registry with auto-discovery.
@@ -22,7 +21,6 @@ import inspect
 import logging
 import os
 import pkgutil
-from typing import Dict
 
 from lyrarr.metadata.base import CoverProvider, LyricsProvider
 
@@ -33,18 +31,18 @@ class ProviderRegistry:
     """Central registry for metadata providers with auto-discovery."""
 
     def __init__(self):
-        self._cover_providers: Dict[str, CoverProvider] = {}
-        self._lyrics_providers: Dict[str, LyricsProvider] = {}
+        self._cover_providers: dict[str, CoverProvider] = {}
+        self._lyrics_providers: dict[str, LyricsProvider] = {}
         self._discovered = False
 
     @property
-    def cover_providers(self) -> Dict[str, CoverProvider]:
+    def cover_providers(self) -> dict[str, CoverProvider]:
         if not self._discovered:
             self._discover()
         return self._cover_providers
 
     @property
-    def lyrics_providers(self) -> Dict[str, LyricsProvider]:
+    def lyrics_providers(self) -> dict[str, LyricsProvider]:
         if not self._discovered:
             self._discover()
         return self._lyrics_providers
@@ -88,7 +86,7 @@ class ProviderRegistry:
         if not os.path.isdir(package_dir):
             return
 
-        for importer, modname, ispkg in pkgutil.iter_modules([package_dir]):
+        for _importer, modname, _ispkg in pkgutil.iter_modules([package_dir]):
             if modname.startswith('_'):
                 continue
 

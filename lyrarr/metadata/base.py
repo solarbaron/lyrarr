@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Abstract base classes for metadata providers.
@@ -8,9 +7,9 @@ to ensure consistent interface implementation.
 
 from abc import ABC, abstractmethod
 from difflib import SequenceMatcher
-from typing import List, Dict, Optional, Any
+from typing import Any
 
-from lyrarr.metadata.normalize import normalize_title, normalize_artist, get_primary_artist
+from lyrarr.metadata.normalize import get_primary_artist, normalize_artist, normalize_title
 
 
 class CoverProvider(ABC):
@@ -29,7 +28,7 @@ class CoverProvider(ABC):
         ...
 
     @abstractmethod
-    def search(self, **kwargs) -> List[Dict[str, Any]]:
+    def search(self, **kwargs) -> list[dict[str, Any]]:
         """Search for cover art.
 
         Common kwargs:
@@ -49,7 +48,7 @@ class CoverProvider(ABC):
         ...
 
     @abstractmethod
-    def download(self, url: str) -> Optional[bytes]:
+    def download(self, url: str) -> bytes | None:
         """Download image data from a URL.
 
         Args:
@@ -76,7 +75,7 @@ class LyricsProvider(ABC):
         ...
 
     @abstractmethod
-    def search(self, **kwargs) -> List[Dict[str, Any]]:
+    def search(self, **kwargs) -> list[dict[str, Any]]:
         """Search for lyrics.
 
         Common kwargs:

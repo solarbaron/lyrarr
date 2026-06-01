@@ -1,12 +1,10 @@
-# coding=utf-8
 
 from datetime import datetime
+
 from flask import request
 from flask_restx import Namespace, Resource
-from lyrarr.app.database import (
-    database, TableProfiles, TableArtists, TableAlbums,
-    select, update, delete
-)
+
+from lyrarr.app.database import TableAlbums, TableArtists, TableProfiles, database, delete, select, update
 
 api_ns_profiles = Namespace('profiles', description='Metadata profile operations')
 
@@ -45,8 +43,15 @@ class ProfileList(Resource):
                 cover_providers=data.get('cover_providers', '["musicbrainz","deezer","itunes","fanart","theaudiodb"]'),
                 lyrics_providers=data.get('lyrics_providers', '["lrclib","musixmatch","netease","genius"]'),
                 prefer_synced_lyrics=data.get('prefer_synced_lyrics', True),
+                lyrics_selection_mode=data.get('lyrics_selection_mode', 'best_score'),
+                auto_detect_language=data.get('auto_detect_language', True),
+                auto_translate=data.get('auto_translate', 'off'),
+                translate_target_lang=data.get('translate_target_lang', 'en'),
+                translate_only_foreign=data.get('translate_only_foreign', True),
+                score_threshold=data.get('score_threshold', 0),
                 cover_format=data.get('cover_format', 'jpg'),
                 overwrite_existing=data.get('overwrite_existing', False),
+                embed_cover_art=data.get('embed_cover_art', False),
                 created_at_timestamp=now,
                 updated_at_timestamp=now,
             )

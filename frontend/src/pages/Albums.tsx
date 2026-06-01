@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, TextInput, Pagination, Group, Select, Button, Checkbox, SegmentedControl } from '@mantine/core';
+import { TextInput, Pagination, Group, Select, Button, Checkbox, SegmentedControl } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAlbums, getProfiles, massAssignProfile, batchDownload } from '../api';
+import PageHeader from '../components/PageHeader';
+import { SkeletonGrid, SkeletonTable } from '../components/Skeleton';
 
 export default function AlbumsPage() {
   const navigate = useNavigate();
@@ -64,31 +66,27 @@ export default function AlbumsPage() {
     localStorage.setItem('lyrarr-album-view', val);
   };
 
-  if (isLoading) {
-    return <div className="empty-state"><Loader color="violet" size="lg" /></div>;
-  }
-
   return (
     <div className="fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title">Albums</h1>
-          <p className="page-subtitle">{total} albums synced from Lidarr</p>
-        </div>
-        <SegmentedControl
-          value={viewMode}
-          onChange={handleViewChange}
-          data={[
-            { label: '☰ Table', value: 'table' },
-            { label: '▦ Grid', value: 'grid' },
-          ]}
-          size="xs"
-          styles={{
-            root: { background: 'var(--card-bg)', border: '1px solid var(--card-border)' },
-            label: { color: 'var(--text-secondary)', fontSize: 12 },
-          }}
-        />
-      </div>
+      <PageHeader
+        title="Albums"
+        subtitle={`${total} albums synced from Lidarr`}
+        actions={
+          <SegmentedControl
+            value={viewMode}
+            onChange={handleViewChange}
+            data={[
+              { label: '☰ Table', value: 'table' },
+              { label: '▦ Grid', value: 'grid' },
+            ]}
+            size="xs"
+            styles={{
+              root: { background: 'var(--card-bg)', border: '1px solid var(--card-border)' },
+              label: { color: 'var(--text-secondary)', fontSize: 12 },
+            }}
+          />
+        }
+      />
 
       <Group mb="lg" gap="md" align="end" wrap="wrap">
         <TextInput
@@ -171,7 +169,9 @@ export default function AlbumsPage() {
         )}
       </Group>
 
-      {albums.length === 0 ? (
+      {isLoading ? (
+        viewMode === 'grid' ? <SkeletonGrid count={12} /> : <SkeletonTable rows={10} />
+      ) : albums.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">💿</div>
           <div className="empty-state-title">No Albums Found</div>
@@ -215,6 +215,7 @@ export default function AlbumsPage() {
       ) : (
         /* Table View */
         <>
+          <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -282,6 +283,7 @@ export default function AlbumsPage() {
               ))}
             </tbody>
           </table>
+          </div>
 
           {totalPages > 1 && (
             <Group justify="center" mt="xl">

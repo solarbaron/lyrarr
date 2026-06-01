@@ -1,11 +1,9 @@
-# coding=utf-8
 
-import time
 import hmac
-import secrets
+import time
 from collections import defaultdict
-from flask import Flask, request, jsonify, session
-from functools import wraps
+
+from flask import Flask, jsonify, request, session
 
 
 class RateLimiter:
@@ -31,14 +29,25 @@ class RateLimiter:
 
 def _check_credentials(username, password):
     """Check if username/password match the configured auth credentials.
-    Uses constant-time comparison to prevent timing attacks."""
-    from lyrarr.app.config import settings
+
+    The password is stored as a werkzeug hash; check_password_hash is itself
+    constant-time. A legacy plaintext value (from before hashing) is still
+    accepted via constant-time compare for backward compatibility — it gets
+    upgraded to a hash the next time the password is saved.
+    """
+    from werkzeug.security import check_password_hash
+
+    from lyrarr.app.config import _is_password_hash, settings
     conf_user = getattr(settings.auth, 'username', '') or ''
     conf_pass = getattr(settings.auth, 'password', '') or ''
     if not conf_user or not conf_pass:
         return False
+
     user_match = hmac.compare_digest(username.encode('utf-8'), conf_user.encode('utf-8'))
-    pass_match = hmac.compare_digest(password.encode('utf-8'), conf_pass.encode('utf-8'))
+    if _is_password_hash(conf_pass):
+        pass_match = check_password_hash(conf_pass, password)
+    else:
+        pass_match = hmac.compare_digest(password.encode('utf-8'), conf_pass.encode('utf-8'))
     return user_match and pass_match
 
 
@@ -58,13 +67,18 @@ def _get_auth_type():
     return getattr(settings.auth, 'type', None)
 
 
-# Paths that should never require auth
+# Paths that should never require auth.
+# NOTE: /api/webhook/lidarr is deliberately NOT exempt. When auth is enabled it
+# must be authenticated (via the X-API-KEY header or Basic auth, both handled in
+# check_authentication) so an unauthenticated caller can't spam it to force
+# repeated Lidarr syncs. Configure the Lidarr Webhook connection to send the API
+# key (or Basic credentials). When no auth is configured it stays open, matching
+# the rest of the app.
 AUTH_EXEMPT_PATHS = frozenset([
     '/api/auth/login',
     '/api/auth/status',
     '/api/auth/logout',
     '/api/events',
-    '/api/webhook/lidarr',
 ])
 
 
@@ -129,7 +143,8 @@ def create_app():
         """Enforce authentication on all requests based on auth.type setting."""
         path = request.path
 
-        # Auth endpoints and webhooks are always accessible
+        # Auth/status/SSE endpoints are always accessible (see AUTH_EXEMPT_PATHS).
+        # The Lidarr webhook is intentionally NOT here — it honors auth below.
         if path in AUTH_EXEMPT_PATHS:
             return
 

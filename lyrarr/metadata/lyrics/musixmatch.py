@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Musixmatch Lyrics Provider.
@@ -7,6 +6,7 @@ Requires a free API key (1000 requests/day on free tier).
 """
 
 import logging
+
 import requests
 
 from lyrarr.app.config import settings

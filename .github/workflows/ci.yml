@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, improvements]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # The unit tests target the pure-Python metadata modules (normalize,
+      # scoring, validation, LRC repair, merge) which have no third-party
+      # runtime dependencies, so we only need the test/lint tools here. This
+      # keeps CI fast and avoids pulling heavy deps like faster-whisper.
+      - name: Install tooling
+        run: pip install pytest ruff
+
+      - name: Lint
+        run: ruff check lyrarr tests
+
+      - name: Run tests
+        run: pytest -q

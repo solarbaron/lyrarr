@@ -1,16 +1,12 @@
-# coding=utf-8
 
 import logging
 import os
 from datetime import datetime
 
 from lyrarr.app.config import settings
-from lyrarr.app.database import (
-    database, TableAlbums, TableTracks, TableHistory, TableProfiles,
-    select, update
-)
-from lyrarr.metadata.registry import cover_providers, lyrics_providers
+from lyrarr.app.database import TableAlbums, TableHistory, TableProfiles, TableTracks, database, select, update
 from lyrarr.metadata.embed import embed_cover_in_files
+from lyrarr.metadata.registry import cover_providers, lyrics_providers
 
 logger = logging.getLogger(__name__)
 
@@ -152,12 +148,13 @@ def save_cover_art(album_id, image_data, provider_name):
 
 
 def save_lyrics(track_id, lyrics_data, provider_name):
-    """Save lyrics to disk as .lrc for a track.
+    """Save lyrics to disk as .lrc for a track (manual/interactive path).
 
-    - Archives the previous version in the database (TableLyricsVersions)
-    - Always saves as .lrc; sync status determined from content
+    Thin wrapper over the shared persist path so manual saves, uploads, and the
+    editor behave identically to the scheduled downloader (archiving, status,
+    history, language detection).
     """
-    from lyrarr.app.database import TableLyricsVersions
+    from lyrarr.metadata.lyrics_store import persist_lyrics
 
     track = database.execute(
         select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
@@ -167,93 +164,20 @@ def save_lyrics(track_id, lyrics_data, provider_name):
         logger.error(f"Track {track_id} not found or has no path")
         return False
 
-    try:
-        # Determine content (prefer synced over plain)
-        synced = lyrics_data.get('synced_lyrics')
-        plain = lyrics_data.get('plain_lyrics')
-
-        if synced:
-            content = synced
-        elif plain:
-            content = plain
-        else:
-            return False
-
-        # Always save as .lrc — sync status is determined from content
-        from lyrarr.metadata.language_detect import is_synced_lyrics
-        lyrics_type = 'synced' if is_synced_lyrics(content) else 'plain'
-
-        track_base = os.path.splitext(track.path)[0]
-        filepath = track_base + '.lrc'
-
-        # Archive previous version if a lyrics file already exists
-        old_path = track_base + '.lrc'
-        if os.path.isfile(old_path):
-            try:
-                with open(old_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    old_content = f.read()
-
-                if old_content.strip():
-                    old_type = 'synced' if is_synced_lyrics(old_content) else 'plain'
-                    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-                    database.execute(
-                        sqlite_insert(TableLyricsVersions).values(
-                            lidarrTrackId=track_id,
-                            content=old_content,
-                            lyrics_type=old_type,
-                            provider=provider_name,
-                            timestamp=datetime.now(),
-                        )
-                    )
-                    logger.debug(f"Archived previous lyrics for track {track_id}")
-            except Exception as e:
-                logger.warning(f"Failed to archive old lyrics: {e}")
-
-        # Write the new lyrics file
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
-
-        # Language detection & synced status
-        from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
-        detected_lang = detect_language(content)
-        synced_flag = is_synced_lyrics(content)
-
-        # Update database
-        database.execute(
-            update(TableTracks)
-            .where(TableTracks.lidarrTrackId == track_id)
-            .values(
-                lyrics_status='available',
-                hasLyrics=True,
-                detected_language=detected_lang,
-                is_synced=synced_flag,
-                updated_at_timestamp=datetime.now()
-            )
-        )
-
-        # Add to history
-        from sqlalchemy.dialects.sqlite import insert
-        database.execute(
-            insert(TableHistory).values(
-                action=1,
-                description=f"Downloaded lyrics for {track.title}",
-                metadata_type='lyrics',
-                provider=provider_name,
-                lidarrTrackId=track_id,
-                lidarrArtistId=track.artistId,
-                lidarrAlbumId=track.albumId,
-                timestamp=datetime.now(),
-                metadata_path=filepath,
-            )
-        )
-
-        logger.info(f"Saved lyrics for track '{track.title}' to {filepath} (lang={detected_lang}, synced={synced_flag})")
-        return True
-
-    except Exception as e:
-        logger.error(f"Error saving lyrics for track {track_id}: {e}")
+    # Prefer synced over plain
+    content = lyrics_data.get('synced_lyrics') or lyrics_data.get('plain_lyrics')
+    if not content:
         return False
+
+    result = persist_lyrics(track, content, provider_name, detect_lang=True)
+    if not result:
+        return False
+
+    logger.info(
+        f"Saved lyrics for track '{track.title}' to {result['filepath']} "
+        f"(lang={result['detected_language']}, synced={result['is_synced']})"
+    )
+    return True
 
 
 def translate_lyrics_content(content, target_lang, mode='replace'):
@@ -277,36 +201,43 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
         translator = GoogleTranslator(source='auto', target=target_lang)
 
         lrc_ts = re.compile(r'(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)')
-        lines = content.split('\n')
-        translated_lines = []
-        original_lines = []
 
-        for line in lines:
+        # Parse each line into (tag, text). tag is the LRC timestamp ('' for
+        # plain lyrics); text is the lyric to translate ('' for blank lines).
+        parsed = []   # list of (tag, text)
+        for line in content.split('\n'):
             stripped = line.strip()
             m = lrc_ts.match(stripped)
-
             if m:
-                tag, text = m.group(1), m.group(2)
-                if text:
-                    try:
-                        trans = translator.translate(text)
-                    except Exception:
-                        trans = text
-                    translated_lines.append(f"{tag} {trans}")
-                    original_lines.append(stripped)
-                else:
-                    translated_lines.append(stripped)
-                    original_lines.append(stripped)
+                parsed.append((m.group(1), m.group(2)))
             elif stripped:
-                try:
-                    trans = translator.translate(stripped)
-                except Exception:
-                    trans = stripped
-                translated_lines.append(trans)
-                original_lines.append(stripped)
+                parsed.append(('', stripped))
             else:
-                translated_lines.append('')
+                parsed.append((None, None))  # blank line
+
+        # Translate the *unique* non-empty texts in one batched pass. Lyrics
+        # repeat heavily (choruses), so de-duping avoids re-translating the same
+        # line and turns hundreds of per-line requests into a handful.
+        unique_texts = list({text for tag, text in parsed if text})
+        translations = _translate_texts(translator, unique_texts)
+
+        def _render(text):
+            return translations.get(text, text) if text else text
+
+        original_lines = []
+        translated_lines = []
+        for tag, text in parsed:
+            if tag is None:  # blank line
                 original_lines.append('')
+                translated_lines.append('')
+            elif tag:        # timestamped line
+                orig = f"{tag} {text}" if text else tag
+                trans = f"{tag} {_render(text)}" if text else tag
+                original_lines.append(orig)
+                translated_lines.append(trans)
+            else:            # plain line
+                original_lines.append(text)
+                translated_lines.append(_render(text))
 
         if mode == 'dual':
             dual = []
@@ -324,4 +255,32 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
     except Exception as e:
         logger.error(f"Translation failed: {e}")
         return None
+
+
+def _translate_texts(translator, texts):
+    """Translate a list of strings, returning an {original: translation} map.
+
+    Uses deep-translator's batch API when available and falls back to
+    per-item translation. Individual failures fall back to the original text
+    so a single bad line never aborts the whole song.
+    """
+    result = {}
+    if not texts:
+        return result
+
+    try:
+        batch = translator.translate_batch(texts)
+        if batch and len(batch) == len(texts):
+            for original, translated in zip(texts, batch):
+                result[original] = translated or original
+            return result
+    except Exception as e:
+        logger.debug(f"Batch translation unavailable, falling back per-line: {e}")
+
+    for text in texts:
+        try:
+            result[text] = translator.translate(text) or text
+        except Exception:
+            result[text] = text
+    return result
 

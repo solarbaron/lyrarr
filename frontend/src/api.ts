@@ -90,6 +90,16 @@ export const getLyricsVersions = (trackId: number) =>
   api.get(`/metadata/lyrics/versions/${trackId}`).then(r => r.data);
 export const restoreLyricsVersion = (trackId: number, versionId: number) =>
   api.post(`/metadata/lyrics/versions/${trackId}`, { versionId }).then(r => r.data);
+export const getLyricsBlacklist = (trackId: number) =>
+  api.get(`/metadata/lyrics/blacklist/${trackId}`).then(r => r.data);
+export const blacklistLyrics = (
+  trackId: number,
+  data?: { content?: string; synced_lyrics?: string; plain_lyrics?: string; provider?: string; rescan?: boolean },
+) => api.post(`/metadata/lyrics/blacklist/${trackId}`, data || {}).then(r => r.data);
+export const clearLyricsBlacklist = (trackId: number) =>
+  api.delete(`/metadata/lyrics/blacklist/${trackId}`).then(r => r.data);
+export const upgradeLyrics = (data?: { trackIds?: number[]; albumIds?: number[]; artistIds?: number[]; all?: boolean }) =>
+  api.post('/metadata/lyrics/upgrade', data || {}).then(r => r.data);
 
 // ---------- History ----------
 export const getHistory = () => api.get('/history').then(r => r.data as HistoryEntry[]);
@@ -111,7 +121,7 @@ export const saveSettings = (data: Record<string, unknown>) => api.post('/system
 export const runTask = (taskId: string) => api.post('/system/tasks', { taskId }).then(r => r.data);
 export const getLogs = () => api.get('/system/logs').then(r => r.data);
 export const getHealth = () => api.get('/system/health').then(r => r.data);
-export const testLidarr = (params?: { ip?: string; port?: number; base_url?: string; apikey?: string; ssl?: boolean }) =>
+export const testLidarr = (params?: { ip?: string; port?: number; base_url?: string; apikey?: string; ssl?: boolean; verify_ssl?: boolean }) =>
   api.post('/system/test/lidarr', params || {}).then(r => r.data);
 export const triggerSync = () => api.post('/system/sync').then(r => r.data);
 export const testNotification = () => api.post('/system/test/notification').then(r => r.data);

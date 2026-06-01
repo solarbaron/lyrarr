@@ -1,6 +1,6 @@
-# coding=utf-8
 
 import logging
+
 import requests
 
 from lyrarr.app.config import settings
@@ -33,7 +33,7 @@ def _check_lidarr_health():
             url,
             headers={'X-Api-Key': settings.lidarr.apikey},
             timeout=10,
-            verify=False
+            verify=getattr(settings.lidarr, 'verify_ssl', False),
         )
         if response.status_code == 200:
             return {'healthy': True, 'status': 'connected'}

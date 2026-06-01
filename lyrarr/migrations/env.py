@@ -1,12 +1,9 @@
-# coding=utf-8
 """
 Alembic migration environment for Lyrarr.
 Uses the same database URL and models as the main application.
 """
 
 from logging.config import fileConfig
-
-from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
@@ -20,6 +17,7 @@ if config.config_file_name is not None:
 # Import the app's models metadata for autogenerate
 import os
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lyrarr.app.database import Base, engine
 

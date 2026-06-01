@@ -3,6 +3,7 @@ import { TextInput, PasswordInput, Switch, Button, NumberInput, Loader, FileButt
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup, getProfiles } from '../api';
+import PageHeader from '../components/PageHeader';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -39,6 +40,7 @@ export default function SettingsPage() {
     mutationFn: () => testLidarr({
       ip: form.lidarr?.ip, port: form.lidarr?.port,
       base_url: form.lidarr?.base_url, apikey: form.lidarr?.apikey, ssl: form.lidarr?.ssl,
+      verify_ssl: form.lidarr?.verify_ssl,
     }),
     onSuccess: (data: any) => notifications.show({ title: 'Success', message: data.message || 'Connected!', color: 'green' }),
     onError: (e: any) => notifications.show({ title: 'Error', message: e?.response?.data?.message || 'Failed', color: 'red' }),
@@ -85,16 +87,16 @@ export default function SettingsPage() {
 
   return (
     <div className="fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Configure Lyrarr</p>
-        </div>
-        <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-          onClick={() => saveMutation.mutate(form)} loading={saveMutation.isPending}>
-          Save Settings
-        </Button>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="Configure Lyrarr"
+        actions={
+          <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
+            onClick={() => saveMutation.mutate(form)} loading={saveMutation.isPending}>
+            Save Settings
+          </Button>
+        }
+      />
 
       {/* Lidarr */}
       <div className="settings-section">
@@ -114,6 +116,9 @@ export default function SettingsPage() {
             onChange={(e) => updateField('lidarr', 'apikey', e.currentTarget.value)} styles={inputStyles} />
           <Switch label="SSL" checked={form.lidarr?.ssl || false}
             onChange={(e) => updateField('lidarr', 'ssl', e.currentTarget.checked)}
+            styles={{ label: { color: 'var(--text-secondary)' } }} />
+          <Switch label="Verify SSL Certificate" checked={form.lidarr?.verify_ssl || false}
+            onChange={(e) => updateField('lidarr', 'verify_ssl', e.currentTarget.checked)}
             styles={{ label: { color: 'var(--text-secondary)' } }} />
           <Button variant="light" color="violet" onClick={() => testMutation.mutate()} loading={testMutation.isPending}>
             Test Connection

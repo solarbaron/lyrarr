@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 TheAudioDB Cover Art Provider.
@@ -7,6 +6,7 @@ Free test API key ("2") included — works for most lookups.
 """
 
 import logging
+
 import requests
 
 from lyrarr.app.config import settings

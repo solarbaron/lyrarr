@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """Allow running lyrarr as a module: python -m lyrarr"""
 

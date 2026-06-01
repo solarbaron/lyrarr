@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, TextInput, Pagination, Group, Select, Button, Checkbox } from '@mantine/core';
+import { TextInput, Pagination, Group, Select, Button, Checkbox } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getArtists, getProfiles, massAssignProfile, batchDownload } from '../api';
+import PageHeader from '../components/PageHeader';
+import { SkeletonTable } from '../components/Skeleton';
 
 export default function ArtistsPage() {
   const navigate = useNavigate();
@@ -56,16 +58,9 @@ export default function ArtistsPage() {
     }
   };
 
-  if (isLoading) {
-    return <div className="empty-state"><Loader color="violet" size="lg" /></div>;
-  }
-
   return (
     <div className="fade-in">
-      <div className="page-header">
-        <h1 className="page-title">Artists</h1>
-        <p className="page-subtitle">{total} artists synced from Lidarr</p>
-      </div>
+      <PageHeader title="Artists" subtitle={`${total} artists synced from Lidarr`} />
 
       <Group mb="lg" gap="md" align="end" wrap="wrap">
         <TextInput
@@ -122,7 +117,9 @@ export default function ArtistsPage() {
         )}
       </Group>
 
-      {artists.length === 0 ? (
+      {isLoading ? (
+        <SkeletonTable rows={10} />
+      ) : artists.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">🎤</div>
           <div className="empty-state-title">No Artists Found</div>
@@ -132,6 +129,7 @@ export default function ArtistsPage() {
         </div>
       ) : (
         <>
+          <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -192,6 +190,7 @@ export default function ArtistsPage() {
               ))}
             </tbody>
           </table>
+          </div>
 
           {totalPages > 1 && (
             <Group justify="center" mt="xl">

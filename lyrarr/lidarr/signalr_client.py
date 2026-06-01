@@ -1,11 +1,9 @@
-# coding=utf-8
 
 import logging
-import threading
 
 from lyrarr.app.config import settings
-from lyrarr.lidarr.sync import update_artists
 from lyrarr.app.event_handler import event_stream
+from lyrarr.lidarr.sync import request_artist_sync, request_sync
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ class LidarrSignalRClient:
             self._connection = HubConnectionBuilder() \
                 .with_url(hub_url, options={
                     "headers": {"X-Api-Key": settings.lidarr.apikey},
-                    "verify_ssl": False,
+                    "verify_ssl": getattr(settings.lidarr, 'verify_ssl', False),
                 }) \
                 .with_automatic_reconnect({
                     "type": "interval",
@@ -106,8 +104,7 @@ class LidarrSignalRClient:
                 if cmd_name in ('RefreshArtist', 'RescanArtist', 'ArtistSearch'):
                     logger.info(f"Lidarr command completed: {cmd_name}, triggering sync")
                     if settings.lidarr.sync_on_live:
-                        sync_thread = threading.Thread(target=update_artists, daemon=True)
-                        sync_thread.start()
+                        request_sync()
 
         except Exception as e:
             logger.error(f"Error processing Lidarr SignalR message: {e}")
@@ -119,11 +116,27 @@ class LidarrSignalRClient:
 
 
 def _trigger_sync(event_name, action, body):
-    """Trigger an appropriate sync based on the event type."""
-    # For now, trigger a full sync but log what triggered it
-    logger.info(f"Triggering sync for {event_name} {action}")
-    sync_thread = threading.Thread(target=update_artists, daemon=True)
-    sync_thread.start()
+    """Trigger a sync scoped to the affected artist when possible.
+
+    artist/album/track events all carry enough to resolve an artist id, so we
+    sync just that artist instead of the whole library. Anything we can't scope
+    falls back to a full sync.
+    """
+    artist_id = None
+    if event_name == 'artist':
+        artist_id = body.get('id') or body.get('artistId')
+    elif event_name in ('album', 'track'):
+        artist_id = body.get('artistId')
+        # Track/album events sometimes nest the artist object instead.
+        if not artist_id:
+            artist_id = (body.get('artist') or {}).get('id')
+
+    if artist_id:
+        logger.info(f"Scoped sync for {event_name} {action} → artist {artist_id}")
+        request_artist_sync(artist_id)
+    else:
+        logger.info(f"Full sync for {event_name} {action} (no artist id in event)")
+        request_sync()
 
 
 lidarr_signalr_client = LidarrSignalRClient()

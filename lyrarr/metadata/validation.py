@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Lyrics quality validation pipeline.
@@ -12,8 +11,8 @@ Catches common quality issues in downloaded lyrics before saving to disk:
   - LRC files with only metadata tags but no actual lyrics
 """
 
-import re
 import logging
+import re
 from collections import Counter
 
 logger = logging.getLogger(__name__)
@@ -24,6 +23,31 @@ _INSTRUMENTAL_MARKERS = re.compile(
     r'without vocals?|interlude|intro|outro|skit)\s*[\]\)]?\s*$',
     re.IGNORECASE | re.MULTILINE
 )
+
+# Patterns indicating an instrumental track *by its title*. These tracks have no
+# lyrics, so any "match" a provider returns is a different (vocal) song — exactly
+# the nonsense we want to avoid saving. Kept deliberately specific (parenthetical
+# tags, "X version/mix", or a trailing "- instrumental") so an album or band
+# literally named "Instrumental" isn't swept up.
+_INSTRUMENTAL_TITLE = re.compile(
+    r'[\(\[]\s*(?:instrumental|karaoke|off[\s-]?vocals?|no[\s-]?vocals?|'
+    r'backing[\s-]?track)\b[^\)\]]*[\)\]]'
+    r'|\b(?:instrumental|karaoke)\s+(?:version|mix|edit|take)\b'
+    r'|[-–—]\s*instrumental\s*$'
+    r'|\binstrumental\s*$',
+    re.IGNORECASE
+)
+
+
+def is_instrumental_title(title):
+    """Whether a track title indicates an instrumental/karaoke track.
+
+    Used to skip lyrics search entirely for tracks that can't have lyrics,
+    preventing a wrong (vocal-version) match from being saved.
+    """
+    if not title:
+        return False
+    return bool(_INSTRUMENTAL_TITLE.search(title))
 
 # LRC timestamp pattern
 _LRC_TS = re.compile(r'^\[\d{1,2}:\d{2}[.:]\d{2,3}\]')
@@ -86,9 +110,9 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     line_count = len(clean_lines)
 
     # ------------------------------------------------------------------
-    # 1. Instrumental detection
+    # 1. Instrumental detection (by title or by content)
     # ------------------------------------------------------------------
-    if _is_instrumental(content, clean_text, clean_lines):
+    if is_instrumental_title(track_title) or _is_instrumental(content, clean_text, clean_lines):
         is_instrumental = True
         issues.append({
             'type': 'instrumental',
@@ -140,7 +164,6 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     # ------------------------------------------------------------------
     if line_count >= 5:
         line_counts = Counter(clean_lines)
-        most_common_count = line_counts.most_common(1)[0][1] if line_counts else 0
         unique_ratio = len(line_counts) / line_count if line_count > 0 else 1.0
 
         if unique_ratio < DUPLICATE_LINE_THRESHOLD:

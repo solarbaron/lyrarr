@@ -1,4 +1,3 @@
-# coding=utf-8
 
 # Exit codes
 EXIT_NORMAL = 0

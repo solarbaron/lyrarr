@@ -1,4 +1,3 @@
-# coding=utf-8
 
 import os
 import platform
@@ -6,7 +5,7 @@ import platform
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.app.config import settings, get_settings, save_settings
+from lyrarr.app.config import get_settings, save_settings, settings
 
 api_ns_system = Namespace('system', description='System operations')
 
@@ -38,6 +37,18 @@ class SystemSettings(Resource):
 
         settings_items = [(k, v) for k, v in data.items()]
         result = save_settings(settings_items)
+
+        # Apply schedule-affecting changes immediately instead of waiting for a
+        # restart. save_settings flags when a sync/backup interval or the Lidarr
+        # toggle changed; the jobs use replace_existing so this re-arms them.
+        if result.get('update_schedule'):
+            try:
+                from lyrarr.app.scheduler import scheduler
+                scheduler.update_configurable_tasks()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Could not refresh scheduled tasks: {e}")
+
         return {'message': 'Settings saved', **result}
 
 
@@ -74,7 +85,7 @@ class SystemLogs(Resource):
             return []
 
         try:
-            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(log_file, encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
                 # Return last 500 lines
                 return [line.rstrip() for line in lines[-500:]]
@@ -94,10 +105,10 @@ class SystemHealth(Resource):
 class SystemSync(Resource):
     def post(self):
         """Trigger a Lidarr sync now."""
-        from threading import Thread
-        from lyrarr.lidarr.sync import update_artists
-        sync_thread = Thread(target=update_artists, kwargs={'force': True}, daemon=True)
-        sync_thread.start()
+        from lyrarr.lidarr.sync import request_sync
+        # debounce=False so a manual sync starts immediately, but still respects
+        # the single-flight lock so it won't run on top of an in-progress sync.
+        request_sync(force=True, debounce=False)
         return {'message': 'Sync started'}
 
 
@@ -111,12 +122,13 @@ class TestLidarr(Resource):
         base_url = data.get('base_url', settings.lidarr.base_url)
         apikey = data.get('apikey', settings.lidarr.apikey)
         ssl = data.get('ssl', settings.lidarr.ssl)
+        verify_ssl = data.get('verify_ssl', getattr(settings.lidarr, 'verify_ssl', False))
 
         import requests as req
         protocol = 'https' if ssl else 'http'
         url = f"{protocol}://{ip}:{port}{base_url.rstrip('/')}/api/v1/system/status"
         try:
-            response = req.get(url, headers={'X-Api-Key': apikey}, timeout=10, verify=False)
+            response = req.get(url, headers={'X-Api-Key': apikey}, timeout=10, verify=verify_ssl)
             if response.status_code == 200:
                 version = response.json().get('version', 'unknown')
                 return {'message': f'Connected to Lidarr v{version}'}

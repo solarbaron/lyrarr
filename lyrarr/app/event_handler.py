@@ -1,8 +1,7 @@
-# coding=utf-8
 
-import queue
 import json
 import logging
+import queue
 import threading
 from collections import deque
 

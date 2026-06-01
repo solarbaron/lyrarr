@@ -1,25 +1,23 @@
-# coding=utf-8
 
+import errno
+import logging
+import os
 import signal
 import warnings
-import logging
-import errno
-
-from lyrarr.literals import EXIT_INTERRUPT, EXIT_NORMAL, EXIT_PORT_ALREADY_IN_USE_ERROR
-from lyrarr.utilities.central import restart_lyrarr, stop_lyrarr
-
-from waitress.server import create_server
 from time import sleep
 
-import os
 from flask import send_from_directory
+from waitress.server import create_server
 
 from lyrarr.api import api_bp
 from lyrarr.api.events import events_bp
+from lyrarr.literals import EXIT_INTERRUPT, EXIT_NORMAL, EXIT_PORT_ALREADY_IN_USE_ERROR
+from lyrarr.utilities.central import restart_lyrarr, stop_lyrarr
+
 from .app import create_app
-from .get_args import args
-from .config import settings, base_url
+from .config import base_url, settings
 from .database import close_database
+from .get_args import args
 
 # Resolve the frontend build directory
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'frontend')

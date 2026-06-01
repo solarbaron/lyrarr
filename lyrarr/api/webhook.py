@@ -1,4 +1,3 @@
-# coding=utf-8
 
 """
 Webhook endpoints for receiving notifications from Lidarr.
@@ -6,16 +5,22 @@ Alternative to SignalR for environments where direct network access isn't availa
 
 Configure a Lidarr webhook (Settings → Connect → Webhook) pointing to:
     POST http://lyrarr-host:port/api/webhook/lidarr
+
+If authentication is enabled in Lyrarr, this endpoint is NOT exempt — the
+request must carry valid credentials, otherwise anyone could POST to it to
+force repeated Lidarr syncs. Either add an "X-Api-Key" header with your Lyrarr
+API key to the Lidarr webhook connection, or set the webhook's Basic auth
+username/password to your Lyrarr credentials. With no auth configured, it stays
+open, matching the rest of the app.
 """
 
 import logging
-import threading
 
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.lidarr.sync import update_artists
 from lyrarr.app.event_handler import event_stream
+from lyrarr.lidarr.sync import request_artist_sync, request_sync
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +54,27 @@ class LidarrWebhook(Resource):
             'message': f'Lidarr webhook: {event_type}',
         })
 
-        # Trigger sync for relevant events
-        sync_events = {'Download', 'ArtistAdd', 'Rename', 'Retag'}
+        # Trigger sync for relevant events, scoped to the affected artist when
+        # the payload identifies one (Lidarr includes an `artist` object).
+        sync_events = {'Download', 'ArtistAdd', 'Rename', 'Retag', 'TrackRetag', 'AlbumDelete'}
         if event_type in sync_events:
-            logger.info(f"Webhook {event_type}: triggering sync")
-            sync_thread = threading.Thread(target=update_artists, daemon=True)
-            sync_thread.start()
+            artist_id = (data.get('artist') or {}).get('id')
+            if artist_id:
+                logger.info(f"Webhook {event_type}: scoped sync for artist {artist_id}")
+                request_artist_sync(artist_id)
+            else:
+                logger.info(f"Webhook {event_type}: full sync (no artist id in payload)")
+                request_sync()
             return {'message': f'Sync triggered for {event_type}'}
+
+        if event_type == 'ArtistDelete':
+            # Re-sync the artist; sync_artist removes it locally if it's gone.
+            artist_id = (data.get('artist') or {}).get('id')
+            if artist_id:
+                request_artist_sync(artist_id)
+                return {'message': 'Artist delete processed'}
+            request_sync()
+            return {'message': 'Sync triggered for ArtistDelete'}
 
         if event_type == 'Test':
             return {'message': 'Webhook test received successfully'}
