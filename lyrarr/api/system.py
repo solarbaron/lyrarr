@@ -37,6 +37,18 @@ class SystemSettings(Resource):
 
         settings_items = [(k, v) for k, v in data.items()]
         result = save_settings(settings_items)
+
+        # Apply schedule-affecting changes immediately instead of waiting for a
+        # restart. save_settings flags when a sync/backup interval or the Lidarr
+        # toggle changed; the jobs use replace_existing so this re-arms them.
+        if result.get('update_schedule'):
+            try:
+                from lyrarr.app.scheduler import scheduler
+                scheduler.update_configurable_tasks()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Could not refresh scheduled tasks: {e}")
+
         return {'message': 'Settings saved', **result}
 
 
