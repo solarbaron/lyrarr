@@ -3,6 +3,7 @@ import { Loader, Button, TextInput, NumberInput, Modal, Checkbox, Group, Menu, M
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignProfile } from '../api';
+import PageHeader from '../components/PageHeader';
 
 interface ProfileForm {
   name: string;
@@ -172,15 +173,15 @@ export default function ProfilesPage() {
 
   return (
     <div className="fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title">Metadata Profiles</h1>
-          <p className="page-subtitle">Control what metadata gets downloaded per artist or album</p>
-        </div>
-        <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }} onClick={openCreate}>
-          New Profile
-        </Button>
-      </div>
+      <PageHeader
+        title="Metadata Profiles"
+        subtitle="Control what metadata gets downloaded per artist or album"
+        actions={
+          <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }} onClick={openCreate}>
+            New Profile
+          </Button>
+        }
+      />
 
       <table className="data-table">
         <thead>

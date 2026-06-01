@@ -3,6 +3,7 @@ import { TextInput, PasswordInput, Switch, Button, NumberInput, Loader, FileButt
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup, getProfiles } from '../api';
+import PageHeader from '../components/PageHeader';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -86,16 +87,16 @@ export default function SettingsPage() {
 
   return (
     <div className="fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Configure Lyrarr</p>
-        </div>
-        <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-          onClick={() => saveMutation.mutate(form)} loading={saveMutation.isPending}>
-          Save Settings
-        </Button>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="Configure Lyrarr"
+        actions={
+          <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
+            onClick={() => saveMutation.mutate(form)} loading={saveMutation.isPending}>
+            Save Settings
+          </Button>
+        }
+      />
 
       {/* Lidarr */}
       <div className="settings-section">

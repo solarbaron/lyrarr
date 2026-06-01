@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedUndetected, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate, batchRedetectLanguages, updateTrack, upgradeLyrics } from '../api';
+import PageHeader from '../components/PageHeader';
 
 const LANG_OPTIONS = [
   { value: 'en', label: 'English' },
@@ -131,10 +132,7 @@ export default function WantedPage() {
 
   return (
     <div className="fade-in">
-      <div className="page-header">
-        <h1 className="page-title">Wanted</h1>
-        <p className="page-subtitle">Missing metadata that needs to be downloaded</p>
-      </div>
+      <PageHeader title="Wanted" subtitle="Missing metadata that needs to be downloaded" />
 
       {/* Summary Stats */}
       {stats && (

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SimpleGrid, Loader, Button, Progress } from '@mantine/core';
+import { SimpleGrid, Button, Progress, Group } from '@mantine/core';
+import PageHeader from '../components/PageHeader';
 import { notifications } from '@mantine/notifications';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate, faLanguage, faFileImport } from '@fortawesome/free-solid-svg-icons';
@@ -54,25 +55,23 @@ export default function DashboardPage() {
 
   return (
     <div className="fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">
-            {status?.lidarr_enabled
-              ? `Connected to Lidarr • v${status?.version || 'dev'}`
-              : 'Configure Lidarr in Settings to get started'}
-          </p>
-        </div>
-        <Button
-          variant="gradient"
-          gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-          leftSection={<FontAwesomeIcon icon={faRotate} />}
-          onClick={() => syncMutation.mutate()}
-          loading={syncMutation.isPending}
-        >
-          Sync with Lidarr
-        </Button>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        subtitle={status?.lidarr_enabled
+          ? `Connected to Lidarr • v${status?.version || 'dev'}`
+          : 'Configure Lidarr in Settings to get started'}
+        actions={
+          <Button
+            variant="gradient"
+            gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
+            leftSection={<FontAwesomeIcon icon={faRotate} />}
+            onClick={() => syncMutation.mutate()}
+            loading={syncMutation.isPending}
+          >
+            Sync with Lidarr
+          </Button>
+        }
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 5 }} spacing="lg">
         {stats.map((stat) => (
@@ -96,47 +95,49 @@ export default function DashboardPage() {
       {/* Lyrics Intelligence Stats */}
       {langStats && langStats.total_available > 0 && (
         <div className="stat-card" style={{ marginTop: 24 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+            <h3 className="section-title" style={{ margin: 0 }}>
               <FontAwesomeIcon icon={faLanguage} style={{ color: '#8b3dff' }} />
               Lyrics Intelligence
             </h3>
-            <Button
-              variant="light" color="violet" size="xs"
-              onClick={() => redetectMutation.mutate()}
-              loading={redetectMutation.isPending}
-            >
-              Re-detect Languages
-            </Button>
-            <Button
-              variant="light" color="grape" size="xs"
-              leftSection={<FontAwesomeIcon icon={faFileImport} />}
-              onClick={() => {
-                importSidecarLyrics().then(() => {
-                  notifications.show({ title: 'Started', message: 'Scanning for existing .lrc sidecar files...', color: 'violet' });
-                  setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 15000);
-                });
-              }}
-            >
-              Import Sidecar Files
-            </Button>
-            <Button
-              variant="light" color="orange" size="xs"
-              leftSection={<FontAwesomeIcon icon={faFileImport} />}
-              onClick={() => {
-                auditLyricsState().then(() => {
-                  notifications.show({ title: 'Started', message: 'Auditing lyrics state — checking all tracks against disk...', color: 'orange' });
-                  setTimeout(() => {
-                    queryClient.invalidateQueries({ queryKey: ['language-stats'] });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }, 15000);
-                }).catch(() => {
-                  notifications.show({ title: 'Error', message: 'Failed to start lyrics audit', color: 'red' });
-                });
-              }}
-            >
-              Audit Lyrics State
-            </Button>
+            <Group gap="xs">
+              <Button
+                variant="light" color="violet" size="xs"
+                onClick={() => redetectMutation.mutate()}
+                loading={redetectMutation.isPending}
+              >
+                Re-detect Languages
+              </Button>
+              <Button
+                variant="light" color="grape" size="xs"
+                leftSection={<FontAwesomeIcon icon={faFileImport} />}
+                onClick={() => {
+                  importSidecarLyrics().then(() => {
+                    notifications.show({ title: 'Started', message: 'Scanning for existing .lrc sidecar files...', color: 'violet' });
+                    setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 15000);
+                  });
+                }}
+              >
+                Import Sidecar Files
+              </Button>
+              <Button
+                variant="light" color="orange" size="xs"
+                leftSection={<FontAwesomeIcon icon={faFileImport} />}
+                onClick={() => {
+                  auditLyricsState().then(() => {
+                    notifications.show({ title: 'Started', message: 'Auditing lyrics state — checking all tracks against disk...', color: 'orange' });
+                    setTimeout(() => {
+                      queryClient.invalidateQueries({ queryKey: ['language-stats'] });
+                      queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                    }, 15000);
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start lyrics audit', color: 'red' });
+                  });
+                }}
+              >
+                Audit Lyrics State
+              </Button>
+            </Group>
           </div>
 
           {/* Quick Stats Row */}

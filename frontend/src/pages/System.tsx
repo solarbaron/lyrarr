@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Loader, Code, ScrollArea, Badge, Progress } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { getSystemStatus, getTasks, getLogs, getHealth, runTask, getProviderHealth, resetProviderHealth } from '../api';
+import PageHeader from '../components/PageHeader';
 
 const PROVIDER_LABELS: Record<string, string> = {
   musicbrainz: 'MusicBrainz', fanart: 'fanart.tv', deezer: 'Deezer',
@@ -40,10 +41,7 @@ export default function SystemPage() {
 
   return (
     <div className="fade-in">
-      <div className="page-header">
-        <h1 className="page-title">System</h1>
-        <p className="page-subtitle">System status, tasks, and logs</p>
-      </div>
+      <PageHeader title="System" subtitle="System status, tasks, and logs" />
 
       {/* Status */}
       <div className="settings-section">
