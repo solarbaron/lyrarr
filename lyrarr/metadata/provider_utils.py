@@ -34,20 +34,27 @@ class ProviderRateLimiter:
     }
 
     def __init__(self):
-        self._last_call = {}
+        # Per-provider monotonic time at which the next call is permitted.
+        self._next_allowed = {}
         self._lock = threading.Lock()
 
     def wait(self, provider_name):
-        """Block until the rate limit for this provider allows a new call."""
-        rate = self.DEFAULT_RATES.get(provider_name, 1.0)
+        """Block until the rate limit for this provider allows a new call.
 
+        Uses a reservation model: under the lock we only compute and reserve this
+        provider's slot, then sleep *outside* the lock. This keeps the lock from
+        being held during the sleep, so a slow/strict provider can't stall calls
+        to other providers, and concurrent calls to the same provider queue with
+        correct spacing.
+        """
+        rate = self.DEFAULT_RATES.get(provider_name, 1.0)
+        now = time.monotonic()
         with self._lock:
-            last = self._last_call.get(provider_name, 0)
-            elapsed = time.monotonic() - last
-            if elapsed < rate:
-                wait_time = rate - elapsed
-                time.sleep(wait_time)
-            self._last_call[provider_name] = time.monotonic()
+            scheduled = max(now, self._next_allowed.get(provider_name, 0.0))
+            self._next_allowed[provider_name] = scheduled + rate
+        delay = scheduled - now
+        if delay > 0:
+            time.sleep(delay)
 
 
 class ProviderHealthTracker:

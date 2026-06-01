@@ -83,23 +83,28 @@ def _run_sync(force=False):
     Anything that arrives mid-run is handled on the next loop iteration.
     """
     global _sync_running, _sync_pending_full, _pending_artist_ids
-    while True:
-        with _sync_lock:
-            do_full = _sync_pending_full
-            artist_ids = _pending_artist_ids
-            _sync_pending_full = False
-            _pending_artist_ids = set()
-            if not do_full and not artist_ids:
-                _sync_running = False
-                return
-        try:
-            if do_full:
-                update_artists(force=force)
-            else:
-                for aid in artist_ids:
-                    sync_artist(aid)
-        except Exception as e:
-            logger.error(f"Coalesced sync failed: {e}")
+    try:
+        while True:
+            with _sync_lock:
+                do_full = _sync_pending_full
+                artist_ids = _pending_artist_ids
+                _sync_pending_full = False
+                _pending_artist_ids = set()
+                if not do_full and not artist_ids:
+                    _sync_running = False
+                    return
+            try:
+                if do_full:
+                    update_artists(force=force)
+                else:
+                    for aid in artist_ids:
+                        sync_artist(aid)
+            except Exception as e:
+                logger.error(f"Coalesced sync failed: {e}")
+    finally:
+        # A fresh thread is spawned per sync burst; drop its thread-local scoped
+        # session on exit so dead threads don't accumulate sessions over time.
+        database.remove()
 
 
 def _lidarr_image_url(image_path):

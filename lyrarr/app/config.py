@@ -238,7 +238,11 @@ array_keys = ['providers', 'exclude', 'path_mappings']
 
 empty_values = ['', 'None', 'null', 'undefined', None, []]
 
-str_keys = ['password']
+# Subkeys that must stay strings — never coerce to int on save. Without this,
+# a numeric-looking value like the TheAudioDB test key "2" would be cast to the
+# int 2 and fail its str validator (and a purely-numeric API key would be
+# corrupted, dropping any leading zeros).
+str_keys = ['password', 'apikey', 'username', 'telegram_chat_id', 'telegram_bot_token']
 
 
 def _is_password_hash(value):
