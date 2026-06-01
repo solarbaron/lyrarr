@@ -134,6 +134,12 @@ class LyricsSearch(Resource):
         # Merge and de-duplicate cross-provider results
         results = merge_provider_results(results)
 
+        # Hide results the user has blacklisted for this track.
+        from lyrarr.metadata.lyrics_store import get_blacklisted_hashes, result_is_blacklisted
+        blacklisted = get_blacklisted_hashes(track_id)
+        if blacklisted:
+            results = [r for r in results if not result_is_blacklisted(r, blacklisted)]
+
         # Sort by score
         results.sort(key=lambda x: x.get('score', 0), reverse=True)
         return {'results': results, 'trackId': track_id}
@@ -249,8 +255,8 @@ class LyricsUpgrade(Resource):
     def post(self):
         """Re-search plain-lyrics tracks for a synced upgrade (background).
 
-        Body: { albumIds?, artistIds?, all? }. With no scope (or all=true),
-        every track that currently has unsynced lyrics is checked.
+        Body: { trackIds?, albumIds?, artistIds?, all? }. With no scope (or
+        all=true), every track that currently has unsynced lyrics is checked.
         """
         from threading import Thread
 
@@ -258,6 +264,7 @@ class LyricsUpgrade(Resource):
         from lyrarr.metadata.download_worker import run_lyrics_upgrade
 
         data = request.get_json() or {}
+        track_ids = data.get('trackIds') or None
         album_ids = data.get('albumIds', [])
         artist_ids = data.get('artistIds', [])
         scope_all = data.get('all', False)
@@ -268,11 +275,11 @@ class LyricsUpgrade(Resource):
             ).scalars().all()
             album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
 
-        scoped = None if scope_all else (album_ids or None)
+        scoped_albums = None if (scope_all or track_ids) else (album_ids or None)
 
         def _run():
             try:
-                result = run_lyrics_upgrade(album_ids=scoped, source='manual')
+                result = run_lyrics_upgrade(album_ids=scoped_albums, track_ids=track_ids, source='manual')
                 if result.get('skipped'):
                     event_stream(type='download_complete', payload={
                         'covers': 0, 'lyrics': 0,

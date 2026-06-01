@@ -98,7 +98,7 @@ export const blacklistLyrics = (
 ) => api.post(`/metadata/lyrics/blacklist/${trackId}`, data || {}).then(r => r.data);
 export const clearLyricsBlacklist = (trackId: number) =>
   api.delete(`/metadata/lyrics/blacklist/${trackId}`).then(r => r.data);
-export const upgradeLyrics = (data?: { albumIds?: number[]; artistIds?: number[]; all?: boolean }) =>
+export const upgradeLyrics = (data?: { trackIds?: number[]; albumIds?: number[]; artistIds?: number[]; all?: boolean }) =>
   api.post('/metadata/lyrics/upgrade', data || {}).then(r => r.data);
 
 // ---------- History ----------

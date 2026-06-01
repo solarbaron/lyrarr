@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Loader, Badge, Button, Group, Progress, Tooltip, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { searchLyrics, downloadLyrics } from '../api';
+import { searchLyrics, downloadLyrics, blacklistLyrics } from '../api';
 import type { LyricsResult } from '../types';
 import api from '../api';
 
@@ -66,6 +66,22 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
     },
     onError: () => {
       notifications.show({ title: 'Error', message: 'Failed to save lyrics', color: 'red' });
+    },
+  });
+
+  const blacklistMutation = useMutation({
+    mutationFn: (result: LyricsResult) => blacklistLyrics(trackId, {
+      synced_lyrics: result.synced_lyrics,
+      plain_lyrics: result.plain_lyrics,
+      provider: result.provider,
+      rescan: false,  // just record it; don't touch the saved file from here
+    }),
+    onSuccess: () => {
+      notifications.show({ title: 'Blacklisted', message: 'This result won\'t be auto-selected again', color: 'orange' });
+      refetch();  // re-run so the blacklisted result drops out of the list
+    },
+    onError: () => {
+      notifications.show({ title: 'Error', message: 'Failed to blacklist', color: 'red' });
     },
   });
 
@@ -232,6 +248,17 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
                     >
                       Use
                     </Button>
+                    <Tooltip label="Never auto-select this result for this track">
+                      <Button
+                        variant="subtle"
+                        color="red"
+                        size="compact-xs"
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); blacklistMutation.mutate(result); }}
+                        loading={blacklistMutation.isPending}
+                      >
+                        Blacklist
+                      </Button>
+                    </Tooltip>
                   </Group>
                 </Group>
 

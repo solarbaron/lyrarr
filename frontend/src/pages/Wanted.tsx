@@ -3,7 +3,7 @@ import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress, Checkbox,
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedUndetected, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate, batchRedetectLanguages, updateTrack } from '../api';
+import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedUndetected, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate, batchRedetectLanguages, updateTrack, upgradeLyrics } from '../api';
 
 const LANG_OPTIONS = [
   { value: 'en', label: 'English' },
@@ -309,6 +309,22 @@ export default function WantedPage() {
               styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
             />
             <Group gap="xs">
+              <Button
+                size="xs" variant="light" color="violet"
+                disabled={selectedTracks.size === 0}
+                onClick={() => {
+                  upgradeLyrics({ trackIds: Array.from(selectedTracks) }).then((r: any) => {
+                    notifications.show({ title: 'Started', message: r.message || `Searching synced lyrics for ${selectedTracks.size} track(s)...`, color: 'violet' });
+                    setSelectedTracks(new Set());
+                    queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
+                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+                  }).catch(() => {
+                    notifications.show({ title: 'Error', message: 'Failed to start upgrade', color: 'red' });
+                  });
+                }}
+              >
+                ⤴ Upgrade Selected ({selectedTracks.size})
+              </Button>
               <Button
                 size="xs" variant="light" color="teal"
                 disabled={selectedTracks.size === 0}

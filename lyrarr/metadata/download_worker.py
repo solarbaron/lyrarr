@@ -814,22 +814,31 @@ def run_metadata_downloads():
         logger.debug(f"Notification skipped: {e}")
 
 
-def upgrade_unsynced_lyrics(album_ids=None):
+def upgrade_unsynced_lyrics(album_ids=None, track_ids=None):
     """Re-search providers for tracks that have plain lyrics and upgrade to synced.
 
     Only replaces a plain file when a synced match is found that passes the score
     floor and isn't blacklisted — never downgrades. Honors each album's profile
     (skips albums whose profile prefers plain lyrics or has lyrics disabled) and
     uses the same backoff as the missing flow so it doesn't re-search every run.
+
+    When track_ids is given (an explicit user request for specific tracks), the
+    backoff window is ignored so the retry schedule can't suppress the upgrade.
     """
-    query = select(TableTracks).where(
+    conds = [
         TableTracks.lyrics_status == 'available',
         TableTracks.is_synced == False,
-        or_(
+    ]
+    if track_ids:
+        conds.append(TableTracks.lidarrTrackId.in_(track_ids))
+    else:
+        # Only the scheduled/bulk pass honors the backoff; explicit track
+        # requests below bypass it.
+        conds.append(or_(
             TableTracks.lyrics_retry_after.is_(None),
             TableTracks.lyrics_retry_after <= datetime.now(),
-        ),
-    )
+        ))
+    query = select(TableTracks).where(*conds)
     if album_ids:
         query = query.where(TableTracks.albumId.in_(album_ids))
     tracks = database.execute(query).scalars().all()
@@ -939,7 +948,7 @@ def upgrade_unsynced_lyrics(album_ids=None):
     return upgraded
 
 
-def run_lyrics_upgrade(album_ids=None, source='scheduled'):
+def run_lyrics_upgrade(album_ids=None, track_ids=None, source='scheduled'):
     """Guarded entry point for the plain→synced upgrade pass.
 
     Shares the download lock so it can't run at the same time as a download run
@@ -950,7 +959,7 @@ def run_lyrics_upgrade(album_ids=None, source='scheduled'):
         logger.warning(f"Skipping {source} lyrics upgrade — a run is already in progress")
         return {'skipped': True, 'upgraded': 0}
     try:
-        upgraded = upgrade_unsynced_lyrics(album_ids=album_ids) or 0
+        upgraded = upgrade_unsynced_lyrics(album_ids=album_ids, track_ids=track_ids) or 0
         return {'skipped': False, 'upgraded': upgraded}
     finally:
         _downloads_lock.release()
