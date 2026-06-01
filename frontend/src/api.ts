@@ -90,6 +90,14 @@ export const getLyricsVersions = (trackId: number) =>
   api.get(`/metadata/lyrics/versions/${trackId}`).then(r => r.data);
 export const restoreLyricsVersion = (trackId: number, versionId: number) =>
   api.post(`/metadata/lyrics/versions/${trackId}`, { versionId }).then(r => r.data);
+export const getLyricsBlacklist = (trackId: number) =>
+  api.get(`/metadata/lyrics/blacklist/${trackId}`).then(r => r.data);
+export const blacklistLyrics = (
+  trackId: number,
+  data?: { content?: string; synced_lyrics?: string; plain_lyrics?: string; provider?: string; rescan?: boolean },
+) => api.post(`/metadata/lyrics/blacklist/${trackId}`, data || {}).then(r => r.data);
+export const clearLyricsBlacklist = (trackId: number) =>
+  api.delete(`/metadata/lyrics/blacklist/${trackId}`).then(r => r.data);
 
 // ---------- History ----------
 export const getHistory = () => api.get('/history').then(r => r.data as HistoryEntry[]);

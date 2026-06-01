@@ -166,6 +166,91 @@ class LyricsDownload(Resource):
         return {'message': 'Failed to save lyrics'}, 500
 
 
+@api_ns_metadata.route('/metadata/lyrics/blacklist/<int:track_id>')
+class LyricsBlacklist(Resource):
+    def get(self, track_id):
+        """List blacklisted lyrics entries for a track."""
+        from lyrarr.app.database import TableBlacklist
+        rows = database.execute(
+            select(TableBlacklist).where(
+                TableBlacklist.lidarrTrackId == track_id,
+                TableBlacklist.metadata_type == 'lyrics',
+            )
+        ).scalars().all()
+        return {'trackId': track_id, 'blacklist': [r.to_dict() for r in rows]}
+
+    def post(self, track_id):
+        """Blacklist a specific lyrics result so it's never auto-selected again.
+
+        Body: { content?, synced_lyrics?, plain_lyrics?, provider?, rescan? }
+        If no content is given, blacklists the currently saved .lrc file.
+        rescan (default true): remove the file and re-queue the track so the
+        downloader picks a different match on the next run.
+        """
+        import os
+        from datetime import datetime
+
+        from lyrarr.app.database import update
+        from lyrarr.metadata.lyrics_store import blacklist_content
+
+        data = request.get_json() or {}
+        provider = data.get('provider')
+        rescan = data.get('rescan', True)
+
+        track = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not track:
+            return {'message': 'Track not found'}, 404
+
+        content = (
+            data.get('content')
+            or data.get('synced_lyrics')
+            or data.get('plain_lyrics')
+        )
+        # Fall back to the currently saved lyrics file
+        if not content and track.path:
+            fpath = os.path.splitext(track.path)[0] + '.lrc'
+            if os.path.isfile(fpath):
+                with open(fpath, encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+
+        if not content or not content.strip():
+            return {'message': 'No lyrics content to blacklist'}, 400
+
+        if not blacklist_content(track_id, content, provider):
+            return {'message': 'Could not blacklist (empty content)'}, 400
+
+        did_rescan = bool(rescan and track.path)
+        if did_rescan:
+            fpath = os.path.splitext(track.path)[0] + '.lrc'
+            if os.path.isfile(fpath):
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track_id)
+                .values(
+                    lyrics_status='missing',
+                    hasLyrics=False,
+                    is_synced=False,
+                    lyrics_retry_count=0,
+                    lyrics_retry_after=None,
+                    updated_at_timestamp=datetime.now(),
+                )
+            )
+
+        return {'message': 'Lyrics result blacklisted', 'rescan': did_rescan}
+
+    def delete(self, track_id):
+        """Clear all blacklisted lyrics entries for a track."""
+        from lyrarr.metadata.lyrics_store import clear_blacklist
+        count = clear_blacklist(track_id)
+        return {'message': f'Cleared {count} blacklist entries', 'count': count}
+
+
 @api_ns_metadata.route('/metadata/lyrics/reset-retry')
 class LyricsResetRetry(Resource):
     def post(self):
