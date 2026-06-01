@@ -20,7 +20,7 @@ import logging
 from flask import request
 from flask_restx import Namespace, Resource
 
-from lyrarr.lidarr.sync import request_sync
+from lyrarr.lidarr.sync import request_artist_sync, request_sync
 from lyrarr.app.event_handler import event_stream
 
 logger = logging.getLogger(__name__)
@@ -55,12 +55,27 @@ class LidarrWebhook(Resource):
             'message': f'Lidarr webhook: {event_type}',
         })
 
-        # Trigger sync for relevant events
-        sync_events = {'Download', 'ArtistAdd', 'Rename', 'Retag'}
+        # Trigger sync for relevant events, scoped to the affected artist when
+        # the payload identifies one (Lidarr includes an `artist` object).
+        sync_events = {'Download', 'ArtistAdd', 'Rename', 'Retag', 'TrackRetag', 'AlbumDelete'}
         if event_type in sync_events:
-            logger.info(f"Webhook {event_type}: triggering sync")
-            request_sync()
+            artist_id = (data.get('artist') or {}).get('id')
+            if artist_id:
+                logger.info(f"Webhook {event_type}: scoped sync for artist {artist_id}")
+                request_artist_sync(artist_id)
+            else:
+                logger.info(f"Webhook {event_type}: full sync (no artist id in payload)")
+                request_sync()
             return {'message': f'Sync triggered for {event_type}'}
+
+        if event_type == 'ArtistDelete':
+            # Re-sync the artist; sync_artist removes it locally if it's gone.
+            artist_id = (data.get('artist') or {}).get('id')
+            if artist_id:
+                request_artist_sync(artist_id)
+                return {'message': 'Artist delete processed'}
+            request_sync()
+            return {'message': 'Sync triggered for ArtistDelete'}
 
         if event_type == 'Test':
             return {'message': 'Webhook test received successfully'}

@@ -3,7 +3,7 @@
 import logging
 
 from lyrarr.app.config import settings
-from lyrarr.lidarr.sync import request_sync
+from lyrarr.lidarr.sync import request_artist_sync, request_sync
 from lyrarr.app.event_handler import event_stream
 
 logger = logging.getLogger(__name__)
@@ -117,9 +117,27 @@ class LidarrSignalRClient:
 
 
 def _trigger_sync(event_name, action, body):
-    """Trigger an appropriate sync based on the event type."""
-    logger.info(f"Triggering sync for {event_name} {action}")
-    request_sync()
+    """Trigger a sync scoped to the affected artist when possible.
+
+    artist/album/track events all carry enough to resolve an artist id, so we
+    sync just that artist instead of the whole library. Anything we can't scope
+    falls back to a full sync.
+    """
+    artist_id = None
+    if event_name == 'artist':
+        artist_id = body.get('id') or body.get('artistId')
+    elif event_name in ('album', 'track'):
+        artist_id = body.get('artistId')
+        # Track/album events sometimes nest the artist object instead.
+        if not artist_id:
+            artist_id = (body.get('artist') or {}).get('id')
+
+    if artist_id:
+        logger.info(f"Scoped sync for {event_name} {action} → artist {artist_id}")
+        request_artist_sync(artist_id)
+    else:
+        logger.info(f"Full sync for {event_name} {action} (no artist id in event)")
+        request_sync()
 
 
 lidarr_signalr_client = LidarrSignalRClient()
