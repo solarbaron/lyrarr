@@ -160,6 +160,21 @@ def get_blacklisted_hashes(track_id):
     return {r.content_hash for r in rows if r.content_hash}
 
 
+def pick_best_synced(results, min_score=0.0):
+    """Return the best synced-lyrics result at/above min_score, or None.
+
+    Used by the upgrade pass to find a synced replacement for plain lyrics.
+    Pure (no DB), so it lives here with the other lyrics-selection helpers.
+    """
+    synced = [
+        r for r in results
+        if r.get('synced_lyrics') and (r.get('score', 0) or 0) >= min_score
+    ]
+    if not synced:
+        return None
+    return max(synced, key=lambda r: r.get('score', 0) or 0)
+
+
 def result_is_blacklisted(result, blacklisted_hashes):
     """Whether a provider result's content matches any blacklisted hash.
 

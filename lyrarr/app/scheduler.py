@@ -20,7 +20,7 @@ from dateutil import tz
 from dateutil.relativedelta import relativedelta
 
 from lyrarr.lidarr.sync import update_artists
-from lyrarr.metadata.download_worker import run_metadata_downloads
+from lyrarr.metadata.download_worker import run_metadata_downloads, run_lyrics_upgrade
 from lyrarr.utilities.health import check_health
 from lyrarr.api.backup import run_scheduled_backup
 from .config import settings
@@ -75,6 +75,7 @@ class Scheduler:
         self.__lidarr_sync_task()
         self.__lidarr_full_update_task()
         self.__metadata_download_task()
+        self.__lyrics_upgrade_task()
         self.__backup_task()
         self.__randomize_interval_task()
         if args.no_tasks:
@@ -168,6 +169,16 @@ class Scheduler:
             run_metadata_downloads, 'interval', hours=2,
             max_instances=1, coalesce=True, misfire_grace_time=15,
             id='download_metadata', name='Download Missing Metadata',
+            replace_existing=True)
+
+    def __lyrics_upgrade_task(self):
+        # Re-search tracks that only have plain lyrics for a synced upgrade.
+        # Runs less often than the download task since synced versions appear
+        # gradually; the run is guarded by the shared download lock.
+        self.aps_scheduler.add_job(
+            run_lyrics_upgrade, 'interval', hours=24,
+            max_instances=1, coalesce=True, misfire_grace_time=15,
+            id='upgrade_lyrics', name='Upgrade Unsynced Lyrics',
             replace_existing=True)
 
     def __backup_task(self):

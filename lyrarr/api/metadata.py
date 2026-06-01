@@ -251,6 +251,55 @@ class LyricsBlacklist(Resource):
         return {'message': f'Cleared {count} blacklist entries', 'count': count}
 
 
+@api_ns_metadata.route('/metadata/lyrics/upgrade')
+class LyricsUpgrade(Resource):
+    def post(self):
+        """Re-search plain-lyrics tracks for a synced upgrade (background).
+
+        Body: { albumIds?, artistIds?, all? }. With no scope (or all=true),
+        every track that currently has unsynced lyrics is checked.
+        """
+        from threading import Thread
+
+        from lyrarr.app.event_handler import event_stream
+        from lyrarr.metadata.download_worker import run_lyrics_upgrade
+
+        data = request.get_json() or {}
+        album_ids = data.get('albumIds', [])
+        artist_ids = data.get('artistIds', [])
+        scope_all = data.get('all', False)
+
+        if artist_ids:
+            albums = database.execute(
+                select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
+            ).scalars().all()
+            album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
+
+        scoped = None if scope_all else (album_ids or None)
+
+        def _run():
+            try:
+                result = run_lyrics_upgrade(album_ids=scoped, source='manual')
+                if result.get('skipped'):
+                    event_stream(type='download_complete', payload={
+                        'covers': 0, 'lyrics': 0,
+                        'message': 'Another run is already in progress',
+                    })
+                else:
+                    event_stream(type='download_complete', payload={
+                        'covers': 0, 'lyrics': result['upgraded'],
+                        'message': f"Upgraded {result['upgraded']} track(s) to synced lyrics",
+                    })
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Lyrics upgrade error: {e}")
+            finally:
+                database.remove()
+
+        Thread(target=_run, daemon=True).start()
+        return {'message': 'Lyrics upgrade started'}
+
+
 @api_ns_metadata.route('/metadata/lyrics/reset-retry')
 class LyricsResetRetry(Resource):
     def post(self):

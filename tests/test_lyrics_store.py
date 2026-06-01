@@ -5,7 +5,11 @@ result_is_blacklisted); persist_lyrics / blacklist_content touch the database an
 are exercised via the API in integration use.
 """
 
-from lyrarr.metadata.lyrics_store import content_hash, result_is_blacklisted
+from lyrarr.metadata.lyrics_store import (
+    content_hash,
+    pick_best_synced,
+    result_is_blacklisted,
+)
 
 PLAIN = "first line\nsecond line\nthird line"
 SYNCED = "[00:01.00]first line\n[00:05.00]second line\n[00:09.00]third line"
@@ -49,3 +53,34 @@ class TestResultIsBlacklisted:
     def test_result_without_content(self):
         bl = {content_hash(PLAIN)}
         assert result_is_blacklisted({}, bl) is False
+
+
+class TestPickBestSynced:
+    def test_picks_highest_scoring_synced(self):
+        results = [
+            {"synced_lyrics": SYNCED, "score": 0.6},
+            {"synced_lyrics": SYNCED, "score": 0.9},
+            {"synced_lyrics": SYNCED, "score": 0.7},
+        ]
+        assert pick_best_synced(results)["score"] == 0.9
+
+    def test_ignores_plain_only_results(self):
+        results = [
+            {"plain_lyrics": PLAIN, "score": 0.95},
+            {"synced_lyrics": SYNCED, "score": 0.5},
+        ]
+        best = pick_best_synced(results)
+        assert best is not None
+        assert best.get("synced_lyrics") == SYNCED
+
+    def test_none_when_no_synced(self):
+        results = [{"plain_lyrics": PLAIN, "score": 0.9}]
+        assert pick_best_synced(results) is None
+
+    def test_respects_min_score(self):
+        results = [{"synced_lyrics": SYNCED, "score": 0.4}]
+        assert pick_best_synced(results, min_score=0.5) is None
+        assert pick_best_synced(results, min_score=0.3) is not None
+
+    def test_empty(self):
+        assert pick_best_synced([]) is None
