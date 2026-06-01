@@ -293,9 +293,15 @@ def init_db():
         for col in table.columns:
             if col.name not in existing_cols:
                 col_type = col.type.compile(engine.dialect)
+                # Only emit a literal DEFAULT for scalar (non-callable) defaults.
+                # A callable default like datetime.now would render as a Python
+                # repr and produce invalid SQL; columns with such defaults are
+                # simply added without a DEFAULT (existing rows get NULL, and the
+                # ORM applies the default on subsequent writes).
                 default_clause = ''
-                if col.default is not None:
-                    default_clause = f" DEFAULT {col.default.arg!r}"
+                default_arg = getattr(col.default, 'arg', None) if col.default is not None else None
+                if default_arg is not None and not callable(default_arg):
+                    default_clause = f" DEFAULT {default_arg!r}"
                 with engine.begin() as conn:
                     conn.execute(text(
                         f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col_type}{default_clause}'
