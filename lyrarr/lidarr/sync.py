@@ -165,8 +165,12 @@ def _upsert_artist(artist):
         database.execute(insert(TableArtists).values(**values))
 
 
-def _upsert_album(album):
-    """Insert or update a single album row from a Lidarr album payload."""
+def _upsert_album(album, track_files=None):
+    """Insert or update a single album row from a Lidarr album payload.
+
+    `track_files` is the pre-fetched /trackfile list for this album; passing it
+    avoids one Lidarr API round-trip per album during bulk syncs.
+    """
     album_id = album.get('id')
 
     cover = None
@@ -187,14 +191,16 @@ def _upsert_album(album):
 
     # Derive the album directory from its first track file.
     album_path = ''
-    try:
-        track_files = lidarr_api.get_tracks(album_id=album_id)
-        if track_files and isinstance(track_files, list) and len(track_files) > 0:
-            first_track_path = track_files[0].get('path', '')
-            if first_track_path:
-                album_path = os.path.dirname(first_track_path)
-    except Exception as e:
-        logger.debug(f"Could not get track files for album {album_id}: {e}")
+    if track_files is None:
+        try:
+            track_files = lidarr_api.get_tracks(album_id=album_id)
+        except Exception as e:
+            logger.debug(f"Could not get track files for album {album_id}: {e}")
+            track_files = []
+    if track_files and isinstance(track_files, list) and len(track_files) > 0:
+        first_track_path = track_files[0].get('path', '')
+        if first_track_path:
+            album_path = os.path.dirname(first_track_path)
 
     if not album_path:
         artist_obj = album.get('artist', {})
@@ -245,19 +251,44 @@ def _upsert_album(album):
         database.execute(insert(TableAlbums).values(**values))
 
 
-def _sync_album_tracks(album):
+def _fetch_artist_track_data(artist_id):
+    """Fetch all track files and track records for one artist, grouped by album.
+
+    Two Lidarr API calls per artist instead of two per album — the main cost
+    saving of the bulk sync. Returns (files_by_album, records_by_album).
+    """
+    files_by_album = {}
+    records_by_album = {}
+
+    track_files = lidarr_api.get_tracks(artist_id=artist_id)
+    if isinstance(track_files, list):
+        for tf in track_files:
+            files_by_album.setdefault(tf.get('albumId'), []).append(tf)
+
+    track_records = lidarr_api.get_track_records(artist_id=artist_id)
+    if isinstance(track_records, list):
+        for tr in track_records:
+            records_by_album.setdefault(tr.get('albumId'), []).append(tr)
+
+    return files_by_album, records_by_album
+
+
+def _sync_album_tracks(album, track_files=None, track_records=None):
     """Sync all track files for one album row. Returns number of tracks synced.
 
     Joins /trackfile (paths) with /track (title, number, duration), and reconciles
-    each track's lyrics state against any .lrc on disk.
+    each track's lyrics state against any .lrc on disk. Pre-fetched per-artist
+    `track_files`/`track_records` avoid two API round-trips per album.
     """
     synced = 0
     try:
-        track_files = lidarr_api.get_tracks(album_id=album.lidarrAlbumId)
+        if track_files is None:
+            track_files = lidarr_api.get_tracks(album_id=album.lidarrAlbumId)
         if not track_files or not isinstance(track_files, list):
             return 0
 
-        track_records = lidarr_api.get_track_records(album_id=album.lidarrAlbumId)
+        if track_records is None:
+            track_records = lidarr_api.get_track_records(album_id=album.lidarrAlbumId)
         tf_to_metadata = {}
         if track_records and isinstance(track_records, list):
             for tr in track_records:
@@ -270,6 +301,17 @@ def _sync_album_tracks(album):
                         'duration': int((tr.get('duration', 0) or 0) / 1000) if tr.get('duration') else None,
                     }
 
+        # One query for the album's existing rows instead of one per track.
+        # Keyed on lidarrTrackId (not albumId) so a track that moved albums in
+        # Lidarr still matches its existing row instead of inserting a duplicate.
+        track_ids = [tf.get('id') for tf in track_files if tf.get('id')]
+        existing_tracks = {
+            t.lidarrTrackId: t
+            for t in database.execute(
+                select(TableTracks).where(TableTracks.lidarrTrackId.in_(track_ids))
+            ).scalars().all()
+        }
+
         for tf in track_files:
             track_id = tf.get('id')
             if not track_id:
@@ -277,16 +319,6 @@ def _sync_album_tracks(album):
             track_path = tf.get('path', '')
 
             meta = tf_to_metadata.get(track_id, {})
-            if not meta.get('title') and track_records:
-                for tr in track_records:
-                    if tr.get('trackFileId') == track_id:
-                        meta = {
-                            'title': tr.get('title', ''),
-                            'trackNumber': tr.get('absoluteTrackNumber') or tr.get('trackNumber'),
-                            'mediumNumber': tr.get('mediumNumber', 1),
-                            'duration': int((tr.get('duration', 0) or 0) / 1000) if tr.get('duration') else None,
-                        }
-                        break
 
             # Derive title: prefer the track record, fall back to the filename.
             title = (meta.get('title') or '').strip()
@@ -300,9 +332,7 @@ def _sync_album_tracks(album):
             if not title:
                 title = 'Unknown'
 
-            existing = database.execute(
-                select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
-            ).scalars().first()
+            existing = existing_tracks.get(track_id)
 
             lyrics_exist = False
             detected_lang = None
@@ -397,26 +427,34 @@ def sync_artist(artist_id):
     _upsert_artist(artist)
 
     albums = lidarr_api.get_albums(artist_id=artist_id) or []
+    files_by_album, records_by_album = _fetch_artist_track_data(artist_id)
+
+    synced_albums = 0
+    total_tracks = 0
     for album in albums:
-        if not album.get('id'):
+        album_id = album.get('id')
+        if not album_id:
             continue
         if settings.lidarr.only_monitored and not album.get('monitored', False):
             continue
-        stats = album.get('statistics', {})
-        if stats.get('trackFileCount', 0) == 0:
+        # Presence of actual track files is the source of truth for "has files"
+        # — the statistics block can be missing or stale in bulk responses.
+        track_files = files_by_album.get(album_id)
+        if not track_files:
             continue
-        _upsert_album(album)
-
-    album_rows = database.execute(
-        select(TableAlbums).where(TableAlbums.artistId == artist_id)
-    ).scalars().all()
-    total_tracks = 0
-    for album_row in album_rows:
-        total_tracks += _sync_album_tracks(album_row)
+        _upsert_album(album, track_files=track_files)
+        album_row = database.execute(
+            select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
+        ).scalars().first()
+        if album_row:
+            total_tracks += _sync_album_tracks(
+                album_row, track_files, records_by_album.get(album_id, [])
+            )
+            synced_albums += 1
 
     logger.info(
         f"Incremental sync done: artist {artist_id} — "
-        f"{len(album_rows)} album(s), {total_tracks} track(s)"
+        f"{synced_albums} album(s), {total_tracks} track(s)"
     )
     event_stream(type='sync_complete', payload={
         'message': f"Synced artist '{artist.get('artistName', '?')}'",
@@ -454,12 +492,19 @@ def update_artists(force=False):
 
     logger.info(f"Synced {synced} artists from Lidarr")
 
-    # Now sync albums (only those with files on disk)
+    # Now sync albums + tracks (only albums with files on disk)
     update_albums(force=force)
 
 
 def update_albums(force=False):
-    """Sync albums from Lidarr to the local database. Only includes albums with downloaded tracks."""
+    """Sync albums and their track files from Lidarr to the local database.
+
+    Fetches the full album list in one call, then track files + track records
+    per artist (two calls each) instead of per album — on large libraries this
+    cuts Lidarr API round-trips by roughly 6x. Only albums that actually have
+    track files are stored; presence in the /trackfile response is the source
+    of truth, not the albums' statistics block.
+    """
     if not force and not settings.general.use_lidarr:
         return
 
@@ -476,52 +521,58 @@ def update_albums(force=False):
 
     logger.info(f"Fetched {len(albums)} albums from Lidarr")
 
-    synced = 0
-    skipped_no_files = 0
-
+    albums_by_artist = {}
     for album in albums:
-        if not album.get('id'):
+        if not album.get('id') or not album.get('artistId'):
             continue
         if settings.lidarr.only_monitored and not album.get('monitored', False):
             continue
-        # Only sync albums that have files on disk
-        stats = album.get('statistics', {})
-        if stats.get('trackFileCount', 0) == 0:
-            skipped_no_files += 1
+        albums_by_artist.setdefault(album['artistId'], []).append(album)
+
+    synced = 0
+    skipped_no_files = 0
+    total_tracks = 0
+
+    for artist_id, artist_albums in albums_by_artist.items():
+        # Skip the per-artist track fetch only when Lidarr's statistics
+        # explicitly say no album has files. Missing statistics → fetch anyway
+        # and let the actual trackfile list decide.
+        stats_say_empty = all(
+            isinstance(a.get('statistics'), dict)
+            and a['statistics'].get('trackFileCount', 0) == 0
+            for a in artist_albums
+        )
+        if stats_say_empty:
+            skipped_no_files += len(artist_albums)
             continue
-        _upsert_album(album)
-        synced += 1
 
-    logger.info(f"Synced {synced} albums from Lidarr (skipped {skipped_no_files} without files)")
+        try:
+            files_by_album, records_by_album = _fetch_artist_track_data(artist_id)
+        except Exception as e:
+            logger.error(f"Error fetching track data for artist {artist_id}: {e}")
+            continue
 
-    # Now sync track files for all synced albums
-    update_tracks(force=force)
+        for album in artist_albums:
+            album_id = album['id']
+            track_files = files_by_album.get(album_id)
+            if not track_files:
+                skipped_no_files += 1
+                continue
+            _upsert_album(album, track_files=track_files)
+            synced += 1
 
+            album_row = database.execute(
+                select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
+            ).scalars().first()
+            if album_row:
+                total_tracks += _sync_album_tracks(
+                    album_row, track_files, records_by_album.get(album_id, [])
+                )
 
-def update_tracks(force=False):
-    """Sync track files from Lidarr to the local database.
-
-    Joins the /trackfile endpoint (file paths) with /track endpoint
-    (real metadata: title, trackNumber, discNumber, duration).
-    """
-    if not force and not settings.general.use_lidarr:
-        return
-
-    logger.info("Starting track sync from Lidarr...")
-
-    # Get all albums we have in our DB
-    albums = database.execute(select(TableAlbums)).scalars().all()
-
-    if not albums:
-        logger.info("No albums to sync tracks for")
-        return
-
-    total_synced = 0
-
-    for album in albums:
-        total_synced += _sync_album_tracks(album)
-
-    logger.info(f"Synced {total_synced} tracks from Lidarr")
+    logger.info(
+        f"Synced {synced} albums and {total_tracks} tracks from Lidarr "
+        f"(skipped {skipped_no_files} albums without files)"
+    )
 
     # Emit sync_complete event with stats
     from lyrarr.app.database import func
@@ -532,7 +583,7 @@ def update_tracks(force=False):
         select(func.count()).select_from(TableAlbums)
     ).scalar() or 0
     event_stream(type='sync_complete', payload={
-        'message': f'Sync complete: {artist_count} artists, {album_count} albums, {total_synced} tracks',
+        'message': f'Sync complete: {artist_count} artists, {album_count} albums, {total_tracks} tracks',
         'artists_synced': artist_count,
         'albums_synced': album_count,
     })

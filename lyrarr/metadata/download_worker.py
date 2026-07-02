@@ -34,6 +34,7 @@ from lyrarr.metadata.lyrics_store import (
 )
 from lyrarr.metadata.merge import merge_provider_results
 from lyrarr.metadata.provider_utils import (
+    ProviderTransientError,
     begin_search,
     health_tracker,
     rate_limiter,
@@ -379,6 +380,12 @@ def collect_lyrics_results(track, artist_name, album_title, providers):
             # A call that returned without raising means the provider is up,
             # even with no match — reset its consecutive-failure streak.
             health_tracker.record_success(provider_name)
+        except ProviderTransientError as e:
+            # Timeout/429/5xx: expected under load — log quietly, but still
+            # count it so repeated failures put the provider in cooldown
+            # instead of costing a full timeout on every remaining track.
+            logger.warning(f"Lyrics provider unavailable ({provider_name}) for '{track.title}': {e}")
+            health_tracker.record_failure(provider_name, str(e))
         except Exception as e:
             logger.error(f"Lyrics search error ({provider_name}) for '{track.title}': {e}")
             health_tracker.record_failure(provider_name, str(e))

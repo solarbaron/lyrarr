@@ -75,7 +75,7 @@ class LidarrSignalRClient:
         Supported events:
         - artist: Artist was added/updated/deleted in Lidarr
         - album: Album was added/updated/deleted
-        - track: Track file was imported/deleted
+        - track/trackfile: Track file was imported/deleted
         - command: Lidarr command completed (e.g., RefreshArtist)
         """
         if not data:
@@ -94,14 +94,16 @@ class LidarrSignalRClient:
                 'message': f'Lidarr: {name} {action}',
             })
 
-            if name in ('artist', 'album', 'track'):
+            if name in ('artist', 'album', 'track', 'trackfile'):
                 if settings.lidarr.sync_on_live:
                     _trigger_sync(name, action, body)
 
             elif name == 'command':
                 # Lidarr command completed (e.g., RefreshArtist, RescanArtist)
                 cmd_name = body.get('name', '')
-                if cmd_name in ('RefreshArtist', 'RescanArtist', 'ArtistSearch'):
+                if cmd_name in ('RefreshArtist', 'RescanArtist', 'ArtistSearch',
+                                'RefreshAlbum', 'AlbumSearch', 'DownloadedAlbumsScan',
+                                'RescanFolders'):
                     logger.info(f"Lidarr command completed: {cmd_name}, triggering sync")
                     if settings.lidarr.sync_on_live:
                         request_sync()
@@ -125,11 +127,20 @@ def _trigger_sync(event_name, action, body):
     artist_id = None
     if event_name == 'artist':
         artist_id = body.get('id') or body.get('artistId')
-    elif event_name in ('album', 'track'):
+    elif event_name in ('album', 'track', 'trackfile'):
         artist_id = body.get('artistId')
         # Track/album events sometimes nest the artist object instead.
         if not artist_id:
             artist_id = (body.get('artist') or {}).get('id')
+        # trackfile events may only carry an albumId — resolve it to an artist.
+        if not artist_id and body.get('albumId'):
+            try:
+                from lyrarr.lidarr.api_client import lidarr_api
+                album = lidarr_api.get_album(body['albumId'])
+                if album:
+                    artist_id = album.get('artistId')
+            except Exception:
+                pass
 
     if artist_id:
         logger.info(f"Scoped sync for {event_name} {action} → artist {artist_id}")

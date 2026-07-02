@@ -1,9 +1,12 @@
 
 import logging
 
+import requests
+
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
 from lyrarr.metadata.normalize import clean_for_search
+from lyrarr.metadata.provider_utils import note_transient_error
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +25,32 @@ class GeniusProvider(LyricsProvider):
         return settings.genius.apikey
 
     def _get_client(self):
-        """Create a lyricsgenius client instance."""
+        """Create a lyricsgenius client instance.
+
+        The Genius() constructor signature varies across lyricsgenius releases
+        (e.g. some drop `verbose`), so only pass kwargs the installed version
+        actually accepts and set the rest as attributes afterwards.
+        """
+        import inspect
+
         import lyricsgenius
 
-        genius = lyricsgenius.Genius(
-            self._api_key,
-            verbose=False,
-            remove_section_headers=False,  # Keep [Chorus], [Verse] etc.
-            retries=2,
-        )
+        kwargs = {
+            'verbose': False,
+            'remove_section_headers': False,  # Keep [Chorus], [Verse] etc.
+            'retries': 2,
+        }
+        try:
+            params = inspect.signature(lyricsgenius.Genius.__init__).parameters
+            if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                kwargs = {k: v for k, v in kwargs.items() if k in params}
+        except (TypeError, ValueError):
+            pass
+
+        # Newer releases dropped `verbose` and log status messages instead.
+        logging.getLogger('lyricsgenius').setLevel(logging.WARNING)
+
+        genius = lyricsgenius.Genius(self._api_key, **kwargs)
         genius.timeout = 15
         # Skip non-song results (articles, interviews, book excerpts)
         genius.skip_non_songs = True
@@ -103,7 +123,16 @@ class GeniusProvider(LyricsProvider):
                 "Install with: pip install lyricsgenius"
             )
         except Exception as e:
-            logger.error(f"Genius search error: {e}")
+            # Network-ish failures are transient: flag them so the track is
+            # retried soon, but don't fail the provider's health streak on a
+            # single slow request. Anything else (auth errors, library API
+            # changes, parse bugs) propagates so the worker records a failure
+            # and the health tracker can bench the provider.
+            if isinstance(e, (requests.exceptions.RequestException, TimeoutError)):
+                note_transient_error()
+                logger.warning(f"Genius transient error: {e}")
+            else:
+                raise
 
         return results
 

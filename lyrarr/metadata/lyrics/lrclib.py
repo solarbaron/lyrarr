@@ -6,6 +6,7 @@ import requests
 from lyrarr.metadata.base import LyricsProvider
 from lyrarr.metadata.normalize import clean_for_search, duration_ms_to_seconds, normalize_title
 from lyrarr.metadata.provider_utils import (
+    ProviderTransientError,
     is_transient_status,
     note_transient_error,
     rate_limiter,
@@ -15,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 LRCLIB_BASE_URL = 'https://lrclib.net/api'
 MUSICBRAINZ_BASE_URL = 'https://musicbrainz.org/ws/2'
+
+# Shared session for connection pooling — avoids a fresh TLS handshake per call.
+_session = requests.Session()
+
+# (connect, read) — fail fast on unreachable host, allow slow responses.
+_TIMEOUT = (5, 15)
 
 
 class LRCLIBProvider(LyricsProvider):
@@ -242,7 +249,7 @@ class LRCLIBProvider(LyricsProvider):
             # MusicBrainz allows ~1 req/sec; throttle every call, not just the
             # first one the worker spaced out, so a burst of lookups can't 503.
             rate_limiter.wait('musicbrainz')
-            response = requests.get(
+            response = _session.get(
                 f"{MUSICBRAINZ_BASE_URL}/recording/{recording_id}",
                 params={
                     'inc': 'isrcs+artist-credits',
@@ -316,10 +323,10 @@ class LRCLIBProvider(LyricsProvider):
 
         try:
             rate_limiter.wait('lrclib')
-            response = requests.get(
+            response = _session.get(
                 f"{LRCLIB_BASE_URL}/get",
                 params=params,
-                timeout=15,
+                timeout=_TIMEOUT,
                 headers={'User-Agent': 'Lyrarr/1.0'}
             )
             if response.status_code == 200:
@@ -339,11 +346,17 @@ class LRCLIBProvider(LyricsProvider):
                         'duration': data.get('duration'),
                     }
             elif is_transient_status(response.status_code):
+                # Abort this track's whole cascade: hammering a rate-limited or
+                # erroring host with the remaining strategies only makes it
+                # worse. Raising also lets the worker's health tracker put
+                # LRCLIB in cooldown if this keeps happening.
                 note_transient_error()
-                logger.warning(f"LRCLIB transient error {response.status_code} on exact match")
+                raise ProviderTransientError(
+                    f"LRCLIB returned {response.status_code} on exact match"
+                )
         except requests.exceptions.RequestException as e:
             note_transient_error()
-            logger.error(f"LRCLIB exact match error: {e}")
+            raise ProviderTransientError(f"LRCLIB exact match error: {e}") from e
 
         return None
 
@@ -353,15 +366,17 @@ class LRCLIBProvider(LyricsProvider):
 
         try:
             rate_limiter.wait('lrclib')
-            response = requests.get(
+            response = _session.get(
                 f"{LRCLIB_BASE_URL}/search",
                 params={'q': query},
-                timeout=15,
+                timeout=_TIMEOUT,
                 headers={'User-Agent': 'Lyrarr/1.0'}
             )
             if response.status_code != 200 and is_transient_status(response.status_code):
                 note_transient_error()
-                logger.warning(f"LRCLIB transient error {response.status_code} on search")
+                raise ProviderTransientError(
+                    f"LRCLIB returned {response.status_code} on search"
+                )
             if response.status_code == 200:
                 data = response.json()
                 for item in data[:10]:  # Check top 10 for best scored match
@@ -399,7 +414,7 @@ class LRCLIBProvider(LyricsProvider):
 
         except requests.exceptions.RequestException as e:
             note_transient_error()
-            logger.error(f"LRCLIB search error: {e}")
+            raise ProviderTransientError(f"LRCLIB search error: {e}") from e
 
         # Sort by score
         results.sort(key=lambda x: x.get('score', 0), reverse=True)
