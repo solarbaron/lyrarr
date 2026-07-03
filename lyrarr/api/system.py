@@ -49,6 +49,22 @@ class SystemSettings(Resource):
                 import logging
                 logging.getLogger(__name__).warning(f"Could not refresh scheduled tasks: {e}")
 
+        # Reconnect SignalR when Lidarr connection details changed, so live
+        # sync follows the new instance without a restart.
+        if result.get('lidarr_changed'):
+            import threading
+
+            def _reconnect_signalr():
+                try:
+                    from lyrarr.lidarr.signalr_client import lidarr_signalr_client
+                    lidarr_signalr_client.stop()
+                    lidarr_signalr_client.start()
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"SignalR reconnect failed: {e}")
+
+            threading.Thread(target=_reconnect_signalr, daemon=True).start()
+
         return {'message': 'Settings saved', **result}
 
 

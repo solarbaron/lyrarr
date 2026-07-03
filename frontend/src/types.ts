@@ -131,6 +131,8 @@ export interface DashboardStats {
 
 export interface SSEEvent {
   type: string;
+  /** True when this event is history replayed on (re)connect, not a live event. */
+  replay?: boolean;
   payload?: {
     message?: string;
     title?: string;

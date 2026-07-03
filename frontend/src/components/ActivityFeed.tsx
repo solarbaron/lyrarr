@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
+import { useQueryClient } from '@tanstack/react-query';
 import type { SSEEvent } from '../types';
 
 interface DownloadItem {
@@ -17,6 +18,9 @@ interface DownloadProgress {
   active: boolean;
 }
 
+// Event types that are pure backend chatter — no value in the feed.
+const IGNORED_TYPES = new Set(['task', 'lidarr_event', 'signalr']);
+
 export default function ActivityFeed() {
   const [items, setItems] = useState<DownloadItem[]>([]);
   const [progress, setProgress] = useState<DownloadProgress>({
@@ -25,6 +29,7 @@ export default function ActivityFeed() {
   const [open, setOpen] = useState(false);
   const [hasNew, setHasNew] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const source = new EventSource('/api/events');
@@ -45,28 +50,50 @@ export default function ActivityFeed() {
     return () => source.close();
   }, []);
 
+  // Refresh page data when background work finishes, so lists don't go stale.
+  // Matches key families: 'artist' covers ['artist', id], ['artists', ...],
+  // ['artist-albums', ...]; 'dashboard' covers ['dashboard-stats'] etc.
+  const refreshQueries = (families: string[]) => {
+    queryClient.invalidateQueries({
+      predicate: (q) => {
+        const k = q.queryKey[0];
+        return typeof k === 'string' &&
+          families.some(f => k === f || k === `${f}s` || k.startsWith(`${f}-`));
+      },
+    });
+  };
+
   const handleEvent = (event: SSEEvent) => {
     const p = event.payload;
+    // Replayed history fills the feed on (re)connect but must not fire
+    // toasts, animate progress, or light up the "new" badge — it already
+    // happened, possibly long ago.
+    const live = !event.replay;
+
+    if (IGNORED_TYPES.has(event.type)) return;
 
     switch (event.type) {
       case 'download_start':
-        setProgress({
-          totalCovers: p?.total_covers || 0,
-          totalLyrics: p?.total_lyrics || 0,
-          currentCover: 0,
-          currentLyric: 0,
-          active: true,
-        });
+        if (live) {
+          setProgress({
+            totalCovers: p?.total_covers || 0,
+            totalLyrics: p?.total_lyrics || 0,
+            currentCover: 0,
+            currentLyric: 0,
+            active: true,
+          });
+        }
         addItem({ icon: '🚀', title: p?.message || 'Download started...', type: 'info' });
-        setOpen(true);
         break;
 
       case 'download_progress':
-        setProgress(prev => ({
-          ...prev,
-          currentCover: p?.metadata_type === 'cover' ? (prev.currentCover + 1) : prev.currentCover,
-          currentLyric: p?.metadata_type === 'lyrics' ? (prev.currentLyric + 1) : prev.currentLyric,
-        }));
+        if (live) {
+          setProgress(prev => ({
+            ...prev,
+            currentCover: p?.metadata_type === 'cover' ? (prev.currentCover + 1) : prev.currentCover,
+            currentLyric: p?.metadata_type === 'lyrics' ? (prev.currentLyric + 1) : prev.currentLyric,
+          }));
+        }
         addItem({
           icon: p?.metadata_type === 'cover' ? '🎨' : '📝',
           title: p?.title || 'Unknown',
@@ -75,17 +102,25 @@ export default function ActivityFeed() {
         });
         break;
 
-      case 'download_complete':
-        setProgress(prev => ({ ...prev, active: false }));
+      case 'download_complete': {
+        if (live) setProgress(prev => ({ ...prev, active: false }));
         addItem({ icon: '✅', title: p?.message || 'Download complete', type: 'success' });
-        // Toast notification
-        notifications.show({
-          title: '✅ Download Complete',
-          message: `Downloaded ${p?.covers || 0} covers and ${p?.lyrics || 0} lyrics`,
-          color: 'green',
-          autoClose: 8000,
-        });
+        const total = (p?.covers || 0) + (p?.lyrics || 0);
+        // Only toast when something was actually downloaded — the scheduled
+        // task also completes (with zero) every couple of hours.
+        if (live && total > 0) {
+          notifications.show({
+            title: '✅ Download Complete',
+            message: `Downloaded ${p?.covers || 0} covers and ${p?.lyrics || 0} lyrics`,
+            color: 'green',
+            autoClose: 8000,
+          });
+        }
+        if (live && total > 0) {
+          refreshQueries(['album', 'track', 'wanted', 'dashboard', 'history']);
+        }
         break;
+      }
 
       case 'download_error':
         addItem({ icon: '❌', title: p?.message || 'Error', type: 'error' });
@@ -93,13 +128,11 @@ export default function ActivityFeed() {
 
       case 'sync_complete':
         addItem({ icon: '🔄', title: p?.message || 'Sync complete', type: 'success' });
-        // Toast notification for sync
-        notifications.show({
-          title: '🔄 Sync Complete',
-          message: p?.message || `Synced ${p?.artists_synced || 0} artists, ${p?.albums_synced || 0} albums`,
-          color: 'blue',
-          autoClose: 8000,
-        });
+        // No toast: background syncs run every few minutes — the feed entry
+        // and the refreshed data are the signal.
+        if (live) {
+          refreshQueries(['artist', 'album', 'dashboard', 'wanted']);
+        }
         break;
 
       case 'sync_start':
@@ -110,7 +143,9 @@ export default function ActivityFeed() {
         addItem({ icon: '📡', title: p?.message || event.type, type: 'info' });
     }
 
-    setHasNew(true);
+    // The badge means "something happened while you weren't looking" —
+    // replayed history doesn't qualify.
+    if (live) setHasNew(true);
   };
 
   const addItem = (item: DownloadItem) => {

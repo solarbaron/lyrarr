@@ -321,18 +321,30 @@ def save_settings(settings_items):
         if key in ['settings-general-base_url', 'settings-lidarr-base_url']:
             value = base_url_slash_cleaner(value)
 
-        if key in ['settings-general-use_lidarr', 'settings-lidarr-ip', 'settings-lidarr-port',
-                   'settings-lidarr-base_url', 'settings-lidarr-ssl', 'settings-lidarr-apikey']:
+        # Resolve the dotted settings path and the currently stored value, so
+        # the change flags below only fire when a value actually changed —
+        # the frontend posts the whole form, not just edited fields.
+        settings_keys_path = '.'.join(settings_keys[1:]) if settings_keys[0] == 'settings' else '.'.join(settings_keys)
+        try:
+            old_value = settings[settings_keys_path]
+        except (KeyError, AttributeError):
+            old_value = None
+        value_changed = old_value != value
+
+        if value_changed and key in [
+                'settings-general-use_lidarr', 'settings-lidarr-ip', 'settings-lidarr-port',
+                'settings-lidarr-base_url', 'settings-lidarr-ssl', 'settings-lidarr-verify_ssl',
+                'settings-lidarr-apikey']:
             lidarr_changed = True
 
-        if key in ['update_schedule', 'settings-general-use_lidarr',
-                   'settings-lidarr-sync_interval', 'settings-lidarr-full_update',
-                   'settings-lidarr-full_update_day', 'settings-lidarr-full_update_hour',
-                   'settings-backup-frequency', 'settings-backup-day', 'settings-backup-hour']:
+        if key == 'update_schedule' or (value_changed and key in [
+                'settings-general-use_lidarr',
+                'settings-lidarr-sync_interval', 'settings-lidarr-full_update',
+                'settings-lidarr-full_update_day', 'settings-lidarr-full_update_hour',
+                'settings-backup-frequency', 'settings-backup-day', 'settings-backup-hour']):
             update_schedule = True
 
         # Apply the setting
-        settings_keys_path = '.'.join(settings_keys[1:]) if settings_keys[0] == 'settings' else '.'.join(settings_keys)
         settings[settings_keys_path] = value
 
     write_config()

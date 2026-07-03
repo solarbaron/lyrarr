@@ -78,7 +78,9 @@ AUTH_EXEMPT_PATHS = frozenset([
     '/api/auth/login',
     '/api/auth/status',
     '/api/auth/logout',
-    '/api/events',
+    # /api/events is NOT exempt: EventSource sends session cookies (and cached
+    # Basic credentials) automatically, so authenticated browsers stream fine,
+    # while anonymous clients can't watch library activity.
 ])
 
 

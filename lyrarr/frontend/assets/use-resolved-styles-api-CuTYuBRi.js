@@ -1,0 +1,1 @@
+import{y as a,br as r,bs as v}from"./index-B6aRYKGR.js";function m({classNames:l,styles:o,props:e,stylesCtx:s}){const t=a();return{resolvedClassNames:v({theme:t,classNames:l,props:e,stylesCtx:s||void 0}),resolvedStyles:r({theme:t,styles:o,props:e,stylesCtx:s||void 0})}}export{m as u};
