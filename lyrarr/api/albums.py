@@ -136,7 +136,10 @@ class AlbumItem(Resource):
         for field in ['override_cover_format', 'override_prefer_synced',
                       'override_download_covers', 'override_download_lyrics']:
             if field in data:
-                values[field] = data[field] if data[field] else None
+                # None/'' clears the override; False is a real value ("disabled")
+                # and must be preserved, not collapsed into "no override".
+                val = data[field]
+                values[field] = None if val is None or val == '' else val
 
         database.execute(
             update(TableAlbums)

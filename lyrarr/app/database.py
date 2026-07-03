@@ -253,6 +253,60 @@ _BOOL_MIGRATION_COLUMNS = {
 }
 
 
+def _rebuild_text_bool_columns():
+    """Rebuild Boolean columns that legacy schemas declared as TEXT.
+
+    Databases created by old lyrarr versions declared boolean columns as TEXT
+    (e.g. `download_covers TEXT`). SQLite's TEXT affinity converts every
+    written integer to a string, so saving download_covers=False stores the
+    string '0' — which Python reads back as truthy. That made disabled
+    profile toggles appear permanently enabled, and broke `monitored == True`
+    SQL filters ('1' = 1 is false in SQLite when types differ).
+
+    Value-level fixes can't help: the affinity re-corrupts every subsequent
+    write. The column itself must be rebuilt with a real BOOLEAN type.
+    """
+    import sqlite3 as _sqlite3
+
+    from sqlalchemy import inspect as sa_inspect
+
+    if _sqlite3.sqlite_version_info < (3, 35, 0):  # DROP COLUMN support
+        logger.warning(
+            "SQLite %s is too old to rebuild legacy TEXT boolean columns "
+            "(3.35+ needed); boolean settings may not save correctly",
+            _sqlite3.sqlite_version,
+        )
+        return
+
+    inspector = sa_inspect(engine)
+    for table_name, columns in _BOOL_MIGRATION_COLUMNS.items():
+        if not inspector.has_table(table_name):
+            continue
+        declared = {c['name']: str(c['type']).upper() for c in inspector.get_columns(table_name)}
+        for col_name in columns:
+            col_type = declared.get(col_name)
+            if col_type is None or 'BOOL' in col_type:
+                continue
+            tmp = f"{col_name}__boolfix"
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {tmp} BOOLEAN'))
+                    # NULL stays NULL (override_* columns use it for "no override").
+                    conn.execute(text(
+                        f"UPDATE {table_name} SET {tmp} = CASE "
+                        f"WHEN {col_name} IS NULL THEN NULL "
+                        f"WHEN lower(CAST({col_name} AS TEXT)) IN ('0', 'false', '', 'no', 'off', 'none') THEN 0 "
+                        f"ELSE 1 END"
+                    ))
+                    conn.execute(text(f'ALTER TABLE {table_name} DROP COLUMN {col_name}'))
+                    conn.execute(text(f'ALTER TABLE {table_name} RENAME COLUMN {tmp} TO {col_name}'))
+                logger.info(
+                    f"Migration: rebuilt {table_name}.{col_name} as BOOLEAN (was {col_type})"
+                )
+            except Exception as e:
+                logger.error(f"Migration: failed to rebuild {table_name}.{col_name}: {e}")
+
+
 def _migrate_bool_columns():
     """Migrate Text 'True'/'False' values to integer 1/0 for Boolean columns."""
     from sqlalchemy import inspect as sa_inspect
@@ -308,7 +362,9 @@ def init_db():
                     ))
                 logger.info(f"Migration: added column {col.name} to {table.name}")
 
-    # Migrate text booleans to real booleans
+    # Rebuild legacy TEXT-typed boolean columns, then migrate any remaining
+    # text 'True'/'False' values in correctly-typed columns.
+    _rebuild_text_bool_columns()
     _migrate_bool_columns()
 
     # Stamp with Alembic 'head' if alembic_version table doesn't exist yet
