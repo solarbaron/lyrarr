@@ -67,6 +67,7 @@ class Scheduler:
         self.aps_scheduler.add_listener(task_listener_remove, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
         self.__check_health_task()
+        self.__maintenance_task()
         self.update_configurable_tasks()
 
         self.aps_scheduler.start()
@@ -163,6 +164,12 @@ class Scheduler:
         self.aps_scheduler.add_job(check_health, 'interval', hours=6, max_instances=1,
                                    coalesce=True, misfire_grace_time=15,
                                    id='check_health', name='Check Health')
+
+    def __maintenance_task(self):
+        from lyrarr.utilities.maintenance import run_maintenance
+        self.aps_scheduler.add_job(run_maintenance, 'interval', hours=24, max_instances=1,
+                                   coalesce=True, misfire_grace_time=15,
+                                   id='maintenance', name='Database Maintenance')
 
     def __metadata_download_task(self):
         self.aps_scheduler.add_job(

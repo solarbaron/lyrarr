@@ -86,12 +86,16 @@ def _plan_retry(retry_count, transient):
     return retry_count + 1, datetime.now() + timedelta(days=days)
 
 
-def run_downloads(album_ids=None, do_covers=True, do_lyrics=True, source='scheduled'):
+def run_downloads(album_ids=None, do_covers=True, do_lyrics=True, source='scheduled',
+                  ignore_backoff=False):
     """Guarded entry point for metadata downloads.
 
     Acquires a process-wide lock so concurrent triggers (the scheduled job and a
     manual batch download) don't run at the same time and double-process tracks.
     If a run is already active, this one is skipped rather than queued.
+
+    ignore_backoff: retry backed-off tracks immediately — used for manual,
+    explicitly-scoped requests where silently skipping would look like a no-op.
     """
     if not _downloads_lock.acquire(blocking=False):
         logger.warning(f"Skipping {source} download run — another run is already in progress")
@@ -103,7 +107,8 @@ def run_downloads(album_ids=None, do_covers=True, do_lyrics=True, source='schedu
 
     try:
         covers = (download_missing_covers(album_ids=album_ids) or 0) if do_covers else 0
-        lyrics = (download_missing_lyrics(album_ids=album_ids) or 0) if do_lyrics else 0
+        lyrics = (download_missing_lyrics(album_ids=album_ids,
+                                          ignore_backoff=ignore_backoff) or 0) if do_lyrics else 0
         return {'skipped': False, 'covers': covers, 'lyrics': lyrics}
     finally:
         _downloads_lock.release()
@@ -397,19 +402,22 @@ def collect_lyrics_results(track, artist_name, album_title, providers):
     }
 
 
-def download_missing_lyrics(album_ids=None):
+def download_missing_lyrics(album_ids=None, ignore_backoff=False):
     """Download lyrics for tracks that are missing them, based on their album's profile.
 
     Args:
         album_ids: Optional list of album IDs to scope the download. If None, all missing.
+        ignore_backoff: Include tracks still inside their retry-backoff window.
+            Used by manual scoped requests — when a user explicitly asks for an
+            album, skipping its backed-off tracks silently reads as "nothing
+            happened".
     """
-    query = select(TableTracks).where(
-        TableTracks.lyrics_status == 'missing',
-        or_(
+    query = select(TableTracks).where(TableTracks.lyrics_status == 'missing')
+    if not ignore_backoff:
+        query = query.where(or_(
             TableTracks.lyrics_retry_after.is_(None),
             TableTracks.lyrics_retry_after <= datetime.now()
-        )
-    )
+        ))
     if album_ids:
         query = query.where(TableTracks.albumId.in_(album_ids))
     tracks = database.execute(query).scalars().all()

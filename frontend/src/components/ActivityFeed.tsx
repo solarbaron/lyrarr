@@ -139,6 +139,25 @@ export default function ActivityFeed() {
         addItem({ icon: '🔄', title: p?.message || 'Syncing with Lidarr...', type: 'info' });
         break;
 
+      case 'health': {
+        const healthy = (p as any)?.healthy;
+        addItem({
+          icon: healthy ? '💚' : '💔',
+          title: p?.message || 'Service health changed',
+          type: healthy ? 'success' : 'error',
+        });
+        // Health flips are rare and important — always worth a toast (live only).
+        if (live) {
+          notifications.show({
+            title: healthy ? 'Connection Restored' : 'Connection Problem',
+            message: p?.message || '',
+            color: healthy ? 'green' : 'red',
+            autoClose: healthy ? 8000 : false,
+          });
+        }
+        break;
+      }
+
       default:
         addItem({ icon: '📡', title: p?.message || event.type, type: 'info' });
     }

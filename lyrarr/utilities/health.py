@@ -1,11 +1,17 @@
 
 import logging
+import threading
 
 import requests
 
 from lyrarr.app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Last known health per service, so transitions (up→down, down→up) can be
+# announced exactly once instead of re-toasting on every periodic check.
+_last_state = {}
+_state_lock = threading.Lock()
 
 
 def check_health():
@@ -17,8 +23,32 @@ def check_health():
     for service, status in health.items():
         if not status['healthy']:
             logger.warning(f"Health check failed for {service}: {status.get('error', 'Unknown error')}")
+        _announce_transition(service, status)
 
     return health
+
+
+def _announce_transition(service, status):
+    """Emit an SSE event when a service flips between healthy and unhealthy."""
+    healthy = bool(status.get('healthy'))
+    with _state_lock:
+        previous = _last_state.get(service)
+        _last_state[service] = healthy
+    # First observation sets the baseline silently; only real flips announce.
+    if previous is None or previous == healthy:
+        return
+
+    from lyrarr.app.event_handler import event_stream
+    if healthy:
+        event_stream(type='health', payload={
+            'service': service, 'healthy': True,
+            'message': f'{service.capitalize()} connection restored',
+        })
+    else:
+        event_stream(type='health', payload={
+            'service': service, 'healthy': False,
+            'message': f'{service.capitalize()} is unreachable: {status.get("error", "unknown error")}',
+        })
 
 
 def _check_lidarr_health():

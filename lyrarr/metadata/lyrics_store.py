@@ -23,6 +23,9 @@ from lyrarr.metadata.merge import _content_hash
 
 logger = logging.getLogger(__name__)
 
+# Most recent archived lyrics versions kept per track.
+_MAX_VERSIONS_PER_TRACK = 5
+
 
 def content_hash(text):
     """Stable hash of lyrics content (timestamps/metadata stripped, lowercased).
@@ -55,7 +58,7 @@ def _archive_existing(track_id, filepath, provider):
         return
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-    from lyrarr.app.database import TableLyricsVersions, database
+    from lyrarr.app.database import TableLyricsVersions, database, delete, select
     try:
         database.execute(
             sqlite_insert(TableLyricsVersions).values(
@@ -65,6 +68,19 @@ def _archive_existing(track_id, filepath, provider):
                 provider=provider,
                 timestamp=datetime.now(),
             )
+        )
+        # Cap versions per track so repeated upgrades/overwrites don't grow
+        # the table unbounded — full lyrics text per row adds up.
+        keep_ids = database.execute(
+            select(TableLyricsVersions.id)
+            .where(TableLyricsVersions.lidarrTrackId == track_id)
+            .order_by(TableLyricsVersions.timestamp.desc())
+            .limit(_MAX_VERSIONS_PER_TRACK)
+        ).scalars().all()
+        database.execute(
+            delete(TableLyricsVersions)
+            .where(TableLyricsVersions.lidarrTrackId == track_id)
+            .where(TableLyricsVersions.id.not_in(keep_ids))
         )
         logger.debug(f"Archived previous lyrics for track {track_id}")
     except Exception as e:

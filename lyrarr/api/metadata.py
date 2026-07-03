@@ -777,6 +777,9 @@ class BatchDownload(Resource):
                     do_covers=dtype in ('covers', 'all'),
                     do_lyrics=dtype in ('lyrics', 'all'),
                     source='manual batch',
+                    # The user explicitly picked these albums/artists — retry
+                    # backed-off tracks now instead of silently skipping them.
+                    ignore_backoff=True,
                 )
 
                 if result.get('skipped'):

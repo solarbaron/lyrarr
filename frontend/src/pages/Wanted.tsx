@@ -37,6 +37,20 @@ const LANG_OPTIONS = [
   { value: 'hu', label: 'Hungarian' },
 ];
 
+/** Human-readable "when will the auto-downloader try this track again". */
+function formatRetry(retryAfter: string | null, retryCount: number | null): string {
+  if (!retryAfter) return 'next run';
+  const ts = new Date(retryAfter);
+  if (isNaN(ts.getTime())) return 'next run';
+  const diffMs = ts.getTime() - Date.now();
+  const attempts = retryCount ? ` (${retryCount} tries)` : '';
+  if (diffMs <= 0) return `next run${attempts}`;
+  const hours = diffMs / 3600000;
+  if (hours < 1) return `in ${Math.max(1, Math.round(diffMs / 60000))}m${attempts}`;
+  if (hours < 48) return `in ${Math.round(hours)}h${attempts}`;
+  return `in ${Math.round(hours / 24)}d${attempts}`;
+}
+
 export default function WantedPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -265,7 +279,7 @@ export default function WantedPage() {
             <>
               <table className="data-table">
                 <thead>
-                  <tr><th>Track</th><th>Artist</th><th>File</th><th>Action</th></tr>
+                  <tr><th>Track</th><th>Artist</th><th>File</th><th>Next Auto-Retry</th><th>Action</th></tr>
                 </thead>
                 <tbody>
                   {wantedLyrics.map((track: any) => (
@@ -274,6 +288,9 @@ export default function WantedPage() {
                       <td style={{ color: 'var(--text-secondary)' }}>{track.artistName || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {track.path ? track.path.split('/').pop() : '—'}
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {formatRetry(track.lyrics_retry_after, track.lyrics_retry_count)}
                       </td>
                       <td>
                         <Button
