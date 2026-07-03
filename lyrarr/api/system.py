@@ -121,10 +121,14 @@ class SystemHealth(Resource):
 class SystemSync(Resource):
     def post(self):
         """Trigger a Lidarr sync now."""
-        from lyrarr.lidarr.sync import request_sync
+        from lyrarr.lidarr.sync import request_sync, sync_in_progress
         # debounce=False so a manual sync starts immediately, but still respects
         # the single-flight lock so it won't run on top of an in-progress sync.
+        already_running = sync_in_progress()
         request_sync(force=True, debounce=False)
+        if already_running:
+            # The in-flight run will drain this request as a follow-up pass.
+            return {'message': 'Sync already running — another pass queued'}
         return {'message': 'Sync started'}
 
 

@@ -316,8 +316,8 @@ export default function WantedPage() {
                     setSelectedTracks(new Set());
                     queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
                     queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start upgrade', color: 'red' });
+                  }).catch((err: any) => {
+                    notifications.show({ title: 'Not Started', message: err?.response?.data?.message || 'Failed to start upgrade', color: 'orange' });
                   });
                 }}
               >

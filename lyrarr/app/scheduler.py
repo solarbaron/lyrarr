@@ -19,7 +19,7 @@ from dateutil import tz
 from dateutil.relativedelta import relativedelta
 
 from lyrarr.api.backup import run_scheduled_backup
-from lyrarr.lidarr.sync import update_artists
+from lyrarr.lidarr.sync import run_scheduled_sync
 from lyrarr.metadata.download_worker import run_lyrics_upgrade, run_metadata_downloads
 from lyrarr.utilities.health import check_health
 
@@ -135,7 +135,7 @@ class Scheduler:
     def __lidarr_sync_task(self):
         if settings.general.use_lidarr:
             self.aps_scheduler.add_job(
-                update_artists, 'interval', minutes=int(settings.lidarr.sync_interval),
+                run_scheduled_sync, 'interval', minutes=int(settings.lidarr.sync_interval),
                 max_instances=1, coalesce=True, misfire_grace_time=15,
                 id='sync_with_lidarr', name='Sync with Lidarr', replace_existing=True)
 
@@ -144,18 +144,18 @@ class Scheduler:
             full_update = settings.lidarr.full_update
             if full_update == "Daily":
                 self.aps_scheduler.add_job(
-                    update_artists, 'cron', hour=settings.lidarr.full_update_hour,
+                    run_scheduled_sync, 'cron', hour=settings.lidarr.full_update_hour,
                     max_instances=1, coalesce=True, misfire_grace_time=15,
                     id='full_lidarr_scan', name='Full Lidarr Scan', replace_existing=True)
             elif full_update == "Weekly":
                 self.aps_scheduler.add_job(
-                    update_artists, 'cron', day_of_week=settings.lidarr.full_update_day,
+                    run_scheduled_sync, 'cron', day_of_week=settings.lidarr.full_update_day,
                     hour=settings.lidarr.full_update_hour,
                     max_instances=1, coalesce=True, misfire_grace_time=15,
                     id='full_lidarr_scan', name='Full Lidarr Scan', replace_existing=True)
             elif full_update == "Manually":
                 self.aps_scheduler.add_job(
-                    update_artists, 'cron', year=in_a_century(),
+                    run_scheduled_sync, 'cron', year=in_a_century(),
                     max_instances=1, coalesce=True, misfire_grace_time=15,
                     id='full_lidarr_scan', name='Full Lidarr Scan', replace_existing=True)
 

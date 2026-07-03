@@ -43,6 +43,13 @@ export default function AlbumsPage() {
       notifications.show({ title: 'Download Started', message: data.message, color: 'blue' });
       setSelected([]);
     },
+    onError: (err: any) => {
+      notifications.show({
+        title: 'Not Started',
+        message: err?.response?.data?.message || 'Failed to start download',
+        color: 'orange',
+      });
+    },
   });
 
   const albums = result?.data || [];

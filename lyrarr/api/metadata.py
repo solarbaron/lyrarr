@@ -261,7 +261,11 @@ class LyricsUpgrade(Resource):
         from threading import Thread
 
         from lyrarr.app.event_handler import event_stream
-        from lyrarr.metadata.download_worker import run_lyrics_upgrade
+        from lyrarr.metadata.download_worker import downloads_in_progress, run_lyrics_upgrade
+
+        # Advisory check — same reasoning as the batch-download endpoint.
+        if downloads_in_progress():
+            return {'message': 'Another download run is in progress — try again when it finishes'}, 409
 
         data = request.get_json() or {}
         track_ids = data.get('trackIds') or None
@@ -740,6 +744,13 @@ class BatchDownload(Resource):
 
         if not album_ids and not artist_ids:
             return {'message': 'albumIds or artistIds required'}, 400
+
+        # Advisory check so the user gets told up front instead of a silent
+        # skip buried in the activity feed. run_downloads' lock stays the
+        # authoritative guard against the race.
+        from lyrarr.metadata.download_worker import downloads_in_progress
+        if downloads_in_progress():
+            return {'message': 'Another download run is in progress — try again when it finishes'}, 409
 
         # If artist IDs provided, resolve to album IDs
         if artist_ids:

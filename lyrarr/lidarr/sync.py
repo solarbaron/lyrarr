@@ -39,6 +39,33 @@ def request_sync(force=False, debounce=True):
     _schedule(force, debounce)
 
 
+def sync_in_progress():
+    """True while a coalesced sync run is active."""
+    return _sync_running
+
+
+def run_scheduled_sync():
+    """Entry point for the APScheduler sync jobs.
+
+    Participates in the same single-flight state as manual and SignalR
+    triggers, with run_downloads-style skip semantics: if a sync is already
+    running, this tick is skipped instead of running a second full sync
+    concurrently (which the old direct update_artists call could do).
+
+    Runs the drain loop synchronously in the scheduler's thread so the task
+    shows as running for its true duration, and any per-artist syncs queued
+    by SignalR events mid-run are drained before the job finishes.
+    """
+    global _sync_running, _sync_pending_full
+    with _sync_lock:
+        if _sync_running:
+            logger.info("Skipping scheduled Lidarr sync — a sync is already in progress")
+            return
+        _sync_pending_full = True
+        _sync_running = True
+    _run_sync()
+
+
 def request_artist_sync(artist_id, debounce=True):
     """Request a coalesced INCREMENTAL sync of a single artist.
 

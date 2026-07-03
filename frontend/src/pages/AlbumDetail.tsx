@@ -168,8 +168,8 @@ export default function AlbumDetailPage() {
                 onClick={() => {
                   batchDownload({ albumIds: [Number(albumId)], type: 'lyrics' }).then(() => {
                     notifications.show({ title: 'Started', message: 'Downloading missing lyrics for this album...', color: 'violet' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start lyrics download', color: 'red' });
+                  }).catch((err: any) => {
+                    notifications.show({ title: 'Not Started', message: err?.response?.data?.message || 'Failed to start lyrics download', color: 'orange' });
                   });
                 }}
               >
