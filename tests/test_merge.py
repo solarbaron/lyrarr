@@ -1,7 +1,7 @@
 
 """Tests for cross-provider lyrics result merging and de-duplication."""
 
-from lyrarr.metadata.merge import _content_hash, merge_provider_results
+from lyrarr.metadata.merge import _content_hash, merge_provider_results, strip_lrc_timestamps
 
 LYRICS_A = "first line\nsecond line\nthird line\nfourth line"
 SYNCED_A = "[00:01.00]first line\n[00:05.00]second line\n[00:09.00]third line\n[00:12.00]fourth line"
@@ -17,6 +17,26 @@ class TestContentHash:
     def test_empty_is_none(self):
         assert _content_hash("") is None
         assert _content_hash("   ") is None
+
+
+class TestStripLrcTimestamps:
+    def test_strips_timestamps(self):
+        assert strip_lrc_timestamps(SYNCED_A) == LYRICS_A
+
+    def test_drops_metadata_tags(self):
+        lrc = "[ar:Artist]\n[ti:Title]\n[00:01.00]hello\n[00:02.00]world"
+        assert strip_lrc_timestamps(lrc) == "hello\nworld"
+
+    def test_plain_text_passthrough(self):
+        assert strip_lrc_timestamps(LYRICS_A) == LYRICS_A
+
+    def test_empty_input(self):
+        assert strip_lrc_timestamps("") == ""
+        assert strip_lrc_timestamps(None) == ""
+
+    def test_preserves_blank_lines_between_sections(self):
+        lrc = "[00:01.00]verse one\n\n[00:10.00]verse two"
+        assert strip_lrc_timestamps(lrc) == "verse one\n\nverse two"
 
 
 class TestMergeProviderResults:

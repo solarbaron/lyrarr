@@ -3,8 +3,17 @@ name: Build & Publish Docker Image
 on:
   push:
     tags:
-      - 'v*'          # Triggers on version tags like v1.0.0, v0.2.1
+      - 'v*'          # v-prefixed tags like v1.2.3
+      - '[0-9]*'      # plain version tags like 1.5, 1.6.0
+  release:
+    types: [published]
   workflow_dispatch:    # Allows manual trigger from GitHub UI
+
+# Creating a GitHub release for a new tag fires both the tag-push and the
+# release event; collapse them into a single build per ref.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -29,14 +38,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # At least one rule below must match every trigger, or the build fails
+      # with "tag is needed when pushing to registry":
+      #  - tag pushes/releases: the tag name verbatim (handles 1.5-style tags
+      #    that strict semver parsing rejects) + normalized pep440 variants
+      #  - manual dispatch from a branch: the branch name, plus :latest on main
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=tag
+            type=pep440,pattern={{version}}
+            type=pep440,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set up Docker Buildx

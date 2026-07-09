@@ -180,6 +180,55 @@ def save_lyrics(track_id, lyrics_data, provider_name):
     return True
 
 
+class _DeepLTranslator:
+    """Minimal DeepL v2 client with the same interface deep-translator exposes.
+
+    deep-translator's DeeplTranslator always sends a source_lang, which breaks
+    DeepL's native auto-detection — omitting it entirely is the documented way
+    to auto-detect, so lyrics in any language translate correctly.
+    """
+
+    # DeepL wants regional codes for a few targets; everything else is the
+    # uppercased ISO 639-1 code.
+    _TARGET_MAP = {'en': 'EN-US', 'pt': 'PT-PT', 'zh-cn': 'ZH', 'zh': 'ZH'}
+
+    def __init__(self, api_key, target_lang):
+        self._api_key = api_key
+        self._target = self._TARGET_MAP.get(target_lang.lower(), target_lang.upper())
+        # DeepL free-tier keys carry an ':fx' suffix and use a separate host.
+        host = 'api-free.deepl.com' if api_key.endswith(':fx') else 'api.deepl.com'
+        self._url = f'https://{host}/v2/translate'
+
+    def translate_batch(self, texts):
+        import requests
+        response = requests.post(
+            self._url,
+            data={'auth_key': self._api_key, 'text': texts, 'target_lang': self._target},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return [t.get('text', '') for t in response.json().get('translations', [])]
+
+    def translate(self, text):
+        batch = self.translate_batch([text])
+        return batch[0] if batch else text
+
+
+def get_translator(target_lang):
+    """Translator for the configured engine: DeepL when selected and keyed, else Google."""
+    from lyrarr.app.config import settings
+
+    engine = getattr(getattr(settings, 'translation', None), 'engine', 'google')
+    api_key = getattr(getattr(settings, 'translation', None), 'deepl_api_key', '')
+    if engine == 'deepl' and api_key:
+        return _DeepLTranslator(api_key, target_lang)
+    if engine == 'deepl':
+        logger.warning("DeepL engine selected but no API key configured — using Google")
+
+    from deep_translator import GoogleTranslator
+    return GoogleTranslator(source='auto', target=target_lang)
+
+
 def translate_lyrics_content(content, target_lang, mode='replace'):
     """Translate lyrics text to a target language.
 
@@ -197,8 +246,7 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
         return None
 
     try:
-        from deep_translator import GoogleTranslator
-        translator = GoogleTranslator(source='auto', target=target_lang)
+        translator = get_translator(target_lang)
 
         lrc_ts = re.compile(r'(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)')
 

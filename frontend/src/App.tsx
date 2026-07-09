@@ -2,7 +2,8 @@ import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faMusic, faCompactDisc, faUser, faClockRotateLeft,
-  faMagnifyingGlass, faGear, faServer, faHouse, faIdBadge, faBars, faXmark, faRightFromBracket
+  faMagnifyingGlass, faGear, faServer, faHouse, faIdBadge, faBars, faXmark, faRightFromBracket,
+  faLayerGroup
 } from '@fortawesome/free-solid-svg-icons';
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { Button, Loader } from '@mantine/core';
@@ -18,6 +19,7 @@ const SettingsPage = lazy(() => import('./pages/Settings'));
 const SystemPage = lazy(() => import('./pages/System'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const ProfilesPage = lazy(() => import('./pages/Profiles'));
+const MassEditPage = lazy(() => import('./pages/MassEdit'));
 const LoginPage = lazy(() => import('./pages/Login'));
 
 // Always-loaded components
@@ -98,6 +100,10 @@ export default function App() {
     { label: 'History', icon: faClockRotateLeft, path: '/history' },
   ];
 
+  const bulkItems = [
+    { label: 'Mass Edit', icon: faLayerGroup, path: '/bulk' },
+  ];
+
   const systemItems = [
     { label: 'Profiles', icon: faIdBadge, path: '/profiles' },
     { label: 'Settings', icon: faGear, path: '/settings' },
@@ -156,6 +162,20 @@ export default function App() {
             </NavLink>
           ))}
 
+          <div className="sidebar-section-label">Bulk Actions</div>
+          {bulkItems.map(item => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+            >
+              <span className="nav-link-icon">
+                <FontAwesomeIcon icon={item.icon} />
+              </span>
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+
           <div className="sidebar-section-label">System</div>
           {systemItems.map(item => (
             <NavLink
@@ -197,6 +217,7 @@ export default function App() {
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
             <Route path="/wanted" element={<WantedPage />} />
+            <Route path="/bulk" element={<MassEditPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/profiles" element={<ProfilesPage />} />
             <Route path="/settings" element={<SettingsPage />} />

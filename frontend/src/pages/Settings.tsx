@@ -147,6 +147,32 @@ export default function SettingsPage() {
             description="Free test key '2' is used by default. Upgrade at theaudiodb.com/patreon"
             value={form.theaudiodb?.apikey || ''}
             onChange={(e) => updateField('theaudiodb', 'apikey', e.currentTarget.value)} styles={inputStyles} />
+          <TextInput label="LRCLIB Instance" placeholder="https://lrclib.net"
+            description="Point at a self-hosted LRCLIB server, or leave the default"
+            value={form.lrclib?.instance || ''}
+            onChange={(e) => updateField('lrclib', 'instance', e.currentTarget.value)} styles={inputStyles} />
+        </div>
+      </div>
+
+      {/* Translation Engine */}
+      <div className="settings-section">
+        <h3>🌐 Translation Engine</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
+          Used by the lyrics editor, auto-translate, and Mass Edit bulk translation.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Select label="Engine"
+            data={[
+              { value: 'google', label: 'Google Translate (free, no key)' },
+              { value: 'deepl', label: 'DeepL (API key required)' },
+            ]}
+            value={form.translation?.engine || 'google'}
+            onChange={(v) => updateField('translation', 'engine', v || 'google')}
+            styles={inputStyles} />
+          <TextInput label="DeepL API Key" placeholder="xxxxxxxx-xxxx-...:fx"
+            description="Free-tier keys (ending in :fx) are detected automatically"
+            value={form.translation?.deepl_api_key || ''}
+            onChange={(e) => updateField('translation', 'deepl_api_key', e.currentTarget.value)} styles={inputStyles} />
         </div>
       </div>
 

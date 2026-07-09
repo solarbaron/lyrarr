@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Loader, Button, Group, Textarea, Select, FileButton, SegmentedControl, Collapse } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { readLyrics, uploadLyrics, saveLyricsFromEditor, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion, getTrackStreamUrl } from '../api';
+import { readLyrics, uploadLyrics, saveLyricsFromEditor, publishLyrics, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion, getTrackStreamUrl } from '../api';
 
 interface Props {
   trackId: number;
@@ -318,6 +318,18 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
     onError: () => notifications.show({ title: 'Error', message: 'Failed to save', color: 'red' }),
   });
 
+  const publishMutation = useMutation({
+    mutationFn: () => publishLyrics(trackId),
+    onSuccess: (data: any) => {
+      notifications.show({ title: 'Published', message: data.message, color: 'green' });
+    },
+    onError: (err: any) => notifications.show({
+      title: 'Publish Failed',
+      message: err?.response?.data?.message || 'Could not publish to LRCLIB',
+      color: 'red',
+    }),
+  });
+
   const uploadMutation = useMutation({
     mutationFn: (file: File) => uploadLyrics(trackId, file),
     onSuccess: (data: any) => {
@@ -456,6 +468,17 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
                   </Button>
                 )}
               </FileButton>
+              <Button
+                variant="light"
+                color="teal"
+                size="xs"
+                onClick={() => publishMutation.mutate()}
+                loading={publishMutation.isPending}
+                disabled={!existingLyrics?.content}
+                title="Contribute the saved lyrics file to the LRCLIB community database"
+              >
+                {publishMutation.isPending ? 'Publishing… (solving challenge)' : 'Publish to LRCLIB'}
+              </Button>
             </Group>
             <Button
               variant="gradient"

@@ -1,6 +1,6 @@
 [project]
 name = "lyrarr"
-version = "0.1.0"
+version = "1.6.0"
 description = "Lidarr companion app for music lyrics and cover art metadata"
 requires-python = ">=3.13"
 readme = "README.md"

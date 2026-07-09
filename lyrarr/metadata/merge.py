@@ -26,6 +26,20 @@ _LRC_META = re.compile(r'^\[(?:ar|ti|al|au|length|by|offset|re|ve|id|la):.*\]$',
 AGREEMENT_BOOST = 0.05
 
 
+def strip_lrc_timestamps(text):
+    """Plain-text rendering of synced lyrics: drop timestamps and LRC metadata tags.
+
+    Used when a plain copy is needed but only synced content exists (e.g.
+    publishing both forms to LRCLIB).
+    """
+    lines = []
+    for line in (text or '').splitlines():
+        if _LRC_META.match(line.strip()):
+            continue
+        lines.append(_LRC_TS.sub('', line).rstrip())
+    return '\n'.join(lines).strip()
+
+
 def merge_provider_results(results, selection_mode='best_score'):
     """Merge and de-duplicate results from multiple providers.
 

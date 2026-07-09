@@ -492,6 +492,34 @@ def download_missing_lyrics(album_ids=None, ignore_backoff=False):
             track, artist_name, album.title if album else None, providers
         )
 
+        # LRCLIB can answer an exact match with "this track is instrumental"
+        # (community-verified). That's terminal: classify the track instead of
+        # retrying forever or accepting a wrong vocal-version match. Only trust
+        # the flag when the match itself is confident.
+        instrumental_marker = next(
+            (r for r in all_results
+             if r.get('instrumental') and (r.get('score', 0) or 0) >= _MIN_ACCEPT_SCORE),
+            None,
+        )
+        if instrumental_marker:
+            database.execute(
+                update(TableTracks)
+                .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+                .values(
+                    lyrics_status='instrumental',
+                    hasLyrics=False,
+                    lyrics_retry_count=0,
+                    lyrics_retry_after=None,
+                    updated_at_timestamp=datetime.now(),
+                )
+            )
+            provider_name = instrumental_marker.get('_provider', 'provider')
+            logger.info(f"⊘ Instrumental ({provider_name}): '{track.title}' — no lyrics exist")
+            continue
+        # Markers below the confidence bar carry no lyrics — drop them so
+        # selection can't pick an empty result.
+        all_results = [r for r in all_results if not r.get('instrumental')]
+
         if not all_results:
             # Distinguish a genuine "no lyrics exist" from a transient failure
             # (rate limit / timeout, or every provider being in cooldown). Only

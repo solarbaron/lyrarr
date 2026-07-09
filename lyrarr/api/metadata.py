@@ -1,6 +1,7 @@
 
 from flask import request
 from flask_restx import Namespace, Resource
+from sqlalchemy import or_
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, func, select
 from lyrarr.metadata.manager import cover_providers, lyrics_providers, save_cover_art, save_lyrics
@@ -130,6 +131,10 @@ class LyricsSearch(Resource):
                 results.extend(hits)
             except Exception:
                 pass
+
+        # Drop instrumental markers (LRCLIB "no lyrics exist" answers) — they
+        # carry no content, so there is nothing for the user to preview or save.
+        results = [r for r in results if r.get('synced_lyrics') or r.get('plain_lyrics')]
 
         # Merge and de-duplicate cross-provider results
         results = merge_provider_results(results)
@@ -480,6 +485,82 @@ class LyricsRead(Resource):
             'type': lyrics_type,
             'has_lyrics': content is not None,
         }
+
+
+@api_ns_metadata.route('/metadata/lyrics/publish/<int:track_id>')
+class LyricsPublish(Resource):
+    def post(self, track_id):
+        """Publish the track's current lyrics file to LRCLIB (community contribution).
+
+        Solves LRCLIB's proof-of-work challenge, so the request can take a few
+        seconds. User-triggered only.
+        """
+        import os
+
+        track = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not track or not track.path:
+            return {'message': 'Track not found or has no path'}, 404
+
+        filepath = os.path.splitext(track.path)[0] + '.lrc'
+        if not os.path.isfile(filepath):
+            return {'message': 'No lyrics file on disk for this track'}, 404
+        try:
+            with open(filepath, encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            return {'message': f'Could not read lyrics file: {e}'}, 500
+        if not content.strip():
+            return {'message': 'Lyrics file is empty'}, 400
+
+        artist = database.execute(
+            select(TableArtists).where(TableArtists.lidarrArtistId == track.artistId)
+        ).scalars().first()
+        album = database.execute(
+            select(TableAlbums).where(TableAlbums.lidarrAlbumId == track.albumId)
+        ).scalars().first()
+
+        from lyrarr.metadata.language_detect import is_synced_lyrics
+        from lyrarr.metadata.lyrics.lrclib_publish import LrclibPublishError, publish_lyrics
+        from lyrarr.metadata.merge import strip_lrc_timestamps
+
+        if is_synced_lyrics(content):
+            synced, plain = content, strip_lrc_timestamps(content)
+        else:
+            synced, plain = None, content
+
+        try:
+            publish_lyrics(
+                track_name=track.title,
+                artist_name=artist.name if artist else None,
+                album_name=album.title if album else None,
+                duration_s=(track.duration or 0) / 1000,
+                plain_lyrics=plain,
+                synced_lyrics=synced,
+            )
+        except LrclibPublishError as e:
+            return {'message': str(e)}, 502
+
+        from datetime import datetime
+
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from lyrarr.app.database import TableHistory
+        database.execute(
+            sqlite_insert(TableHistory).values(
+                action=1,
+                description=f"Published lyrics for {track.title} to LRCLIB",
+                metadata_type='lyrics',
+                provider='lrclib',
+                lidarrTrackId=track.lidarrTrackId,
+                lidarrArtistId=track.artistId,
+                lidarrAlbumId=track.albumId,
+                timestamp=datetime.now(),
+                metadata_path=filepath,
+            )
+        )
+        return {'message': 'Lyrics published to LRCLIB — thanks for contributing!'}
 
 
 @api_ns_metadata.route('/metadata/lyrics/upload/<int:track_id>')
@@ -834,13 +915,23 @@ class BatchTranslate(Resource):
             album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
 
         # Find eligible tracks: available lyrics but no detected language
-        tracks = database.execute(
-            select(TableTracks).where(
-                TableTracks.lidarrAlbumId.in_(album_ids),
-                TableTracks.lyrics_status == 'available',
+        force = bool(data.get('force'))
+
+        # Default pass fills in missing language detection (translating only
+        # when detection fails); force mode translates everything in scope
+        # that isn't already in the target language.
+        conditions = [
+            TableTracks.albumId.in_(album_ids),
+            TableTracks.lyrics_status == 'available',
+        ]
+        if force:
+            conditions.append(or_(
                 TableTracks.detected_language.is_(None),
-            )
-        ).scalars().all()
+                TableTracks.detected_language != target_lang,
+            ))
+        else:
+            conditions.append(TableTracks.detected_language.is_(None))
+        tracks = database.execute(select(TableTracks).where(*conditions)).scalars().all()
 
         track_list = [(t.lidarrTrackId, t.path, t.title) for t in tracks]
         count = len(track_list)
@@ -856,9 +947,8 @@ class BatchTranslate(Resource):
             failed = 0
 
             try:
-                from deep_translator import GoogleTranslator
-
                 from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+                from lyrarr.metadata.manager import get_translator
 
                 event_stream(type='batch_translate_start', payload={
                     'message': f'Translating lyrics for {count} track(s)',
@@ -883,8 +973,9 @@ class BatchTranslate(Resource):
 
                         # Detect language first
                         lang = detect_language(content)
-                        if lang:
-                            # Language detected — update DB and skip translation
+                        if lang and (not force or lang == target_lang):
+                            # Already in a known language (or already the target
+                            # in force mode) — record it and skip translation.
                             database.execute(
                                 update(TableTracks)
                                 .where(TableTracks.lidarrTrackId == track_id)
@@ -893,7 +984,7 @@ class BatchTranslate(Resource):
                             continue
 
                         # Translate line by line
-                        translator = GoogleTranslator(source='auto', target=target_lang)
+                        translator = get_translator(target_lang)
                         lines = content.split('\n')
                         translated_lines = []
 
@@ -1011,7 +1102,7 @@ class BatchSyncGenerate(Resource):
             # Find eligible tracks: available lyrics but not synced
             tracks = database.execute(
                 select(TableTracks).where(
-                    TableTracks.lidarrAlbumId.in_(album_ids),
+                    TableTracks.albumId.in_(album_ids),
                     TableTracks.lyrics_status == 'available',
                     TableTracks.is_synced == False,
                 )

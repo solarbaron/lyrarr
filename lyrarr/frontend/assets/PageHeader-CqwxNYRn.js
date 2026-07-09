@@ -1,1 +1,0 @@
-import{j as e}from"./index-CIZ7n_Z2.js";function i({title:r,subtitle:a,actions:s}){return e.jsxs("div",{className:"page-header",children:[e.jsxs("div",{className:"page-header-text",children:[e.jsx("h1",{className:"page-title",children:r}),a&&e.jsx("p",{className:"page-subtitle",children:a})]}),s&&e.jsx("div",{className:"page-header-actions",children:s})]})}export{i as P};
