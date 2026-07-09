@@ -123,6 +123,9 @@ validators = [
     # genius section
     Validator('genius.apikey', must_exist=True, default='', is_type_of=str),
 
+    # lrclib section — instance is overridable for self-hosted LRCLIB servers
+    Validator('lrclib.instance', must_exist=True, default='https://lrclib.net', is_type_of=str),
+
     # musixmatch section
     Validator('musixmatch.apikey', must_exist=True, default='', is_type_of=str),
 

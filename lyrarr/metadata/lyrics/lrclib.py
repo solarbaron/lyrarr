@@ -3,6 +3,8 @@ import logging
 
 import requests
 
+from lyrarr import __version__
+from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
 from lyrarr.metadata.normalize import clean_for_search, duration_ms_to_seconds, normalize_title
 from lyrarr.metadata.provider_utils import (
@@ -14,7 +16,6 @@ from lyrarr.metadata.provider_utils import (
 
 logger = logging.getLogger(__name__)
 
-LRCLIB_BASE_URL = 'https://lrclib.net/api'
 MUSICBRAINZ_BASE_URL = 'https://musicbrainz.org/ws/2'
 
 # Shared session for connection pooling — avoids a fresh TLS handshake per call.
@@ -22,6 +23,15 @@ _session = requests.Session()
 
 # (connect, read) — fail fast on unreachable host, allow slow responses.
 _TIMEOUT = (5, 15)
+
+# LRCLIB's docs ask clients to identify themselves with name, version and URL.
+USER_AGENT = f'Lyrarr v{__version__} (https://github.com/solarbaron/lyrarr)'
+
+
+def lrclib_api_url():
+    """Base API URL for the configured LRCLIB instance (self-hostable)."""
+    instance = (settings.lrclib.instance or 'https://lrclib.net').rstrip('/')
+    return f'{instance}/api'
 
 
 class LRCLIBProvider(LyricsProvider):
@@ -87,6 +97,10 @@ class LRCLIBProvider(LyricsProvider):
             exact['score'] = match['score']
             exact['match_details'] = match
             results.append(exact)
+            # A verified-instrumental exact match is a terminal answer — no
+            # point cascading to broader searches for lyrics that don't exist.
+            if exact.get('instrumental'):
+                return results
 
         # Strategy 2: Exact match without album (broader)
         if not results:
@@ -107,6 +121,8 @@ class LRCLIBProvider(LyricsProvider):
                     exact_no_album['score'] = match['score']
                     exact_no_album['match_details'] = match
                     results.append(exact_no_album)
+                    if exact_no_album.get('instrumental'):
+                        return results
 
         # Strategy 3: Exact match with title variants
         if not results:
@@ -125,6 +141,8 @@ class LRCLIBProvider(LyricsProvider):
                         exact_var['score'] = match['score']
                         exact_var['match_details'] = match
                         results.append(exact_var)
+                        if exact_var.get('instrumental'):
+                            return results
                         break  # One hit is enough for exact match
 
         # Strategy 4: Search with artist + title (broader)
@@ -206,6 +224,8 @@ class LRCLIBProvider(LyricsProvider):
                     exact['match_details'] = match
                     exact['match_details']['mb_matched'] = True
                     results.append(exact)
+                    if exact.get('instrumental'):
+                        return results
 
         # Attempt 2: Search LRCLIB with each ISRC as a query keyword
         # LRCLIB doesn't have an ISRC endpoint, but ISRCs are sometimes
@@ -257,7 +277,7 @@ class LRCLIBProvider(LyricsProvider):
                 },
                 timeout=10,
                 headers={
-                    'User-Agent': 'Lyrarr/1.0 (https://github.com/lyrarr)',
+                    'User-Agent': USER_AGENT,
                     'Accept': 'application/json',
                 }
             )
@@ -324,19 +344,23 @@ class LRCLIBProvider(LyricsProvider):
         try:
             rate_limiter.wait('lrclib')
             response = _session.get(
-                f"{LRCLIB_BASE_URL}/get",
+                f"{lrclib_api_url()}/get",
                 params=params,
                 timeout=_TIMEOUT,
-                headers={'User-Agent': 'Lyrarr/1.0'}
+                headers={'User-Agent': USER_AGENT}
             )
             if response.status_code == 200:
                 data = response.json()
                 synced = data.get('syncedLyrics')
                 plain = data.get('plainLyrics')
-                if synced or plain:
+                # LRCLIB marks community-verified instrumental tracks. An exact
+                # match saying "instrumental" is a real answer, not a miss — the
+                # worker uses it to classify the track and stop searching.
+                if synced or plain or data.get('instrumental'):
                     return {
                         'synced_lyrics': synced,
                         'plain_lyrics': plain,
+                        'instrumental': bool(data.get('instrumental')) and not synced and not plain,
                         'provider': self.name,
                         'score': 0.0,  # Will be replaced by computed score
                         'source_id': data.get('id'),
@@ -367,10 +391,10 @@ class LRCLIBProvider(LyricsProvider):
         try:
             rate_limiter.wait('lrclib')
             response = _session.get(
-                f"{LRCLIB_BASE_URL}/search",
+                f"{lrclib_api_url()}/search",
                 params={'q': query},
                 timeout=_TIMEOUT,
-                headers={'User-Agent': 'Lyrarr/1.0'}
+                headers={'User-Agent': USER_AGENT}
             )
             if response.status_code != 200 and is_transient_status(response.status_code):
                 note_transient_error()

@@ -131,6 +131,10 @@ class LyricsSearch(Resource):
             except Exception:
                 pass
 
+        # Drop instrumental markers (LRCLIB "no lyrics exist" answers) — they
+        # carry no content, so there is nothing for the user to preview or save.
+        results = [r for r in results if r.get('synced_lyrics') or r.get('plain_lyrics')]
+
         # Merge and de-duplicate cross-provider results
         results = merge_provider_results(results)
 
@@ -480,6 +484,82 @@ class LyricsRead(Resource):
             'type': lyrics_type,
             'has_lyrics': content is not None,
         }
+
+
+@api_ns_metadata.route('/metadata/lyrics/publish/<int:track_id>')
+class LyricsPublish(Resource):
+    def post(self, track_id):
+        """Publish the track's current lyrics file to LRCLIB (community contribution).
+
+        Solves LRCLIB's proof-of-work challenge, so the request can take a few
+        seconds. User-triggered only.
+        """
+        import os
+
+        track = database.execute(
+            select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
+        ).scalars().first()
+        if not track or not track.path:
+            return {'message': 'Track not found or has no path'}, 404
+
+        filepath = os.path.splitext(track.path)[0] + '.lrc'
+        if not os.path.isfile(filepath):
+            return {'message': 'No lyrics file on disk for this track'}, 404
+        try:
+            with open(filepath, encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            return {'message': f'Could not read lyrics file: {e}'}, 500
+        if not content.strip():
+            return {'message': 'Lyrics file is empty'}, 400
+
+        artist = database.execute(
+            select(TableArtists).where(TableArtists.lidarrArtistId == track.artistId)
+        ).scalars().first()
+        album = database.execute(
+            select(TableAlbums).where(TableAlbums.lidarrAlbumId == track.albumId)
+        ).scalars().first()
+
+        from lyrarr.metadata.language_detect import is_synced_lyrics
+        from lyrarr.metadata.lyrics.lrclib_publish import LrclibPublishError, publish_lyrics
+        from lyrarr.metadata.merge import strip_lrc_timestamps
+
+        if is_synced_lyrics(content):
+            synced, plain = content, strip_lrc_timestamps(content)
+        else:
+            synced, plain = None, content
+
+        try:
+            publish_lyrics(
+                track_name=track.title,
+                artist_name=artist.name if artist else None,
+                album_name=album.title if album else None,
+                duration_s=(track.duration or 0) / 1000,
+                plain_lyrics=plain,
+                synced_lyrics=synced,
+            )
+        except LrclibPublishError as e:
+            return {'message': str(e)}, 502
+
+        from datetime import datetime
+
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from lyrarr.app.database import TableHistory
+        database.execute(
+            sqlite_insert(TableHistory).values(
+                action=1,
+                description=f"Published lyrics for {track.title} to LRCLIB",
+                metadata_type='lyrics',
+                provider='lrclib',
+                lidarrTrackId=track.lidarrTrackId,
+                lidarrArtistId=track.artistId,
+                lidarrAlbumId=track.albumId,
+                timestamp=datetime.now(),
+                metadata_path=filepath,
+            )
+        )
+        return {'message': 'Lyrics published to LRCLIB — thanks for contributing!'}
 
 
 @api_ns_metadata.route('/metadata/lyrics/upload/<int:track_id>')

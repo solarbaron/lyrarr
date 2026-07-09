@@ -71,6 +71,10 @@ export const uploadLyrics = (trackId: number, file: File) => {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data);
 };
+// Publishing solves LRCLIB's proof-of-work challenge server-side, which can
+// take a while — give it a generous timeout.
+export const publishLyrics = (trackId: number) =>
+  api.post(`/metadata/lyrics/publish/${trackId}`, {}, { timeout: 120000 }).then(r => r.data);
 export const saveLyricsFromEditor = (trackId: number, content: string, isSynced: boolean) =>
   api.post(`/metadata/lyrics/download/${trackId}`, {
     [isSynced ? 'synced_lyrics' : 'plain_lyrics']: content,
