@@ -5,6 +5,7 @@ import platform
 from flask import request
 from flask_restx import Namespace, Resource
 
+from lyrarr import __version__
 from lyrarr.app.config import get_settings, save_settings, settings
 
 api_ns_system = Namespace('system', description='System operations')
@@ -15,7 +16,7 @@ class SystemStatus(Resource):
     def get(self):
         """Get system status."""
         return {
-            'version': os.environ.get('LYRARR_VERSION', 'dev'),
+            'version': os.environ.get('LYRARR_VERSION', __version__),
             'python_version': platform.python_version(),
             'os': platform.system(),
             'lidarr_configured': bool(settings.lidarr.apikey),
