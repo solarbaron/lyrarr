@@ -146,6 +146,15 @@ export interface SSEEvent {
     current_lyric?: number;
     artists_synced?: number;
     albums_synced?: number;
+    total?: number;
+    translated?: number;
+    failed?: number;
+    deleted?: number;
+    mode?: string;
+    language?: string;
+    is_synced?: boolean;
+    service?: string;
+    healthy?: boolean;
   };
 }
 

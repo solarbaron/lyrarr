@@ -126,6 +126,11 @@ validators = [
     # lrclib section — instance is overridable for self-hosted LRCLIB servers
     Validator('lrclib.instance', must_exist=True, default='https://lrclib.net', is_type_of=str),
 
+    # translation section
+    Validator('translation.engine', must_exist=True, default='google', is_type_of=str,
+              is_in=['google', 'deepl']),
+    Validator('translation.deepl_api_key', must_exist=True, default='', is_type_of=str),
+
     # musixmatch section
     Validator('musixmatch.apikey', must_exist=True, default='', is_type_of=str),
 
@@ -247,7 +252,8 @@ empty_values = ['', 'None', 'null', 'undefined', None, []]
 # a numeric-looking value like the TheAudioDB test key "2" would be cast to the
 # int 2 and fail its str validator (and a purely-numeric API key would be
 # corrupted, dropping any leading zeros).
-str_keys = ['password', 'apikey', 'username', 'telegram_chat_id', 'telegram_bot_token']
+str_keys = ['password', 'apikey', 'username', 'telegram_chat_id', 'telegram_bot_token',
+            'deepl_api_key', 'instance', 'engine']
 
 
 def _is_password_hash(value):

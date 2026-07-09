@@ -86,7 +86,7 @@ export const generateSyncedLyrics = (trackId: number, data: { content: string; m
   api.post(`/metadata/lyrics/sync-generate/${trackId}`, data).then(r => r.data);
 export const batchDownload = (data: { albumIds?: number[]; artistIds?: number[]; type?: string }) =>
   api.post('/metadata/batch-download', data).then(r => r.data);
-export const batchTranslate = (data: { albumIds?: number[]; artistIds?: number[]; targetLang?: string }) =>
+export const batchTranslate = (data: { albumIds?: number[]; artistIds?: number[]; targetLang?: string; force?: boolean }) =>
   api.post('/metadata/lyrics/batch-translate', data).then(r => r.data);
 export const batchSyncGenerate = (data: { albumIds?: number[]; artistIds?: number[]; trackIds?: number[] }) =>
   api.post('/metadata/lyrics/batch-sync-generate', data).then(r => r.data);
@@ -104,6 +104,29 @@ export const clearLyricsBlacklist = (trackId: number) =>
   api.delete(`/metadata/lyrics/blacklist/${trackId}`).then(r => r.data);
 export const upgradeLyrics = (data?: { trackIds?: number[]; albumIds?: number[]; artistIds?: number[]; all?: boolean }) =>
   api.post('/metadata/lyrics/upgrade', data || {}).then(r => r.data);
+
+// ---------- Bulk (Mass Edit) ----------
+export interface LibraryTreeAlbum {
+  id: number;
+  title: string;
+  year: number | null;
+  genres: string[];
+  coverStatus: string;
+  tracks: number;
+  withLyrics: number;
+  synced: number;
+  missing: number;
+  instrumental: number;
+}
+export interface LibraryTreeArtist {
+  id: number;
+  name: string;
+  albums: LibraryTreeAlbum[];
+}
+export const getLibraryTree = () =>
+  api.get('/library/tree').then(r => r.data as { artists: LibraryTreeArtist[]; genres: string[] });
+export const batchDeleteLyrics = (data: { albumIds?: number[]; artistIds?: number[]; mode?: 'all' | 'plain' | 'instrumental' }) =>
+  api.post('/metadata/lyrics/batch-delete', data).then(r => r.data);
 
 // ---------- History ----------
 export const getHistory = () => api.get('/history').then(r => r.data as HistoryEntry[]);

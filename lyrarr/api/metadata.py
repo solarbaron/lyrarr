@@ -1,6 +1,7 @@
 
 from flask import request
 from flask_restx import Namespace, Resource
+from sqlalchemy import or_
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, func, select
 from lyrarr.metadata.manager import cover_providers, lyrics_providers, save_cover_art, save_lyrics
@@ -914,13 +915,23 @@ class BatchTranslate(Resource):
             album_ids = list(set(album_ids + [a.lidarrAlbumId for a in albums]))
 
         # Find eligible tracks: available lyrics but no detected language
-        tracks = database.execute(
-            select(TableTracks).where(
-                TableTracks.lidarrAlbumId.in_(album_ids),
-                TableTracks.lyrics_status == 'available',
+        force = bool(data.get('force'))
+
+        # Default pass fills in missing language detection (translating only
+        # when detection fails); force mode translates everything in scope
+        # that isn't already in the target language.
+        conditions = [
+            TableTracks.albumId.in_(album_ids),
+            TableTracks.lyrics_status == 'available',
+        ]
+        if force:
+            conditions.append(or_(
                 TableTracks.detected_language.is_(None),
-            )
-        ).scalars().all()
+                TableTracks.detected_language != target_lang,
+            ))
+        else:
+            conditions.append(TableTracks.detected_language.is_(None))
+        tracks = database.execute(select(TableTracks).where(*conditions)).scalars().all()
 
         track_list = [(t.lidarrTrackId, t.path, t.title) for t in tracks]
         count = len(track_list)
@@ -936,9 +947,8 @@ class BatchTranslate(Resource):
             failed = 0
 
             try:
-                from deep_translator import GoogleTranslator
-
                 from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
+                from lyrarr.metadata.manager import get_translator
 
                 event_stream(type='batch_translate_start', payload={
                     'message': f'Translating lyrics for {count} track(s)',
@@ -963,8 +973,9 @@ class BatchTranslate(Resource):
 
                         # Detect language first
                         lang = detect_language(content)
-                        if lang:
-                            # Language detected — update DB and skip translation
+                        if lang and (not force or lang == target_lang):
+                            # Already in a known language (or already the target
+                            # in force mode) — record it and skip translation.
                             database.execute(
                                 update(TableTracks)
                                 .where(TableTracks.lidarrTrackId == track_id)
@@ -973,7 +984,7 @@ class BatchTranslate(Resource):
                             continue
 
                         # Translate line by line
-                        translator = GoogleTranslator(source='auto', target=target_lang)
+                        translator = get_translator(target_lang)
                         lines = content.split('\n')
                         translated_lines = []
 
@@ -1091,7 +1102,7 @@ class BatchSyncGenerate(Resource):
             # Find eligible tracks: available lyrics but not synced
             tracks = database.execute(
                 select(TableTracks).where(
-                    TableTracks.lidarrAlbumId.in_(album_ids),
+                    TableTracks.albumId.in_(album_ids),
                     TableTracks.lyrics_status == 'available',
                     TableTracks.is_synced == False,
                 )
