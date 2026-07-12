@@ -104,11 +104,19 @@ class AlbumItem(Resource):
         ).scalars().first()
 
         # Get tracks for this album
-        tracks = database.execute(
+        track_query = (
             select(TableTracks)
             .where(TableTracks.albumId == album_id)
             .order_by(TableTracks.discNumber, TableTracks.trackNumber)
-        ).scalars().all()
+        )
+        tracks = database.execute(track_query).scalars().all()
+
+        # Reconcile against disk on view, so lyrics files deleted (or added)
+        # outside lyrarr show correctly without waiting for the next sync.
+        from lyrarr.metadata.lyrics_store import reconcile_track_lyrics
+        changed = [reconcile_track_lyrics(t) for t in tracks]
+        if any(changed):
+            tracks = database.execute(track_query).scalars().all()
 
         # Get profile name
         profiles = {p.id: p.name for p in database.execute(select(TableProfiles)).scalars().all()}

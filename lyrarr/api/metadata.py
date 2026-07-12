@@ -464,6 +464,10 @@ class LyricsRead(Resource):
         if not track or not track.path:
             return {'message': 'Track not found or has no path'}, 404
 
+        # Fix stale DB state if the file was deleted/added outside lyrarr.
+        from lyrarr.metadata.lyrics_store import reconcile_track_lyrics
+        reconcile_track_lyrics(track)
+
         track_base = os.path.splitext(track.path)[0]
         content = None
         lyrics_type = None

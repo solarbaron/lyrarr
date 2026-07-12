@@ -161,6 +161,70 @@ def persist_lyrics(track, content, provider, *, detect_lang=True, archive=True):
 
 
 # ---------------------------------------------------------------------------
+# Disk ↔ DB reconciliation
+# ---------------------------------------------------------------------------
+
+def reconcile_track_lyrics(track):
+    """Sync one track row's lyrics state with what is actually on disk.
+
+    Catches .lrc files deleted (or dropped in) outside lyrarr between Lidarr
+    syncs. Cheap when nothing changed (one stat call), so it's safe to run
+    on-demand from read paths. Terminal states (blacklisted, instrumental)
+    are left alone. Returns True if the row was updated.
+    """
+    if not track or not track.path:
+        return False
+
+    from lyrarr.app.database import TableTracks, database, update
+
+    filepath = os.path.splitext(track.path)[0] + '.lrc'
+    exists = os.path.isfile(filepath)
+
+    if not exists and track.lyrics_status == 'available':
+        database.execute(
+            update(TableTracks)
+            .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+            .values(
+                lyrics_status='missing',
+                hasLyrics=False,
+                is_synced=False,
+                detected_language=None,
+                lyrics_retry_count=0,
+                lyrics_retry_after=None,
+                updated_at_timestamp=datetime.now(),
+            )
+        )
+        logger.info(f"Lyrics file for '{track.title}' was deleted from disk — marked missing")
+        return True
+
+    if exists and track.lyrics_status == 'missing':
+        try:
+            with open(filepath, encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+        except Exception:
+            return False
+        if not content.strip():
+            return False
+        database.execute(
+            update(TableTracks)
+            .where(TableTracks.lidarrTrackId == track.lidarrTrackId)
+            .values(
+                lyrics_status='available',
+                hasLyrics=True,
+                is_synced=is_synced_lyrics(content),
+                detected_language=detect_language(content),
+                lyrics_retry_count=0,
+                lyrics_retry_after=None,
+                updated_at_timestamp=datetime.now(),
+            )
+        )
+        logger.info(f"Lyrics file for '{track.title}' appeared on disk — marked available")
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Per-result blacklisting
 # ---------------------------------------------------------------------------
 
