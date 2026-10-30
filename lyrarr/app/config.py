@@ -6,7 +6,7 @@ from ipaddress import ip_address
 from shutil import move
 from types import MappingProxyType
 
-from dynaconf import Dynaconf
+from dynaconf import Dynaconf, validator_conditions
 from dynaconf import Validator as OriginalValidator
 from dynaconf.loaders.yaml_loader import write
 from dynaconf.utils.functional import empty
@@ -23,6 +23,105 @@ def base_url_slash_cleaner(uri):
     return uri
 
 
+def normalize_base_url(uri):
+    """Canonical form of general.base_url: '' or '/prefix' (leading slash, no
+    trailing slash). The API blueprint and the auth gate are mounted under it,
+    so both must agree on the exact spelling."""
+    uri = str(uri or '').strip()
+    return base_url_slash_cleaner('/' + uri).rstrip('/')
+
+
+# ---------- Dynaconf injection guards ----------
+# Dynaconf evaluates string values starting with '@' (@jinja, @format, @int,
+# @merge, @del, ...) and honours special keys such as dynaconf_include /
+# dynaconf_merge / *_for_dynaconf, both when loading config.yaml and when a
+# value is set at runtime. @jinja/@format and dynaconf_include amount to code
+# execution (CVE-2026-33154), so no such value may reach the settings object.
+
+def is_reserved_settings_key(key):
+    """Keys Dynaconf treats specially (dynaconf_include, dynaconf_merge, ...)."""
+    return 'dynaconf' in str(key).lower()
+
+
+def _is_merge_marker(value):
+    """List entries like 'dynaconf_merge' switch Dynaconf into merge mode."""
+    return isinstance(value, str) and value.strip().lower().startswith('dynaconf_')
+
+
+def find_unsafe_value(value, path=''):
+    """Return the path of the first Dynaconf token / reserved key inside
+    ``value`` (recursively), or None when the value is safe to store."""
+    if isinstance(value, str):
+        return (path or '<value>') if value.lstrip().startswith('@') else None
+    if isinstance(value, dict):
+        for k, v in value.items():
+            sub = f'{path}.{k}' if path else str(k)
+            if is_reserved_settings_key(k):
+                return sub
+            found = find_unsafe_value(v, sub)
+            if found:
+                return found
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            if _is_merge_marker(v):
+                return f'{path}[{i}]'
+            found = find_unsafe_value(v, f'{path}[{i}]')
+            if found:
+                return found
+    return None
+
+
+def _strip_unsafe(data, path=''):
+    """Copy of ``data`` with Dynaconf tokens and reserved keys removed.
+    Returns (clean_data, removed_paths)."""
+    removed = []
+    if isinstance(data, dict):
+        clean = {}
+        for k, v in data.items():
+            sub = f'{path}.{k}' if path else str(k)
+            if is_reserved_settings_key(k) or (isinstance(v, str) and v.lstrip().startswith('@')):
+                removed.append(sub)
+                continue
+            clean[k], sub_removed = _strip_unsafe(v, sub)
+            removed.extend(sub_removed)
+        return clean, removed
+    if isinstance(data, list):
+        clean = []
+        for i, v in enumerate(data):
+            if _is_merge_marker(v) or (isinstance(v, str) and v.lstrip().startswith('@')):
+                removed.append(f'{path}[{i}]')
+                continue
+            item, sub_removed = _strip_unsafe(v, f'{path}[{i}]')
+            clean.append(item)
+            removed.extend(sub_removed)
+        return clean, removed
+    return data, removed
+
+
+def _sanitize_config_file(path):
+    """Drop Dynaconf tokens/reserved keys from config.yaml before Dynaconf
+    reads it (a tampered file or an old backup restore could have planted
+    them). Removed keys fall back to their validator defaults."""
+    try:
+        import yaml
+        with open(path, encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+    except Exception as error:
+        logging.debug(f"Could not pre-scan {path}: {error}")
+        return
+    if not isinstance(data, dict):
+        return
+    clean, removed = _strip_unsafe(data)
+    if not removed:
+        return
+    logging.warning(f"Removed unsafe entries from {path} (Dynaconf tokens are not allowed): {', '.join(removed)}")
+    try:
+        write(settings_path=path + '.tmp', settings_data=clean, merge=False)
+        move(path + '.tmp', path)
+    except Exception as error:
+        logging.exception(f"Could not rewrite sanitized settings file: {error}")
+
+
 def validate_ip_address(ip_string):
     if ip_string == '*':
         return True
@@ -31,6 +130,13 @@ def validate_ip_address(ip_string):
         return True
     except ValueError:
         return False
+
+
+def is_plain_filename(value):
+    """A bare file name (no directories, no traversal) — used where a setting
+    names a file written next to the music (folder art)."""
+    return (isinstance(value, str) and value.strip() not in ('', '.', '..')
+            and not any(c in value for c in '/\\\0'))
 
 
 class Validator(OriginalValidator):
@@ -98,7 +204,8 @@ validators = [
     Validator('metadata.covers.overwrite_existing', must_exist=True, default=False, is_type_of=bool),
     Validator('metadata.covers.embed_in_files', must_exist=True, default=False, is_type_of=bool),
     Validator('metadata.covers.save_as_folder_art', must_exist=True, default=True, is_type_of=bool),
-    Validator('metadata.covers.folder_art_filename', must_exist=True, default='cover', is_type_of=str),
+    Validator('metadata.covers.folder_art_filename', must_exist=True, default='cover', is_type_of=str,
+              condition=is_plain_filename),
 
     # metadata > lyrics section
     Validator('metadata.lyrics.enabled', must_exist=True, default=True, is_type_of=bool),
@@ -135,7 +242,7 @@ validators = [
     Validator('musixmatch.apikey', must_exist=True, default='', is_type_of=str),
 
     # theaudiodb section
-    Validator('theaudiodb.apikey', must_exist=True, default='2', is_type_of=str),
+    Validator('theaudiodb.apikey', must_exist=True, default='2', is_type_of=str, cast=str),
 
     # notifications section
     Validator('notifications.enabled', must_exist=True, default=False, is_type_of=bool),
@@ -183,10 +290,20 @@ if not os.path.exists(config_yaml_file):
 if os.path.exists(config_yaml_file):
     os.environ['LYRARR_CONFIGURED'] = '1'
 
+_sanitize_config_file(config_yaml_file)
+
 settings = Dynaconf(
     settings_file=config_yaml_file,
     core_loaders=['YAML'],
-    apply_default_on_none=True,
+    # No global apply_default_on_none: when it's on, every validator whose
+    # default is None (auth.type, proxy.type, general.default_profile_id)
+    # re-applies that default with TOML parsing of its WHOLE section, turning
+    # numeric-looking strings ('123' instance name, digit-only API keys) into
+    # ints that then fail validation and get reset. A null value for a typed
+    # setting still gets its default via the reset loop below.
+    # Never evaluate '@' tokens (@jinja/@format/@int/...) in config values —
+    # YAML is already typed, so nothing legitimate depends on them.
+    auto_cast=False,
 )
 
 settings.validators.register(*validators)
@@ -199,12 +316,19 @@ while failed_validator:
     except ValidationError as e:
         current_validator_details = e.details[0][0]
         logging.error(f"Validator failed for {current_validator_details.names[0]}: {e}")
-        if hasattr(current_validator_details, 'default') and current_validator_details.default is not empty:
-            old_value = settings.get(current_validator_details.names[0], 'undefined')
-            settings[current_validator_details.names[0]] = current_validator_details.default
-            logging.warning(f"VALIDATOR RESET: {current_validator_details.names[0]} from '{old_value}' to '{current_validator_details.default}'")
+        name = current_validator_details.names[0]
+        old_value = settings.get(name, 'undefined')
+        if (getattr(current_validator_details, 'is_type_of', None) is str
+                and isinstance(old_value, (int, float)) and not isinstance(old_value, bool)):
+            # A numeric-looking string that Dynaconf TOML-parsed into a number
+            # (see above): restore the string instead of discarding it.
+            settings[name] = str(old_value)
+            logging.warning(f"VALIDATOR REPAIR: {name} restored as a string")
+        elif hasattr(current_validator_details, 'default') and current_validator_details.default is not empty:
+            settings[name] = current_validator_details.default
+            logging.warning(f"VALIDATOR RESET: {name} from '{old_value}' to '{current_validator_details.default}'")
         else:
-            logging.critical(f"Value for {current_validator_details.names[0]} doesn't pass validation and there's no "
+            logging.critical(f"Value for {name} doesn't pass validation and there's no "
                              f"default value. Lyrarr won't work until it's been fixed.")
             raise SystemExit(4) from None
 
@@ -212,7 +336,8 @@ while failed_validator:
 def write_config():
     if settings.as_dict() == Dynaconf(
         settings_file=config_yaml_file,
-        core_loaders=['YAML']
+        core_loaders=['YAML'],
+        auto_cast=False,
     ).as_dict():
         logging.debug("Nothing changed when comparing to config file. Skipping write to file.")
     else:
@@ -229,10 +354,10 @@ def write_config():
                 logging.exception(f"Exception raised while trying to overwrite settings file: {error}")
 
 
-base_url = settings.general.base_url.rstrip('/')
-
-# Make sure to get rid of double slashes in base_url
-settings.general.base_url = base_url_slash_cleaner(uri=settings.general.base_url)
+# Canonical '' or '/prefix' — server.py mounts the API under it and the auth
+# gate in app.py protects exactly that prefix.
+base_url = normalize_base_url(settings.general.base_url)
+settings.general.base_url = base_url
 settings.lidarr.base_url = base_url_slash_cleaner(uri=settings.lidarr.base_url)
 
 # Save updated settings to file
@@ -294,73 +419,212 @@ def get_settings():
     return settings_to_return
 
 
-def save_settings(settings_items):
+# Known settings schema: dotted path -> Validator (type and default).
+_schema = {v.names[0].lower(): v for v in validators}
+
+# Settings whose blank value in a submitted form / restored backup means "keep
+# the stored value" (they are redacted or easy to leave empty by accident).
+secret_keys = ['password', 'apikey', 'deepl_api_key', 'telegram_bot_token', 'discord_webhook']
+
+_lidarr_connection_paths = {
+    'general.use_lidarr', 'lidarr.ip', 'lidarr.port', 'lidarr.base_url', 'lidarr.ssl',
+    'lidarr.verify_ssl', 'lidarr.apikey'}
+_schedule_paths = {
+    'general.use_lidarr', 'lidarr.sync_interval', 'lidarr.full_update', 'lidarr.full_update_day',
+    'lidarr.full_update_hour', 'backup.frequency', 'backup.day', 'backup.hour'}
+
+
+class SettingsError(ValueError):
+    """A submitted/restored setting was rejected; nothing was applied."""
+
+
+def _expected_types(path):
+    validator = _schema.get(path)
+    types = getattr(validator, 'operations', {}).get('is_type_of') if validator else None
+    if types is None:
+        return ()
+    return types if isinstance(types, tuple) else (types,)
+
+
+def _validate_value(path, value):
+    """Run the setting's validator checks on a prospective value without
+    touching the live settings (Validator.validate() mutates them). Returns
+    the (cast) value or raises SettingsError."""
+    validator = _schema[path]
+    value = validator.cast(value)
+    types = _expected_types(path)
+    ok = not (isinstance(value, bool) and types and bool not in types)
+    for op_name, op_value in getattr(validator, 'operations', {}).items():
+        op = getattr(validator_conditions, op_name, None)
+        if not ok or op is None:
+            continue
+        try:
+            ok = bool(op(value, op_value))
+        except TypeError:
+            ok = False
+    if ok and validator.condition is not None:
+        try:
+            ok = bool(validator.condition(value))
+        except Exception:
+            ok = False
+    if not ok:
+        raise SettingsError(f'Invalid value for {path}: {value!r}')
+    return value
+
+
+def _flatten_settings(key, value):
+    """Yield (dotted path, value) leaves. The UI posts whole sections, so a
+    value can be a dict of subkeys (e.g. settings-metadata-covers)."""
+    parts = str(key).split('-')
+    if parts[0] == 'settings' and len(parts) > 1:
+        parts = parts[1:]
+    path = '.'.join(parts).lower()
+    yield from _flatten_path(path, value)
+
+
+def _flatten_path(path, value):
+    if isinstance(value, dict) and path not in _schema:
+        for subk, subv in value.items():
+            yield from _flatten_path(f'{path}.{str(subk).lower()}', subv)
+    else:
+        yield path, value
+
+
+def _coerce(path, value):
+    """Coerce a submitted value to the setting's declared type, or raise
+    SettingsError. Mirrors the old form handling ('true'/'false', numeric
+    strings) but only casts to a type the validator actually accepts."""
+    leaf = path.rsplit('.', 1)[-1]
+    types = _expected_types(path)
+
+    # Make sure that text based form values aren't passed as list
+    if isinstance(value, list) and len(value) == 1 and leaf not in array_keys:
+        value = value[0]
+        if value in empty_values and value != '':
+            value = None
+
+    if isinstance(value, str):
+        if value in ('true', 'false') and bool in types:
+            value = value == 'true'
+        elif int in types and leaf not in str_keys:
+            if value.strip() == '':
+                if NoneType in types:
+                    value = None
+                elif str not in types:
+                    raise SettingsError(f'{path} must be a number')
+            else:
+                try:
+                    value = int(value)
+                except ValueError:
+                    if str not in types:
+                        raise SettingsError(f'{path} must be a number') from None
+        elif value in ('None', 'null', '') and NoneType in types:
+            value = None
+    elif isinstance(value, (int, float)) and not isinstance(value, bool) and types == (str,):
+        # A JSON number for a string field (chat id, numeric API key, ...)
+        value = str(value)
+    return value
+
+
+def save_settings(settings_items, *, unknown='error', keep_blank_secrets=False):
+    """Validate and apply settings, then persist them.
+
+    settings_items: iterable of (key, value); keys are 'settings-section-sub'
+    (or 'section-sub') and values may be whole sub-dicts. Only keys of the
+    known schema are accepted, Dynaconf tokens ('@...', dynaconf_* keys) are
+    refused, values are coerced to the declared type and checked against their
+    validators before anything is applied; on any error nothing is changed and
+    SettingsError is raised.
+
+    unknown: 'error' rejects unknown keys (unless re-submitting the stored
+    value unchanged), 'skip' ignores them (backup restore across versions).
+    keep_blank_secrets: treat blank secrets (API keys, tokens) as "keep the
+    stored value" — exported backups redact some of them.
+    """
     update_schedule = False
     lidarr_changed = False
+    changes = {}
+    skipped = []
 
-    for key, value in settings_items:
-        settings_keys = key.split('-')
-
-        # Make sure that text based form values aren't passed as list
-        if isinstance(value, list) and len(value) == 1 and settings_keys[-1] not in array_keys:
-            value = value[0]
-            if value in empty_values and value != '':
-                value = None
-
-        # Try to cast string as integer
-        if isinstance(value, str) and settings_keys[-1] not in str_keys:
-            try:
-                value = int(value)
-            except ValueError:
-                pass
-
-        if value == 'true':
-            value = True
-        elif value == 'false':
-            value = False
-
-        # Password fields: a blank submission means "keep the stored value"
-        # (the client never receives the real value). The auth password is
-        # stored hashed; hash any new plaintext before saving.
-        if settings_keys[-1] == 'password':
-            if value in (None, '', 'None'):
-                continue
-            if key == 'settings-auth-password' and not _is_password_hash(value):
-                from werkzeug.security import generate_password_hash
-                value = generate_password_hash(value)
-
-        if key in ['settings-general-base_url', 'settings-lidarr-base_url']:
-            value = base_url_slash_cleaner(value)
-
-        # Resolve the dotted settings path and the currently stored value, so
-        # the change flags below only fire when a value actually changed —
-        # the frontend posts the whole form, not just edited fields.
-        settings_keys_path = '.'.join(settings_keys[1:]) if settings_keys[0] == 'settings' else '.'.join(settings_keys)
-        try:
-            old_value = settings[settings_keys_path]
-        except (KeyError, AttributeError):
-            old_value = None
-        value_changed = old_value != value
-
-        if value_changed and key in [
-                'settings-general-use_lidarr', 'settings-lidarr-ip', 'settings-lidarr-port',
-                'settings-lidarr-base_url', 'settings-lidarr-ssl', 'settings-lidarr-verify_ssl',
-                'settings-lidarr-apikey']:
-            lidarr_changed = True
-
-        if key == 'update_schedule' or (value_changed and key in [
-                'settings-general-use_lidarr',
-                'settings-lidarr-sync_interval', 'settings-lidarr-full_update',
-                'settings-lidarr-full_update_day', 'settings-lidarr-full_update_hour',
-                'settings-backup-frequency', 'settings-backup-day', 'settings-backup-hour']):
+    for key, raw_value in settings_items:
+        if key == 'update_schedule':
             update_schedule = True
+            continue
+        if is_reserved_settings_key(key):
+            raise SettingsError(f'Setting {key} is not allowed')
 
-        # Apply the setting
-        settings[settings_keys_path] = value
+        for path, value in _flatten_settings(key, raw_value):
+            if is_reserved_settings_key(path):
+                raise SettingsError(f'Setting {path} is not allowed')
+            bad = find_unsafe_value(value, path)
+            if bad:
+                raise SettingsError(f"Invalid value for {bad}: values may not start with '@'")
 
-    write_config()
+            leaf = path.rsplit('.', 1)[-1]
+            if leaf in ignore_keys:
+                continue
+
+            try:
+                old_value = settings[path]
+            except (KeyError, AttributeError):
+                old_value = None
+
+            if path not in _schema:
+                # The UI round-trips every key it received, including stale
+                # ones still sitting in config.yaml; those are left alone.
+                if unknown == 'skip' or (old_value is not None and old_value == value):
+                    skipped.append(path)
+                    continue
+                raise SettingsError(f'Unknown setting {path}')
+
+            value = _coerce(path, value)
+
+            # Password fields: a blank submission means "keep the stored value"
+            # (the client never receives the real value). The auth password is
+            # stored hashed; hash any new plaintext before saving.
+            if leaf == 'password':
+                if value in (None, '', 'None'):
+                    continue
+                if path == 'auth.password' and not _is_password_hash(value):
+                    from werkzeug.security import generate_password_hash
+                    value = generate_password_hash(value)
+            elif keep_blank_secrets and leaf in secret_keys and value in (None, '') and old_value:
+                continue
+
+            if path == 'general.base_url':
+                value = normalize_base_url(value)
+            elif path == 'lidarr.base_url':
+                value = base_url_slash_cleaner(value) if isinstance(value, str) else value
+
+            value = _validate_value(path, value)
+
+            # The change flags below only fire when a value actually changed —
+            # the frontend posts the whole form, not just edited fields.
+            if old_value == value:
+                continue
+            changes[path] = (old_value, value)
+
+    if changes:
+        if any(path.startswith('auth.') for path in changes):
+            _check_auth_consistency(changes)
+        for path, (_old, value) in changes.items():
+            settings[path] = value
+
+        lidarr_changed = bool(_lidarr_connection_paths & changes.keys())
+        update_schedule = update_schedule or bool(_schedule_paths & changes.keys())
+        write_config()
 
     return {
         'update_schedule': update_schedule,
         'lidarr_changed': lidarr_changed,
+        'changed': sorted(changes),
+        'skipped': skipped,
     }
+
+
+def _check_auth_consistency(changes):
+    """Refuse to enable login auth without credentials (instant lockout)."""
+    def prospective(path):
+        return changes[path][1] if path in changes else settings.get(path)
+    if prospective('auth.type') and not (prospective('auth.username') and prospective('auth.password')):
+        raise SettingsError('Set a username and password before enabling authentication')
