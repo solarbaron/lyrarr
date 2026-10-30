@@ -13,6 +13,17 @@ def configure_logging(debug=False):
     logger = logging.getLogger()
     logger.setLevel(log_level)
 
+    # Anything logged before this point (e.g. config validation in config.py
+    # at import time) went through logging's implicit basicConfig() stderr
+    # handler; keeping it would print every later line twice. Calling this
+    # again (e.g. to change the level) must not stack handlers either.
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(log_level)
@@ -43,6 +54,7 @@ def configure_logging(debug=False):
     logging.getLogger('waitress').setLevel(logging.WARNING)
     logging.getLogger('apscheduler').setLevel(logging.WARNING)
     logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('alembic').setLevel(logging.WARNING)
 
     logging.info(f"Logging configured at {logging.getLevelName(log_level)} level")
     logging.info(f"Log file: {log_file}")

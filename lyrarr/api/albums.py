@@ -1,8 +1,19 @@
 
+import logging
+
 from flask import request
 from flask_restx import Namespace, Resource
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableProfiles, TableTracks, database, func, select, update
+from lyrarr.utilities.album_status import (
+    album_track_stats,
+    filter_values,
+    lyrics_status_expr,
+    status_from_track_states,
+)
+from lyrarr.utilities.pagination import page_params
+
+logger = logging.getLogger(__name__)
 
 api_ns_albums = Namespace('albums', description='Album operations')
 
@@ -11,8 +22,7 @@ api_ns_albums = Namespace('albums', description='Album operations')
 class AlbumList(Resource):
     def get(self):
         """List all albums with pagination, search, sort, and filter."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 25, type=int)
+        page, page_size = page_params(25)
         search = request.args.get('search', '', type=str)
         artist_id = request.args.get('artistId', None, type=int)
         sort_by = request.args.get('sortBy', 'title', type=str)
@@ -22,60 +32,74 @@ class AlbumList(Resource):
         monitored = request.args.get('monitored', '', type=str)
         profile_id = request.args.get('profileId', None, type=int)
 
-        query = select(TableAlbums)
-        count_query = select(func.count()).select_from(TableAlbums)
+        # Album lyrics status is derived from the tracks (see album_status).
+        stats = album_track_stats()
+        status_expr = lyrics_status_expr(stats)
+        query = (
+            select(TableAlbums, status_expr.label('computed_lyrics_status'))
+            .outerjoin(stats, stats.c.album_id == TableAlbums.lidarrAlbumId)
+        )
 
         if search:
             query = query.where(TableAlbums.title.ilike(f'%{search}%'))
-            count_query = count_query.where(TableAlbums.title.ilike(f'%{search}%'))
 
         if artist_id is not None:
             query = query.where(TableAlbums.artistId == artist_id)
-            count_query = count_query.where(TableAlbums.artistId == artist_id)
 
         if cover_status:
-            query = query.where(TableAlbums.cover_status == cover_status)
-            count_query = count_query.where(TableAlbums.cover_status == cover_status)
+            # 'available' covers both downloaded and user-uploaded art.
+            if cover_status == 'available':
+                query = query.where(TableAlbums.cover_status.in_(('available', 'manual')))
+            else:
+                query = query.where(TableAlbums.cover_status == cover_status)
 
         if lyrics_status:
-            query = query.where(TableAlbums.lyrics_status == lyrics_status)
-            count_query = count_query.where(TableAlbums.lyrics_status == lyrics_status)
+            wanted = filter_values(lyrics_status)
+            if wanted is None:
+                return {'message': f'Unknown lyricsStatus: {lyrics_status}'}, 400
+            query = query.where(status_expr.in_(wanted))
 
         if monitored == 'true':
             query = query.where(TableAlbums.monitored == True)
-            count_query = count_query.where(TableAlbums.monitored == True)
         elif monitored == 'false':
             query = query.where(TableAlbums.monitored == False)
-            count_query = count_query.where(TableAlbums.monitored == False)
 
         if profile_id is not None:
             query = query.where(TableAlbums.profileId == profile_id)
-            count_query = count_query.where(TableAlbums.profileId == profile_id)
 
-        total = database.execute(count_query).scalar()
+        total = database.execute(select(func.count()).select_from(query.subquery())).scalar()
 
         # Sorting
         sort_map = {
             'title': TableAlbums.title,
             'year': TableAlbums.year,
+            'added': TableAlbums.created_at_timestamp,
+            'lyricsStatus': status_expr,
         }
         sort_col = sort_map.get(sort_by, TableAlbums.title)
         if sort_dir == 'desc':
-            query = query.order_by(sort_col.desc())
+            query = query.order_by(sort_col.desc(), TableAlbums.title)
         else:
-            query = query.order_by(sort_col)
+            query = query.order_by(sort_col, TableAlbums.title)
 
         query = query.offset((page - 1) * page_size).limit(page_size)
 
-        rows = database.execute(query).scalars().all()
+        rows = database.execute(query).all()
 
         # Resolve artist names and profile names
-        artists = {a.lidarrArtistId: a.name for a in database.execute(select(TableArtists)).scalars().all()}
+        artist_ids = {album.artistId for album, _ in rows}
+        artists = {
+            a.lidarrArtistId: a.name
+            for a in database.execute(
+                select(TableArtists).where(TableArtists.lidarrArtistId.in_(artist_ids))
+            ).scalars().all()
+        } if artist_ids else {}
         profiles = {p.id: p.name for p in database.execute(select(TableProfiles)).scalars().all()}
 
         data = []
-        for r in rows:
+        for r, computed_status in rows:
             d = r.to_dict()
+            d['lyrics_status'] = computed_status
             d['artistName'] = artists.get(r.artistId, 'Unknown')
             d['profileName'] = profiles.get(r.profileId, 'None')
             data.append(d)
@@ -122,6 +146,7 @@ class AlbumItem(Resource):
         profiles = {p.id: p.name for p in database.execute(select(TableProfiles)).scalars().all()}
 
         d = album.to_dict()
+        d['lyrics_status'] = status_from_track_states(t.lyrics_status for t in tracks)
         d['artistName'] = artist.name if artist else 'Unknown'
         d['artistMbId'] = artist.mbId if artist else None
         d['profileName'] = profiles.get(album.profileId, 'None')
@@ -228,10 +253,13 @@ class AlbumUploadCover(Resource):
                 select(TableProfiles).where(TableProfiles.id == album.profileId)
             ).scalars().first()
             if profile and getattr(profile, 'embed_cover_art', False):
-                from lyrarr.metadata.download_worker import embed_cover_in_files
-                embed_cover_in_files(album.path, cover_data, ext)
-        except Exception:
-            pass  # Non-critical
+                from lyrarr.metadata.embed import embed_cover_in_files
+                track_paths = database.execute(
+                    select(TableTracks.path).where(TableTracks.albumId == album.lidarrAlbumId)
+                ).scalars().all()
+                embed_cover_in_files(album.path, cover_data, ext, track_paths=[p for p in track_paths if p])
+        except Exception as e:
+            logger.warning(f"Embedding uploaded cover for album {album.lidarrAlbumId} failed: {e}")
 
         return {'message': f'Cover art uploaded for "{album.title}"'}
 

@@ -4,6 +4,8 @@ SSE (Server-Sent Events) endpoint for real-time activity feed.
 Uses per-client pub/sub so all connected browsers receive every event.
 """
 
+import queue
+
 from flask import Blueprint, Response, request
 
 from lyrarr.app.event_handler import subscribe, unsubscribe
@@ -11,7 +13,8 @@ from lyrarr.app.event_handler import subscribe, unsubscribe
 events_bp = Blueprint('events', __name__)
 
 
-@events_bp.route('/api/events')
+# Registered under <base_url>/api by server.py.
+@events_bp.route('/events')
 def sse_stream():
     """Stream server-sent events to the frontend.
 
@@ -33,14 +36,21 @@ def sse_stream():
         # Tell the browser how long to wait before reconnecting.
         yield "retry: 5000\n\n"
         try:
-            while True:
+            while not client_queue.closed:
                 try:
                     # Block for up to 30 seconds, then send a keepalive comment
-                    event_id, data = client_queue.get(timeout=30)
-                    yield f"id: {event_id}\ndata: {data}\n\n"
-                except Exception:
+                    item = client_queue.get(timeout=30)
+                except queue.Empty:
                     # Send keepalive to keep connection open
                     yield ": keepalive\n\n"
+                    continue
+                # None (or a closed queue) means this client was dropped or the
+                # server is shutting down: end the stream so EventSource
+                # reconnects and catches up via Last-Event-ID.
+                if item is None or client_queue.closed:
+                    break
+                event_id, data = item
+                yield f"id: {event_id}\ndata: {data}\n\n"
         finally:
             unsubscribe(client_queue)
 

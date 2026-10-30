@@ -2,7 +2,6 @@
 import atexit
 import logging
 import os
-import signal
 from datetime import datetime
 
 from sqlalchemy import (  # noqa W0611
@@ -63,7 +62,8 @@ def _stop_worker_threads():
     database.remove()
 
 
-signal.signal(signal.SIGTERM, lambda signal_no, frame: close_database())
+# SIGTERM/SIGINT are handled by the web server (lyrarr/app/server.py), which
+# stops the scheduler and HTTP server and then calls close_database().
 
 Base = declarative_base()
 metadata = Base.metadata
@@ -140,7 +140,7 @@ class TableAlbums(Base):
 
     lidarrAlbumId = mapped_column(Integer, primary_key=True)
     mbId = mapped_column(Text)  # MusicBrainz Release Group ID
-    artistId = mapped_column(Integer, ForeignKey('table_artists.lidarrArtistId', ondelete='CASCADE'))
+    artistId = mapped_column(Integer, ForeignKey('table_artists.lidarrArtistId', ondelete='CASCADE'), index=True)
     title = mapped_column(Text, nullable=False)
     year = mapped_column(Integer)
     path = mapped_column(Text)
@@ -158,6 +158,8 @@ class TableAlbums(Base):
     override_prefer_synced = mapped_column(Boolean, nullable=True)
     override_download_covers = mapped_column(Boolean, nullable=True)
     override_download_lyrics = mapped_column(Boolean, nullable=True)
+    cover_retry_count = mapped_column(Integer, default=0)  # failed cover searches (backoff step)
+    cover_retry_after = mapped_column(DateTime, nullable=True)  # next eligible cover search
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
 
@@ -170,19 +172,24 @@ class TableTracks(Base):
 
     lidarrTrackId = mapped_column(Integer, primary_key=True)
     mbId = mapped_column(Text)  # MusicBrainz Recording ID
-    albumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'))
-    artistId = mapped_column(Integer, ForeignKey('table_artists.lidarrArtistId', ondelete='CASCADE'))
+    albumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'), index=True)
+    artistId = mapped_column(Integer, ForeignKey('table_artists.lidarrArtistId', ondelete='CASCADE'), index=True)
     title = mapped_column(Text, nullable=False)
     trackNumber = mapped_column(Integer)
     discNumber = mapped_column(Integer, default=1)
-    duration = mapped_column(Integer)  # in milliseconds
+    duration = mapped_column(Integer)  # in seconds (sync converts Lidarr's ms)
     path = mapped_column(Text)
     hasLyrics = mapped_column(Boolean, default=False)  # whether synced lyrics exist
-    lyrics_status = mapped_column(Text, default='missing')  # missing, available, manual, blacklisted, instrumental
+    lyrics_status = mapped_column(Text, default='missing', index=True)  # missing, available, manual, blacklisted, instrumental
     detected_language = mapped_column(Text, nullable=True)  # ISO 639-1 code (e.g. 'en', 'ja')
     is_synced = mapped_column(Boolean, default=False)  # whether current lyrics file is synced LRC
     lyrics_retry_count = mapped_column(Integer, default=0)  # number of failed lyrics search attempts
     lyrics_retry_after = mapped_column(DateTime, nullable=True)  # next eligible retry time (exponential backoff)
+    # Who wrote the current lyrics file: 'auto' (scheduled downloader), 'manual'
+    # (user pick/upload/edit/restore), 'translated', 'generated' (Whisper).
+    # NULL for files written before this column existed. Automatic passes only
+    # replace 'auto'/NULL lyrics so user-curated files are never clobbered.
+    lyrics_source = mapped_column(Text, nullable=True)
     created_at_timestamp = mapped_column(DateTime)
     updated_at_timestamp = mapped_column(DateTime)
 
@@ -198,10 +205,10 @@ class TableHistory(Base):
     description = mapped_column(Text, nullable=False)
     metadata_type = mapped_column(Text)  # 'cover' or 'lyrics'
     provider = mapped_column(Text)
-    lidarrAlbumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'))
-    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'))
-    lidarrArtistId = mapped_column(Integer, ForeignKey('table_artists.lidarrArtistId', ondelete='CASCADE'))
-    timestamp = mapped_column(DateTime, nullable=False, default=datetime.now)
+    lidarrAlbumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'), index=True)
+    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'), index=True)
+    lidarrArtistId = mapped_column(Integer, ForeignKey('table_artists.lidarrArtistId', ondelete='CASCADE'), index=True)
+    timestamp = mapped_column(DateTime, nullable=False, default=datetime.now, index=True)
     metadata_path = mapped_column(Text)
 
     def to_dict(self):
@@ -218,8 +225,8 @@ class TableBlacklist(Base):
     # stripped, lowercased). Lets the auto-downloader skip a specific wrong match
     # on re-runs regardless of which provider returns it.
     content_hash = mapped_column(Text)
-    lidarrAlbumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'))
-    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'))
+    lidarrAlbumId = mapped_column(Integer, ForeignKey('table_albums.lidarrAlbumId', ondelete='CASCADE'), index=True)
+    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'), index=True)
     timestamp = mapped_column(DateTime, default=datetime.now)
 
     def to_dict(self):
@@ -231,7 +238,7 @@ class TableLyricsVersions(Base):
     __tablename__ = 'table_lyrics_versions'
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'))
+    lidarrTrackId = mapped_column(Integer, ForeignKey('table_tracks.lidarrTrackId', ondelete='CASCADE'), index=True)
     content = mapped_column(Text, nullable=False)
     lyrics_type = mapped_column(Text, nullable=False)  # 'synced' or 'plain'
     provider = mapped_column(Text)
@@ -284,27 +291,62 @@ def _rebuild_text_bool_columns():
             continue
         declared = {c['name']: str(c['type']).upper() for c in inspector.get_columns(table_name)}
         for col_name in columns:
-            col_type = declared.get(col_name)
-            if col_type is None or 'BOOL' in col_type:
-                continue
             tmp = f"{col_name}__boolfix"
+            col_type = declared.get(col_name)
+            leftover = tmp in declared
+            if not leftover and (col_type is None or 'BOOL' in col_type):
+                continue
             try:
-                with engine.begin() as conn:
-                    conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {tmp} BOOLEAN'))
-                    # NULL stays NULL (override_* columns use it for "no override").
-                    conn.execute(text(
-                        f"UPDATE {table_name} SET {tmp} = CASE "
-                        f"WHEN {col_name} IS NULL THEN NULL "
-                        f"WHEN lower(CAST({col_name} AS TEXT)) IN ('0', 'false', '', 'no', 'off', 'none') THEN 0 "
-                        f"ELSE 1 END"
-                    ))
-                    conn.execute(text(f'ALTER TABLE {table_name} DROP COLUMN {col_name}'))
-                    conn.execute(text(f'ALTER TABLE {table_name} RENAME COLUMN {tmp} TO {col_name}'))
-                logger.info(
-                    f"Migration: rebuilt {table_name}.{col_name} as BOOLEAN (was {col_type})"
-                )
+                _rebuild_bool_column(table_name, col_name, col_type, leftover)
+                if col_type is not None and 'BOOL' not in col_type:
+                    logger.info(
+                        f"Migration: rebuilt {table_name}.{col_name} as BOOLEAN (was {col_type})"
+                    )
             except Exception as e:
                 logger.error(f"Migration: failed to rebuild {table_name}.{col_name}: {e}")
+
+
+def _rebuild_bool_column(table_name, col_name, col_type, leftover):
+    """Rebuild one column as BOOLEAN in a single explicit transaction.
+
+    The engine runs in AUTOCOMMIT mode, so `engine.begin()` would not make the
+    ADD/UPDATE/DROP/RENAME sequence atomic; SQLite DDL is transactional, so an
+    explicit BEGIN on the raw connection does. A `<col>__boolfix` column left
+    by an older, non-atomic run is cleaned up first (or, if the original
+    column is already gone, renamed into place).
+    """
+    tmp = f"{col_name}__boolfix"
+    with engine.connect() as conn:
+        conn.exec_driver_sql('BEGIN IMMEDIATE')
+        try:
+            if leftover:
+                if col_type is None:
+                    conn.exec_driver_sql(f'ALTER TABLE {table_name} RENAME COLUMN {tmp} TO {col_name}')
+                    conn.exec_driver_sql('COMMIT')
+                    logger.info(f"Migration: restored {table_name}.{col_name} from an interrupted rebuild")
+                    return
+                conn.exec_driver_sql(f'ALTER TABLE {table_name} DROP COLUMN {tmp}')
+                if 'BOOL' in col_type:
+                    conn.exec_driver_sql('COMMIT')
+                    logger.info(f"Migration: dropped leftover column {table_name}.{tmp}")
+                    return
+            conn.exec_driver_sql(f'ALTER TABLE {table_name} ADD COLUMN {tmp} BOOLEAN')
+            # NULL stays NULL (override_* columns use it for "no override").
+            conn.exec_driver_sql(
+                f"UPDATE {table_name} SET {tmp} = CASE "
+                f"WHEN {col_name} IS NULL THEN NULL "
+                f"WHEN lower(CAST({col_name} AS TEXT)) IN ('0', 'false', '', 'no', 'off', 'none') THEN 0 "
+                f"ELSE 1 END"
+            )
+            conn.exec_driver_sql(f'ALTER TABLE {table_name} DROP COLUMN {col_name}')
+            conn.exec_driver_sql(f'ALTER TABLE {table_name} RENAME COLUMN {tmp} TO {col_name}')
+            conn.exec_driver_sql('COMMIT')
+        except Exception:
+            try:
+                conn.exec_driver_sql('ROLLBACK')
+            except Exception:
+                pass
+            raise
 
 
 def _migrate_bool_columns():
@@ -331,6 +373,29 @@ def _migrate_bool_columns():
                     ))
                     logger.info(f"Migration: converted {result} rows in {table_name}.{col_name} "
                                 f"from text to boolean")
+
+
+def _alembic_stamp_head():
+    """Stamp the database with the current Alembic head, failing soft.
+
+    The Alembic config is built in code (pointing at lyrarr/migrations) rather
+    than read from alembic.ini, which isn't shipped in the Docker image; the
+    `configure_logger` attribute tells migrations/env.py to leave the app's
+    logging configuration alone.
+    """
+    try:
+        from alembic import command as alembic_cmd
+        from alembic.config import Config as AlembicConfig
+
+        alembic_cfg = AlembicConfig()
+        alembic_cfg.set_main_option(
+            'script_location', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'migrations')
+        )
+        alembic_cfg.attributes['configure_logger'] = False
+        alembic_cmd.stamp(alembic_cfg, 'head')
+        logger.info("Alembic: stamped database with current head revision")
+    except Exception as e:
+        logger.warning(f"Alembic stamp skipped: {e}")
 
 
 def init_db():
@@ -367,23 +432,20 @@ def init_db():
     _rebuild_text_bool_columns()
     _migrate_bool_columns()
 
+    # create_all() only creates indexes together with new tables; add any
+    # model-declared index that an existing database is missing.
+    for table in metadata.sorted_tables:
+        for index in table.indexes:
+            try:
+                index.create(bind=engine, checkfirst=True)
+            except Exception as e:
+                logger.warning(f"Migration: could not create index {index.name}: {e}")
+
     # Stamp with Alembic 'head' if alembic_version table doesn't exist yet
     # This marks existing databases as up-to-date for future Alembic migrations
     from sqlalchemy import inspect as sa_inspect2
-    inspector2 = sa_inspect2(engine)
-    if not inspector2.has_table('alembic_version'):
-        try:
-            import os as _os
-
-            from alembic import command as alembic_cmd
-            from alembic.config import Config as AlembicConfig
-            alembic_ini = _os.path.join(_os.path.dirname(__file__), '..', '..', 'alembic.ini')
-            if _os.path.exists(alembic_ini):
-                alembic_cfg = AlembicConfig(alembic_ini)
-                alembic_cmd.stamp(alembic_cfg, 'head')
-                logger.info("Alembic: stamped database with current head revision")
-        except Exception as e:
-            logger.debug(f"Alembic stamp skipped: {e}")
+    if not sa_inspect2(engine).has_table('alembic_version'):
+        _alembic_stamp_head()
 
     # Add the system table single row if it doesn't exist
     if not database.execute(select(System)).first():

@@ -129,9 +129,17 @@ def interrupt_handler(signum, frame):
             raise SystemExit(EXIT_INTERRUPT)
 
 
+def terminate_handler(signum, frame):
+    # Forward SIGTERM to the child (which shuts down cleanly) and exit.
+    print('Received SIGTERM, stopping Lyrarr...')
+    terminate_child()
+    exit_program(EXIT_NORMAL)
+
+
 if __name__ == '__main__':
     interrupted = False
     signal.signal(signal.SIGINT, interrupt_handler)
+    signal.signal(signal.SIGTERM, terminate_handler)
     restart_file = os.path.join(args.config_dir, FILE_RESTART)
     stop_file = os.path.join(args.config_dir, FILE_STOP)
     os.environ[ENV_STOPFILE] = stop_file

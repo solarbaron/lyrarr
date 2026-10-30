@@ -3,6 +3,7 @@ from flask import request
 from flask_restx import Namespace, Resource
 
 from lyrarr.app.database import TableTracks, database, func, select
+from lyrarr.utilities.pagination import page_params
 
 api_ns_tracks = Namespace('tracks', description='Track operations')
 
@@ -11,8 +12,7 @@ api_ns_tracks = Namespace('tracks', description='Track operations')
 class TrackList(Resource):
     def get(self):
         """List tracks with pagination."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 50, type=int)
+        page, page_size = page_params(50)
         album_id = request.args.get('albumId', None, type=int)
         artist_id = request.args.get('artistId', None, type=int)
         language = request.args.get('language', '', type=str)
@@ -91,18 +91,24 @@ class TrackItem(Resource):
             if new_status not in ('blacklisted', 'missing'):
                 return {'message': f'Invalid lyrics_status: {new_status}. Allowed: blacklisted, missing'}, 400
             if new_status == 'blacklisted':
-                updates['lyrics_status'] = 'blacklisted'
-                # Remove existing lyrics file
+                # Remove the existing lyrics file — archived into the track's
+                # version history first so it can be restored.
                 import os
                 if row.path:
                     track_base = os.path.splitext(row.path)[0]
                     fpath = track_base + '.lrc'
                     if os.path.isfile(fpath):
+                        from lyrarr.metadata.lyrics_store import _archive_existing
+                        if _archive_existing(row.lidarrTrackId, fpath, 'blacklist') is False:
+                            return {'message': 'Could not archive the existing lyrics; '
+                                               'the file was left in place'}, 500
                         try:
                             os.remove(fpath)
-                        except Exception:
-                            pass
+                        except OSError as e:
+                            return {'message': f'Could not remove the lyrics file: {e}'}, 500
+                updates['lyrics_status'] = 'blacklisted'
                 updates['hasLyrics'] = False
+                updates['is_synced'] = False
             elif new_status == 'missing':
                 # Un-blacklist: set to missing so downloader picks it up
                 updates['lyrics_status'] = 'missing'

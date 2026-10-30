@@ -18,14 +18,34 @@ def check_health():
     """Check the health of connected services."""
     health = {
         'lidarr': _check_lidarr_health(),
+        'auth': _check_auth_health(),
     }
 
     for service, status in health.items():
         if not status['healthy']:
             logger.warning(f"Health check failed for {service}: {status.get('error', 'Unknown error')}")
-        _announce_transition(service, status)
+        # Connection flips are announced; configuration warnings are not.
+        if service in _CONNECTION_SERVICES:
+            _announce_transition(service, status)
 
     return health
+
+
+_CONNECTION_SERVICES = frozenset({'lidarr'})
+
+
+def _check_auth_health():
+    """Warn while authentication is disabled — anyone who can reach the UI can
+    change settings and lyrics files."""
+    if getattr(settings.auth, 'type', None):
+        return {'healthy': True, 'status': 'enabled'}
+    return {
+        'healthy': False,
+        'status': 'disabled',
+        'level': 'warning',
+        'error': 'Authentication is disabled — enable it in Settings '
+                 'if Lyrarr is reachable beyond a trusted network',
+    }
 
 
 def _announce_transition(service, status):
@@ -58,7 +78,10 @@ def _check_lidarr_health():
 
     try:
         protocol = 'https' if settings.lidarr.ssl else 'http'
-        url = f"{protocol}://{settings.lidarr.ip}:{settings.lidarr.port}{settings.lidarr.base_url}api/v1/system/status"
+        # Same URL construction as the API client: works with and without a
+        # Lidarr URL base, with or without a trailing slash.
+        url = (f"{protocol}://{settings.lidarr.ip}:{settings.lidarr.port}"
+               f"{(settings.lidarr.base_url or '').rstrip('/')}/api/v1/system/status")
         response = requests.get(
             url,
             headers={'X-Api-Key': settings.lidarr.apikey},

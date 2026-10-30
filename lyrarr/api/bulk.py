@@ -8,6 +8,7 @@ without paging, and batch-delete strips lyrics files for a selected scope.
 import ast
 import logging
 import os
+import threading
 from datetime import datetime
 
 from flask import request
@@ -27,6 +28,10 @@ from lyrarr.app.database import (
 logger = logging.getLogger(__name__)
 
 api_ns_bulk = Namespace('Bulk', description='Bulk library operations')
+
+# Only one batch delete at a time: two overlapping runs over the same scope
+# would race on archiving/removing the same files.
+_batch_delete_lock = threading.Lock()
 
 
 def _parse_genres(raw):
@@ -117,9 +122,20 @@ class BatchDeleteLyrics(Resource):
 
         if mode not in ('all', 'plain', 'instrumental'):
             return {'message': f"Unknown mode '{mode}'"}, 400
+        if not isinstance(album_ids, list) or not isinstance(artist_ids, list):
+            return {'message': 'albumIds and artistIds must be lists'}, 400
         if not album_ids and not artist_ids:
             return {'message': 'albumIds or artistIds required'}, 400
 
+        if not _batch_delete_lock.acquire(blocking=False):
+            return {'message': 'A batch delete is already running'}, 409
+        try:
+            return self._run(album_ids, artist_ids, mode)
+        finally:
+            _batch_delete_lock.release()
+
+    @staticmethod
+    def _run(album_ids, artist_ids, mode):
         if artist_ids:
             albums = database.execute(
                 select(TableAlbums).where(TableAlbums.artistId.in_(artist_ids))
@@ -146,8 +162,13 @@ class BatchDeleteLyrics(Resource):
             filepath = os.path.splitext(track.path)[0] + '.lrc'
             if not os.path.isfile(filepath):
                 continue
+            # Never delete a file whose archive copy couldn't be written — it
+            # would be unrecoverable.
+            if _archive_existing(track.lidarrTrackId, filepath, 'batch-delete') is False:
+                failed += 1
+                logger.warning(f"Batch delete: could not archive lyrics for '{track.title}'; left in place")
+                continue
             try:
-                _archive_existing(track.lidarrTrackId, filepath, 'batch-delete')
                 os.remove(filepath)
             except OSError as e:
                 failed += 1

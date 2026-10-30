@@ -3,6 +3,8 @@ from flask import request
 from flask_restx import Namespace, Resource
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, func, select
+from lyrarr.utilities.album_status import apply_album_lyrics_status
+from lyrarr.utilities.pagination import page_params
 
 api_ns_wanted = Namespace('wanted', description='Missing metadata')
 
@@ -11,8 +13,7 @@ api_ns_wanted = Namespace('wanted', description='Missing metadata')
 class WantedCovers(Resource):
     def get(self):
         """List albums with missing cover art (paginated, searchable)."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 25, type=int)
+        page, page_size = page_params(25)
         search = request.args.get('search', '', type=str)
         sort_by = request.args.get('sortBy', 'title', type=str)
 
@@ -43,6 +44,7 @@ class WantedCovers(Resource):
             d = r.to_dict()
             d['artistName'] = artists.get(r.artistId, 'Unknown')
             data.append(d)
+        apply_album_lyrics_status(data)
 
         return {
             'data': data,
@@ -56,8 +58,7 @@ class WantedCovers(Resource):
 class WantedLyrics(Resource):
     def get(self):
         """List tracks with missing lyrics (paginated, searchable)."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 25, type=int)
+        page, page_size = page_params(25)
         search = request.args.get('search', '', type=str)
 
         base = TableTracks.lyrics_status == 'missing'
@@ -97,8 +98,7 @@ class WantedLyrics(Resource):
 class WantedUntimed(Resource):
     def get(self):
         """List tracks with available but unsynced lyrics (paginated, searchable)."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 25, type=int)
+        page, page_size = page_params(25)
         search = request.args.get('search', '', type=str)
 
         base_conds = [
@@ -127,7 +127,7 @@ class WantedUntimed(Resource):
         for r in rows:
             d = r.to_dict()
             d['artistName'] = artists.get(r.artistId, 'Unknown')
-            d['albumTitle'] = albums.get(r.lidarrAlbumId, 'Unknown')
+            d['albumTitle'] = albums.get(r.albumId, 'Unknown')
             data.append(d)
 
         return {
@@ -142,8 +142,7 @@ class WantedUntimed(Resource):
 class WantedUndetected(Resource):
     def get(self):
         """List tracks with available lyrics but no detected language (paginated, searchable)."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 25, type=int)
+        page, page_size = page_params(25)
         search = request.args.get('search', '', type=str)
 
         base_conds = [
@@ -172,7 +171,7 @@ class WantedUndetected(Resource):
         for r in rows:
             d = r.to_dict()
             d['artistName'] = artists.get(r.artistId, 'Unknown')
-            d['albumTitle'] = albums.get(r.lidarrAlbumId, 'Unknown')
+            d['albumTitle'] = albums.get(r.albumId, 'Unknown')
             data.append(d)
 
         return {

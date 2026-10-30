@@ -16,6 +16,26 @@ _next_id = 0
 _NO_REPLAY_TYPES = frozenset({'task', 'download_progress', 'lidarr_event'})
 
 
+class ClientQueue(queue.Queue):
+    """Per-client event queue. `closed` tells the SSE stream to end.
+
+    A client that falls too far behind (queue full) is dropped; ending its
+    stream makes the browser's EventSource reconnect and catch up via
+    Last-Event-ID, instead of silently receiving nothing ever again.
+    """
+
+    def __init__(self, maxsize=0):
+        super().__init__(maxsize=maxsize)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+        try:
+            self.put_nowait(None)  # wake a blocked reader
+        except queue.Full:
+            pass  # a full queue wakes the reader anyway
+
+
 def event_stream(type, payload=None):
     """Push an event to ALL connected SSE clients (pub/sub)."""
     global _next_id
@@ -37,6 +57,7 @@ def event_stream(type, payload=None):
                 dead.append(q)
         for q in dead:
             _subscribers.remove(q)
+            q.closed = True
 
     logging.debug(f"Event pushed: {type} → {len(_subscribers)} client(s)")
 
@@ -50,7 +71,7 @@ def subscribe(last_event_id=None):
     Last-Event-ID header; only events after that id are replayed, so a brief
     network blip doesn't duplicate the whole feed.
     """
-    client_queue = queue.Queue(maxsize=500)
+    client_queue = ClientQueue(maxsize=500)
     with _lock:
         for event_id, data in _history:
             if last_event_id is not None and event_id <= last_event_id:
@@ -68,3 +89,12 @@ def unsubscribe(client_queue):
     with _lock:
         if client_queue in _subscribers:
             _subscribers.remove(client_queue)
+
+
+def close_all_streams():
+    """End every open SSE stream (used on shutdown)."""
+    with _lock:
+        clients = list(_subscribers)
+        _subscribers.clear()
+    for q in clients:
+        q.close()
