@@ -1,4 +1,4 @@
-__pycache__
+**/__pycache__
 *.pyc
 *.pyo
 .git
@@ -7,7 +7,12 @@ __pycache__
 venv
 node_modules
 frontend/node_modules
+# Rebuilt from source in the frontend-builder stage.
+lyrarr/frontend
 *.md
 .env
 data/
+tests/
 .github
+.ruff_cache
+.pytest_cache
