@@ -17,10 +17,10 @@ export default function ImageLightbox({ src, alt, onClose }: ImageLightboxProps)
   }, [onClose]);
 
   return (
-    <div className="lightbox-backdrop" onClick={onClose}>
+    <div className="lightbox-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label={alt || 'Album cover'}>
       <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
         <img src={src} alt={alt || 'Album cover'} className="lightbox-image" />
-        <button className="lightbox-close" onClick={onClose}>✕</button>
+        <button className="lightbox-close" onClick={onClose} aria-label="Close">✕</button>
       </div>
     </div>
   );

@@ -3,6 +3,8 @@ import { TextInput, PasswordInput, Button } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock } from '@fortawesome/free-solid-svg-icons';
+import { authLogin } from '../api';
+import { errorMessage } from '../notify';
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -17,19 +19,19 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-      if (res.ok && data.authenticated) {
+      const data = await authLogin(username, password);
+      if (data?.authenticated) {
         onLogin();
       } else {
-        notifications.show({ title: 'Login Failed', message: data.message || 'Invalid credentials', color: 'red' });
+        notifications.show({ title: 'Login Failed', message: data?.message || 'Invalid credentials', color: 'red' });
       }
-    } catch {
-      notifications.show({ title: 'Error', message: 'Connection failed', color: 'red' });
+    } catch (err: any) {
+      if (err?.response) {
+        // 401 (bad credentials) / 429 (rate limited) carry a JSON message.
+        notifications.show({ title: 'Login Failed', message: errorMessage(err, 'Invalid credentials'), color: 'red' });
+      } else {
+        notifications.show({ title: 'Error', message: 'Connection failed', color: 'red' });
+      }
     } finally {
       setLoading(false);
     }

@@ -2,9 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress, Checkbox, Select } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedUndetected, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate, batchRedetectLanguages, updateTrack, upgradeLyrics } from '../api';
 import PageHeader from '../components/PageHeader';
+import { notifyError } from '../notify';
 
 const LANG_OPTIONS = [
   { value: 'en', label: 'English' },
@@ -52,7 +53,6 @@ function formatRetry(retryAfter: string | null, retryCount: number | null): stri
 }
 
 export default function WantedPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [coversPage, setCoversPage] = useState(1);
   const [lyricsPage, setLyricsPage] = useState(1);
@@ -121,7 +121,7 @@ export default function WantedPage() {
       });
       setSearchingCoverId(null);
     },
-    onError: () => { setSearchingCoverId(null); },
+    onError: (err) => { setSearchingCoverId(null); notifyError('Cover search failed', err); },
   });
 
   const lyricsSearchMutation = useMutation({
@@ -138,7 +138,7 @@ export default function WantedPage() {
       });
       setSearchingLyricsId(null);
     },
-    onError: () => { setSearchingLyricsId(null); },
+    onError: (err) => { setSearchingLyricsId(null); notifyError('Lyrics search failed', err); },
   });
 
   const coversPct = stats ? Math.round(((stats.covers_complete || 0) / Math.max(stats.total_albums, 1)) * 100) : 0;
@@ -218,21 +218,22 @@ export default function WantedPage() {
                 <tbody>
                   {wantedCovers.map((album: any) => (
                     <tr key={album.lidarrAlbumId} style={{ cursor: 'pointer' }}>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <td>
+                        <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link"
+                          style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <div style={{
                             width: 36, height: 36, borderRadius: 6, background: 'var(--card-border)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, opacity: 0.5
                           }}>💿</div>
                           <span style={{ fontWeight: 600 }}>{album.title}</span>
-                        </div>
+                        </Link>
                       </td>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)} style={{ color: 'var(--text-secondary)' }}>
-                        {album.artistName || '—'}
+                      <td style={{ color: 'var(--text-secondary)' }}>
+                        <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>{album.artistName || '—'}</Link>
                       </td>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>{album.year || '—'}</td>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>{album.albumType || '—'}</td>
-                      <td onClick={(e) => e.stopPropagation()}>
+                      <td><Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>{album.year || '—'}</Link></td>
+                      <td><Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>{album.albumType || '—'}</Link></td>
+                      <td>
                         <Button
                           size="xs" variant="light" color="violet"
                           loading={searchingCoverId === album.lidarrAlbumId}
@@ -349,9 +350,7 @@ export default function WantedPage() {
                     setSelectedTracks(new Set());
                     queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
                     queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start sync generation', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Error', err, 'Failed to start sync generation'));
                 }}
               >
                 ⏱ Sync Selected ({selectedTracks.size})
@@ -365,9 +364,7 @@ export default function WantedPage() {
                     notifications.show({ title: 'Started', message: r.message || `Syncing all ${allIds.length} track(s)...`, color: 'teal' });
                     queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
                     queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start sync generation', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Error', err, 'Failed to start sync generation'));
                 }}
               >
                 ⏱ Sync All on Page
@@ -454,7 +451,10 @@ export default function WantedPage() {
                             batchSyncGenerate({ trackIds: [track.lidarrTrackId] }).then((r: any) => {
                               notifications.show({ title: 'Started', message: r.message || 'Generating timing...', color: 'teal' });
                               setSyncingTrackId(null);
-                            }).catch(() => setSyncingTrackId(null));
+                            }).catch((err) => {
+                              setSyncingTrackId(null);
+                              notifyError('Failed to start timing generation', err);
+                            });
                           }}
                         >
                           ⏱ Sync
@@ -492,9 +492,7 @@ export default function WantedPage() {
                     setSelectedLangTracks(new Set());
                     queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
                     queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start language detection', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Error', err, 'Failed to start language detection'));
                 }}
               >
                 🌐 Detect Selected ({selectedLangTracks.size})
@@ -508,9 +506,7 @@ export default function WantedPage() {
                     notifications.show({ title: 'Started', message: `Detecting language for all ${allIds.length} track(s)...`, color: 'cyan' });
                     queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
                     queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start language detection', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Error', err, 'Failed to start language detection'));
                 }}
               >
                 🌐 Detect All on Page
@@ -597,7 +593,7 @@ export default function WantedPage() {
                                 notifications.show({ title: 'Updated', message: `Set language to ${val.toUpperCase()}`, color: 'green' });
                                 queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
                                 queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                              });
+                              }).catch((err) => notifyError('Failed to set language', err));
                             }
                           }}
                           styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', minHeight: 28, height: 28 } }}
@@ -614,7 +610,10 @@ export default function WantedPage() {
                               setDetectingTrackId(null);
                               queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
                               queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                            }).catch(() => setDetectingTrackId(null));
+                            }).catch((err) => {
+                              setDetectingTrackId(null);
+                              notifyError('Failed to start language detection', err);
+                            });
                           }}
                         >
                           🌐 Detect

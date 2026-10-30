@@ -1,6 +1,6 @@
 {
   "name": "lyrarr-frontend",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Lyrarr - Lidarr Companion for Music Metadata",
   "type": "module",

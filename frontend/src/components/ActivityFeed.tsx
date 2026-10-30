@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { useQueryClient } from '@tanstack/react-query';
 import type { SSEEvent } from '../types';
+import { useServerEvents } from '../events';
+import { refreshQueries } from '../queryRefresh';
 
 interface DownloadItem {
   icon: string;
@@ -11,8 +13,8 @@ interface DownloadItem {
 }
 
 interface DownloadProgress {
-  totalCovers: number;
-  totalLyrics: number;
+  totalCovers: number;   // albums
+  totalLyrics: number;   // tracks
   currentCover: number;
   currentLyric: number;
   active: boolean;
@@ -20,6 +22,11 @@ interface DownloadProgress {
 
 // Event types that are pure backend chatter — no value in the feed.
 const IGNORED_TYPES = new Set(['task', 'lidarr_event', 'signalr']);
+
+// Batch jobs whose *_complete event means library data changed.
+const BATCH_COMPLETE_TYPES = new Set([
+  'batch_translate_complete', 'batch_sync_complete', 'batch_delete_complete', 'lyrics_audit_complete',
+]);
 
 export default function ActivityFeed() {
   const [items, setItems] = useState<DownloadItem[]>([]);
@@ -31,36 +38,10 @@ export default function ActivityFeed() {
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const source = new EventSource('/api/events');
+  useServerEvents((event) => handleEvent(event));
 
-    source.onmessage = (e) => {
-      try {
-        const event: SSEEvent = JSON.parse(e.data);
-        handleEvent(event);
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    source.onerror = () => {
-      // Reconnect happens automatically with EventSource
-    };
-
-    return () => source.close();
-  }, []);
-
-  // Refresh page data when background work finishes, so lists don't go stale.
-  // Matches key families: 'artist' covers ['artist', id], ['artists', ...],
-  // ['artist-albums', ...]; 'dashboard' covers ['dashboard-stats'] etc.
-  const refreshQueries = (families: string[]) => {
-    queryClient.invalidateQueries({
-      predicate: (q) => {
-        const k = q.queryKey[0];
-        return typeof k === 'string' &&
-          families.some(f => k === f || k === `${f}s` || k.startsWith(`${f}-`));
-      },
-    });
+  const showError = (title: string, message: string) => {
+    notifications.show({ title, message, color: 'red', autoClose: false });
   };
 
   const handleEvent = (event: SSEEvent) => {
@@ -103,8 +84,14 @@ export default function ActivityFeed() {
         break;
 
       case 'download_complete': {
+        // Always end the "Downloading…" state — failed runs included.
         if (live) setProgress(prev => ({ ...prev, active: false }));
-        addItem({ icon: '✅', title: p?.message || 'Download complete', type: 'success' });
+        if (p?.error) {
+          addItem({ icon: '❌', title: p?.message || `Download failed: ${p.error}`, type: 'error' });
+          if (live) showError('Download Failed', p.error);
+        } else {
+          addItem({ icon: '✅', title: p?.message || 'Download complete', type: 'success' });
+        }
         const total = (p?.covers || 0) + (p?.lyrics || 0);
         // Only toast when something was actually downloaded — the scheduled
         // task also completes (with zero) every couple of hours.
@@ -116,9 +103,7 @@ export default function ActivityFeed() {
             autoClose: 8000,
           });
         }
-        if (live && total > 0) {
-          refreshQueries(['album', 'track', 'wanted', 'dashboard', 'history']);
-        }
+        if (live && (total > 0 || p?.error)) refreshQueries(queryClient);
         break;
       }
 
@@ -131,7 +116,7 @@ export default function ActivityFeed() {
         // No toast: background syncs run every few minutes — the feed entry
         // and the refreshed data are the signal.
         if (live) {
-          refreshQueries(['artist', 'album', 'dashboard', 'wanted']);
+          refreshQueries(queryClient, ['artist', 'album', 'dashboard', 'wanted', 'library']);
         }
         break;
 
@@ -139,8 +124,13 @@ export default function ActivityFeed() {
         addItem({ icon: '🔄', title: p?.message || 'Syncing with Lidarr...', type: 'info' });
         break;
 
+      case 'lyrics_audit_error':
+        addItem({ icon: '❌', title: p?.message || 'Lyrics audit failed', type: 'error' });
+        if (live) showError('Lyrics Audit Failed', p?.message || 'Unknown error');
+        break;
+
       case 'health': {
-        const healthy = (p as any)?.healthy;
+        const healthy = p?.healthy;
         addItem({
           icon: healthy ? '💚' : '💔',
           title: p?.message || 'Service health changed',
@@ -159,6 +149,19 @@ export default function ActivityFeed() {
       }
 
       default:
+        if (BATCH_COMPLETE_TYPES.has(event.type)) {
+          const failed = !!p?.error;
+          addItem({
+            icon: failed ? '❌' : (p?.failed ? '⚠️' : '✅'),
+            title: p?.message || (failed ? `Failed: ${p?.error}` : event.type),
+            type: failed ? 'error' : 'success',
+          });
+          if (live) {
+            if (failed) showError('Batch Job Failed', p?.error || 'Unknown error');
+            refreshQueries(queryClient);
+          }
+          break;
+        }
         addItem({ icon: '📡', title: p?.message || event.type, type: 'info' });
     }
 
@@ -179,15 +182,18 @@ export default function ActivityFeed() {
   }, [items, open]);
 
   const coverPct = progress.totalCovers > 0
-    ? Math.round((progress.currentCover / progress.totalCovers) * 100) : 0;
+    ? Math.min(100, Math.round((progress.currentCover / progress.totalCovers) * 100)) : 0;
   const lyricsPct = progress.totalLyrics > 0
-    ? Math.round((progress.currentLyric / progress.totalLyrics) * 100) : 0;
+    ? Math.min(100, Math.round((progress.currentLyric / progress.totalLyrics) * 100)) : 0;
 
   return (
     <>
       {/* Toggle Button */}
       <button
         onClick={() => { setOpen(!open); setHasNew(false); }}
+        aria-label={open ? 'Hide activity feed' : 'Show activity feed'}
+        aria-expanded={open}
+        title="Activity"
         style={{
           position: 'fixed', bottom: 20, right: 20,
           width: 48, height: 48, borderRadius: '50%',
@@ -203,7 +209,7 @@ export default function ActivityFeed() {
           animation: progress.active ? 'pulse 2s ease-in-out infinite' : 'none',
         }}
       >
-        {progress.active ? '⏳' : '📡'}
+        <span aria-hidden="true">{progress.active ? '⏳' : '📡'}</span>
         {hasNew && !open && (
           <span style={{
             position: 'absolute', top: -2, right: -2,
@@ -215,7 +221,7 @@ export default function ActivityFeed() {
 
       {/* Panel */}
       {open && (
-        <div style={{
+        <div role="log" aria-label="Activity feed" style={{
           position: 'fixed', bottom: 80, right: 20,
           width: 400, maxHeight: 450, borderRadius: 16,
           background: 'var(--surface-bg, rgba(15,10,35,0.95))',
@@ -251,7 +257,7 @@ export default function ActivityFeed() {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
                     <span>🎨 Covers</span>
-                    <span>{progress.currentCover}/{progress.totalCovers}</span>
+                    <span>{Math.min(progress.currentCover, progress.totalCovers)}/{progress.totalCovers} albums</span>
                   </div>
                   <div className="download-queue-bar">
                     <div className="download-queue-bar-fill covers" style={{ width: `${coverPct}%` }} />
@@ -262,7 +268,7 @@ export default function ActivityFeed() {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
                     <span>📝 Lyrics</span>
-                    <span>{progress.currentLyric}/{progress.totalLyrics}</span>
+                    <span>{Math.min(progress.currentLyric, progress.totalLyrics)}/{progress.totalLyrics} tracks</span>
                   </div>
                   <div className="download-queue-bar">
                     <div className="download-queue-bar-fill lyrics" style={{ width: `${lyricsPct}%` }} />

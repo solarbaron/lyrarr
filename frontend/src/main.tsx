@@ -2,9 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { MantineProvider, createTheme } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { BASE_URL } from './baseUrl';
+import { notifyError } from './notify';
 
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
@@ -27,6 +29,13 @@ const theme = createTheme({
 });
 
 const queryClient = new QueryClient({
+  // Safety net: a mutation without its own onError would otherwise fail
+  // silently. Mutations that handle errors themselves are left alone.
+  mutationCache: new MutationCache({
+    onError: (error, _vars, _ctx, mutation) => {
+      if (!mutation.options.onError) notifyError('Error', error);
+    },
+  }),
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
@@ -41,7 +50,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <MantineProvider theme={theme} defaultColorScheme="dark">
         <Notifications position="top-right" />
-        <BrowserRouter>
+        <BrowserRouter basename={BASE_URL || undefined}>
           <App />
         </BrowserRouter>
       </MantineProvider>

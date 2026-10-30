@@ -4,13 +4,17 @@ import {
   Select, TextInput,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 import {
   getLibraryTree, batchDownload, batchTranslate, batchDeleteLyrics, upgradeLyrics,
   LibraryTreeArtist,
 } from '../api';
 import { SSEEvent } from '../types';
+import { useServerEvents } from '../events';
+import { refreshQueries } from '../queryRefresh';
+import { errorMessage } from '../notify';
 
 const LANGUAGES = [
   { value: 'en', label: 'English' },
@@ -37,92 +41,104 @@ interface MonitorEntry {
   replay?: boolean;
 }
 
-interface ActiveJob {
+interface JobPart {
   label: string;
+  unit: string;
   total: number;
   done: number;
 }
 
+interface ActiveJob {
+  label: string;
+  // Downloads report covers (albums) and lyrics (tracks) separately; other
+  // batches have a single part.
+  parts: JobPart[];
+}
+
 let monitorId = 0;
 
-/** Right-hand live progress monitor fed by the app's SSE stream. */
+/** Right-hand live progress monitor fed by the app's shared SSE stream. */
 function ProgressMonitor({ onJobFinished }: { onJobFinished: () => void }) {
   const [entries, setEntries] = useState<MonitorEntry[]>([]);
   const [job, setJob] = useState<ActiveJob | null>(null);
   const jobRef = useRef<ActiveJob | null>(null);
   jobRef.current = job;
 
-  useEffect(() => {
-    const source = new EventSource('/api/events');
-    source.onmessage = (e) => {
-      let event: SSEEvent;
-      try {
-        event = JSON.parse(e.data);
-      } catch {
-        return;
-      }
-      const p = event.payload || {};
-      const live = !event.replay;
+  const bump = (unit: string) => setJob(j => (j ? {
+    ...j,
+    parts: j.parts.map(part => (part.unit === unit ? { ...part, done: part.done + 1 } : part)),
+  } : j));
 
-      const push = (color: string, message?: string) => {
-        if (!message) return;
-        setEntries(prev => [{
-          id: monitorId++,
-          time: new Date().toLocaleTimeString(),
-          color,
-          message,
-          replay: event.replay,
-        }, ...prev].slice(0, 50));
-      };
+  useServerEvents((event: SSEEvent) => {
+    const p = event.payload || {};
+    const live = !event.replay;
 
-      switch (event.type) {
-        case 'download_start':
-          push('violet', p.message);
-          if (live) {
-            setJob({
-              label: 'Downloading metadata',
-              total: (p.total_covers || 0) + (p.total_lyrics || 0),
-              done: 0,
-            });
-          }
-          break;
-        case 'download_progress':
-          if (live && jobRef.current) {
-            setJob(j => (j ? { ...j, done: j.done + 1 } : j));
-          }
-          if (p.title) {
-            push('gray', `${p.metadata_type === 'cover' ? 'Cover' : 'Lyrics'}: ${p.title} (${p.provider})`);
-          }
-          break;
-        case 'download_complete':
-          push('green', p.message);
-          if (live) { setJob(null); onJobFinished(); }
-          break;
-        case 'batch_translate_start':
-          push('violet', p.message);
-          if (live) setJob({ label: 'Translating lyrics', total: p.total || 0, done: 0 });
-          break;
-        case 'batch_translate_complete':
-          push((p.failed || 0) > 0 ? 'orange' : 'green', p.message);
-          if (live) { setJob(null); onJobFinished(); }
-          break;
-        case 'batch_delete_complete':
-          push((p.failed || 0) > 0 ? 'orange' : 'green', p.message);
-          if (live) onJobFinished();
-          break;
-        case 'sync_complete':
-          push('blue', p.message);
-          if (live) onJobFinished();
-          break;
-        case 'health':
-          push(p.healthy ? 'green' : 'red', p.message);
-          break;
-        default:
-          break;
-      }
+    const push = (color: string, message?: string) => {
+      if (!message) return;
+      setEntries(prev => [{
+        id: monitorId++,
+        time: new Date().toLocaleTimeString(),
+        color,
+        message,
+        replay: event.replay,
+      }, ...prev].slice(0, 50));
     };
-    return () => source.close();
-  }, [onJobFinished]);
+
+    // Every batch emits its *_complete event even when it fails (with an
+    // `error` key) — always clear the running job and surface the error.
+    const finish = (okColor?: string) => {
+      if (p.error) {
+        push('red', p.message ? `${p.message} — ${p.error}` : `Failed: ${p.error}`);
+      } else {
+        push(okColor || ((p.failed || 0) > 0 ? 'orange' : 'green'), p.message);
+      }
+      if (live) { setJob(null); onJobFinished(); }
+    };
+
+    switch (event.type) {
+      case 'download_start': {
+        push('violet', p.message);
+        if (live) {
+          const parts: JobPart[] = [];
+          if (p.total_covers) parts.push({ label: 'Covers', unit: 'albums', total: p.total_covers, done: 0 });
+          if (p.total_lyrics) parts.push({ label: 'Lyrics', unit: 'tracks', total: p.total_lyrics, done: 0 });
+          setJob({ label: 'Downloading metadata', parts });
+        }
+        break;
+      }
+      case 'download_progress':
+        if (live && jobRef.current) bump(p.metadata_type === 'cover' ? 'albums' : 'tracks');
+        if (p.title) {
+          push('gray', `${p.metadata_type === 'cover' ? 'Cover' : 'Lyrics'}: ${p.title} (${p.provider})`);
+        }
+        break;
+      case 'download_complete':
+        finish('green');
+        break;
+      case 'batch_translate_start':
+        push('violet', p.message);
+        if (live) setJob({ label: 'Translating lyrics', parts: [{ label: 'Tracks', unit: 'tracks', total: p.total || 0, done: 0 }] });
+        break;
+      case 'batch_sync_start':
+        push('violet', p.message);
+        if (live) setJob({ label: 'Generating synced lyrics', parts: [{ label: 'Tracks', unit: 'tracks', total: p.total || 0, done: 0 }] });
+        break;
+      case 'batch_translate_complete':
+      case 'batch_sync_complete':
+      case 'batch_delete_complete':
+        finish();
+        break;
+      case 'sync_complete':
+        push('blue', p.message);
+        if (live) onJobFinished();
+        break;
+      case 'health':
+        push(p.healthy ? 'green' : 'red', p.message);
+        break;
+      default:
+        break;
+    }
+  });
 
   return (
     <div style={{
@@ -133,22 +149,29 @@ function ProgressMonitor({ onJobFinished }: { onJobFinished: () => void }) {
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>📡 Progress Monitor</div>
 
       {job ? (
-        <div style={{ marginBottom: 12 }}>
-          <Group justify="space-between" mb={4}>
-            <span style={{ fontSize: 12, fontWeight: 600 }}>
-              <Loader size={10} color="violet" style={{ marginRight: 6 }} />
-              {job.label}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              {job.done}{job.total ? ` / ${job.total}` : ''}
-            </span>
-          </Group>
-          <Progress
-            value={job.total ? Math.min(100, (job.done / job.total) * 100) : 100}
-            animated
-            color="violet"
-            size="sm"
-          />
+        <div style={{ marginBottom: 12 }} role="status">
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+            <Loader size={10} color="violet" style={{ marginRight: 6 }} />
+            {job.label}
+          </div>
+          {(job.parts.length ? job.parts : [{ label: '', unit: '', total: 0, done: 0 }]).map(part => (
+            <div key={part.unit || 'none'} style={{ marginBottom: 6 }}>
+              {part.total > 0 && (
+                <Group justify="space-between" mb={2}>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{part.label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {Math.min(part.done, part.total)} / {part.total} {part.unit}
+                  </span>
+                </Group>
+              )}
+              <Progress
+                value={part.total ? Math.min(100, (part.done / part.total) * 100) : 100}
+                animated
+                color="violet"
+                size="sm"
+              />
+            </div>
+          ))}
         </div>
       ) : (
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
@@ -176,11 +199,130 @@ function ProgressMonitor({ onJobFinished }: { onJobFinished: () => void }) {
   );
 }
 
+interface ArtistRowProps {
+  artist: LibraryTreeArtist;
+  selected: Set<number>;
+  isExpanded: boolean;
+  onToggleArtist: (artist: LibraryTreeArtist) => void;
+  onToggleAlbum: (id: number) => void;
+  onToggleExpanded: (id: number) => void;
+}
+
+/**
+ * One artist (and, when expanded, its albums). Memoized so toggling one
+ * album or typing in the filter doesn't re-render every row of a large
+ * library: a row only re-renders when its own albums' selection changes.
+ */
+const ArtistRow = memo(function ArtistRow({
+  artist, selected, isExpanded, onToggleArtist, onToggleAlbum, onToggleExpanded,
+}: ArtistRowProps) {
+  const selectedCount = artist.albums.filter(a => selected.has(a.id)).length;
+  const allSelected = selectedCount === artist.albums.length;
+  const regionId = `mass-edit-artist-${artist.id}`;
+  return (
+    <div style={{
+      borderBottom: '1px solid var(--card-border)',
+      // Let the browser skip layout/paint for off-screen rows.
+      contentVisibility: 'auto', containIntrinsicSize: 'auto 41px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
+        <Checkbox
+          size="xs"
+          color="violet"
+          checked={allSelected}
+          indeterminate={selectedCount > 0 && !allSelected}
+          onChange={() => onToggleArtist(artist)}
+          aria-label={`Select all albums by ${artist.name}`}
+        />
+        <button
+          type="button"
+          className="unstyled-button"
+          aria-expanded={isExpanded}
+          aria-controls={regionId}
+          style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+          onClick={() => onToggleExpanded(artist.id)}
+        >
+          <span aria-hidden="true" style={{
+            fontSize: 11, transform: isExpanded ? 'rotate(90deg)' : 'none',
+            transition: '0.15s', color: 'var(--text-secondary)',
+          }}>▶</span>
+          <span style={{ fontWeight: 600, fontSize: 13 }}>{artist.name}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+            {artist.albums.length} album{artist.albums.length === 1 ? '' : 's'}
+          </span>
+        </button>
+        {selectedCount > 0 && (
+          <Badge size="xs" color="violet" variant="light">{selectedCount} selected</Badge>
+        )}
+        <Link to={`/artists/${artist.id}`} style={{ fontSize: 11, color: 'var(--text-secondary)' }}
+          aria-label={`Open ${artist.name}`}>
+          Open
+        </Link>
+      </div>
+
+      {isExpanded && (
+        <div id={regionId}>
+          {artist.albums.map(album => (
+            <div
+              key={album.id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '6px 12px 6px 40px', fontSize: 12,
+                background: selected.has(album.id) ? 'rgba(139, 92, 246, 0.08)' : 'transparent',
+              }}
+            >
+              <Checkbox
+                size="xs"
+                color="violet"
+                checked={selected.has(album.id)}
+                onChange={() => onToggleAlbum(album.id)}
+                style={{ flex: 1 }}
+                label={
+                  <>
+                    {album.title}
+                    {album.year ? <span style={{ color: 'var(--text-secondary)' }}> ({album.year})</span> : null}
+                  </>
+                }
+              />
+              <Group gap={4} wrap="nowrap">
+                {album.synced > 0 && (
+                  <Badge size="xs" color="green" variant="light">{album.synced} synced</Badge>
+                )}
+                {album.withLyrics - album.synced > 0 && (
+                  <Badge size="xs" color="yellow" variant="light">{album.withLyrics - album.synced} plain</Badge>
+                )}
+                {album.missing > 0 && (
+                  <Badge size="xs" color="red" variant="light">{album.missing} missing</Badge>
+                )}
+                {album.instrumental > 0 && (
+                  <Badge size="xs" color="gray" variant="light">{album.instrumental} instr.</Badge>
+                )}
+              </Group>
+              <Link to={`/albums/${album.id}`} style={{ fontSize: 11, color: 'var(--text-secondary)' }}
+                aria-label={`Open ${album.title}`}>
+                Open
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}, (prev, next) => {
+  if (prev.artist !== next.artist || prev.isExpanded !== next.isExpanded) return false;
+  if (prev.selected === next.selected) return true;
+  // Callbacks are stable; only this artist's slice of the selection matters.
+  return prev.artist.albums.every(a => prev.selected.has(a.id) === next.selected.has(a.id));
+});
+
 export default function MassEditPage() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState('');
+  // Filtering a big library is the expensive part; let typing stay responsive
+  // and re-filter at lower priority.
+  const deferredSearch = useDeferredValue(search);
   const [genre, setGenre] = useState<string | null>(null);
   const [translateOpen, setTranslateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -197,7 +339,7 @@ export default function MassEditPage() {
   // has at least one album passing both filters.
   const filteredArtists: LibraryTreeArtist[] = useMemo(() => {
     if (!tree) return [];
-    const q = search.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
     return tree.artists
       .map(artist => {
         const nameMatch = q && artist.name.toLowerCase().includes(q);
@@ -209,7 +351,7 @@ export default function MassEditPage() {
         return { ...artist, albums };
       })
       .filter(artist => artist.albums.length > 0);
-  }, [tree, search, genre]);
+  }, [tree, deferredSearch, genre]);
 
   const visibleAlbumIds = useMemo(
     () => new Set(filteredArtists.flatMap(a => a.albums.map(al => al.id))),
@@ -230,31 +372,39 @@ export default function MassEditPage() {
     return { albums, tracks, missing, unsynced };
   }, [tree, selected]);
 
-  const toggleAlbum = (id: number) => {
+  const toggleAlbum = useCallback((id: number) => {
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  const toggleArtist = (artist: LibraryTreeArtist) => {
+  const toggleArtist = useCallback((artist: LibraryTreeArtist) => {
     setSelected(prev => {
       const next = new Set(prev);
       const allSelected = artist.albums.every(a => next.has(a.id));
       artist.albums.forEach(a => allSelected ? next.delete(a.id) : next.add(a.id));
       return next;
     });
-  };
+  }, []);
+
+  const toggleExpanded = useCallback((id: number) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   const selectAllVisible = () => setSelected(new Set([...selected, ...visibleAlbumIds]));
   const clearSelection = () => setSelected(new Set());
 
   const selectedIds = useMemo(() => [...selected], [selected]);
 
-  const onError = (err: any) => notifications.show({
+  const onError = (err: unknown) => notifications.show({
     title: 'Not Started',
-    message: err?.response?.data?.message || 'Request failed',
+    message: errorMessage(err),
     color: 'orange',
   });
   const onStarted = (data: any) => notifications.show({
@@ -281,13 +431,14 @@ export default function MassEditPage() {
     onSuccess: (data: any) => {
       setDeleteOpen(false);
       notifications.show({ title: 'Deleted', message: data.message, color: 'green' });
-      queryClient.invalidateQueries({ queryKey: ['library-tree'] });
+      // Album/track statuses, wanted lists and dashboard counts all changed.
+      refreshQueries(queryClient);
     },
     onError,
   });
 
-  const refreshTree = useMemo(
-    () => () => queryClient.invalidateQueries({ queryKey: ['library-tree'] }),
+  const refreshTree = useCallback(
+    () => { queryClient.invalidateQueries({ queryKey: ['library-tree'] }); },
     [queryClient],
   );
 
@@ -307,6 +458,7 @@ export default function MassEditPage() {
         <div>
           <Group gap="sm" mb="md" wrap="wrap">
             <TextInput
+              aria-label="Filter artists and albums"
               placeholder="Filter artists / albums…"
               value={search}
               onChange={(e) => setSearch(e.currentTarget.value)}
@@ -315,6 +467,7 @@ export default function MassEditPage() {
               styles={inputStyles}
             />
             <Select
+              aria-label="Filter by genre"
               placeholder="Genre"
               data={tree?.genres || []}
               value={genre}
@@ -345,80 +498,17 @@ export default function MassEditPage() {
                   No artists match the current filters.
                 </div>
               )}
-              {filteredArtists.map(artist => {
-                const selectedCount = artist.albums.filter(a => selected.has(a.id)).length;
-                const allSelected = selectedCount === artist.albums.length;
-                const isExpanded = expanded.has(artist.id);
-                return (
-                  <div key={artist.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
-                      <Checkbox
-                        size="xs"
-                        color="violet"
-                        checked={allSelected}
-                        indeterminate={selectedCount > 0 && !allSelected}
-                        onChange={() => toggleArtist(artist)}
-                      />
-                      <div
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
-                        onClick={() => setExpanded(prev => {
-                          const next = new Set(prev);
-                          if (next.has(artist.id)) next.delete(artist.id); else next.add(artist.id);
-                          return next;
-                        })}
-                      >
-                        <span style={{
-                          fontSize: 11, transform: isExpanded ? 'rotate(90deg)' : 'none',
-                          transition: '0.15s', color: 'var(--text-secondary)',
-                        }}>▶</span>
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{artist.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                          {artist.albums.length} album{artist.albums.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      {selectedCount > 0 && (
-                        <Badge size="xs" color="violet" variant="light">{selectedCount} selected</Badge>
-                      )}
-                    </div>
-
-                    {isExpanded && artist.albums.map(album => (
-                      <div
-                        key={album.id}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          padding: '6px 12px 6px 40px', fontSize: 12,
-                          background: selected.has(album.id) ? 'rgba(139, 92, 246, 0.08)' : 'transparent',
-                        }}
-                      >
-                        <Checkbox
-                          size="xs"
-                          color="violet"
-                          checked={selected.has(album.id)}
-                          onChange={() => toggleAlbum(album.id)}
-                        />
-                        <span style={{ flex: 1, cursor: 'pointer' }} onClick={() => toggleAlbum(album.id)}>
-                          {album.title}
-                          {album.year ? <span style={{ color: 'var(--text-secondary)' }}> ({album.year})</span> : null}
-                        </span>
-                        <Group gap={4} wrap="nowrap">
-                          {album.synced > 0 && (
-                            <Badge size="xs" color="green" variant="light">{album.synced} synced</Badge>
-                          )}
-                          {album.withLyrics - album.synced > 0 && (
-                            <Badge size="xs" color="yellow" variant="light">{album.withLyrics - album.synced} plain</Badge>
-                          )}
-                          {album.missing > 0 && (
-                            <Badge size="xs" color="red" variant="light">{album.missing} missing</Badge>
-                          )}
-                          {album.instrumental > 0 && (
-                            <Badge size="xs" color="gray" variant="light">{album.instrumental} instr.</Badge>
-                          )}
-                        </Group>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
+              {filteredArtists.map(artist => (
+                <ArtistRow
+                  key={artist.id}
+                  artist={artist}
+                  selected={selected}
+                  isExpanded={expanded.has(artist.id)}
+                  onToggleArtist={toggleArtist}
+                  onToggleAlbum={toggleAlbum}
+                  onToggleExpanded={toggleExpanded}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -453,7 +543,7 @@ export default function MassEditPage() {
           <Button size="xs" variant="light" color="red" onClick={() => setDeleteOpen(true)}>
             Delete Lyrics…
           </Button>
-          <Button size="xs" variant="subtle" color="gray" onClick={clearSelection}>✕</Button>
+          <Button size="xs" variant="subtle" color="gray" onClick={clearSelection} aria-label="Clear selection">✕</Button>
         </div>
       )}
 

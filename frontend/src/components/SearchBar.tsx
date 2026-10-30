@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { globalSearch } from '../api';
 
 interface SearchResults {
@@ -13,8 +13,6 @@ export default function SearchBar() {
   const [results, setResults] = useState<SearchResults | null>(null);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const navigate = useNavigate();
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (query.length < 2) {
@@ -23,18 +21,28 @@ export default function SearchBar() {
       return;
     }
 
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
+    // Each query change cancels the previous request, and a response is only
+    // applied if its effect is still current — so a slow reply for an older
+    // query (or one arriving after the box was cleared) can't overwrite the
+    // results or reopen the dropdown.
+    const controller = new AbortController();
+    let current = true;
+    const timer = setTimeout(async () => {
       try {
-        const data = await globalSearch(query);
+        const data = await globalSearch(query, controller.signal);
+        if (!current) return;
         setResults(data);
         setOpen(true);
       } catch {
-        setResults(null);
+        if (current) setResults(null);
       }
     }, 300);
 
-    return () => clearTimeout(debounceRef.current);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
   // Close on outside click
@@ -48,8 +56,7 @@ export default function SearchBar() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const go = (path: string) => {
-    navigate(path);
+  const close = () => {
     setOpen(false);
     setQuery('');
     setResults(null);
@@ -62,6 +69,8 @@ export default function SearchBar() {
       <input
         type="text"
         placeholder="Search..."
+        aria-label="Search library"
+        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         style={{
@@ -106,9 +115,9 @@ export default function SearchBar() {
                 Artists
               </div>
               {results.artists.map(a => (
-                <div key={`a-${a.id}`} onClick={() => go(`/artists/${a.id}`)} className="search-result-item">
+                <Link key={`a-${a.id}`} to={`/artists/${a.id}`} onClick={close} className="search-result-item">
                   {a.name}
-                </div>
+                </Link>
               ))}
             </div>
           ) : null}
@@ -119,10 +128,10 @@ export default function SearchBar() {
                 Albums
               </div>
               {results.albums.map(a => (
-                <div key={`al-${a.id}`} onClick={() => go(`/albums/${a.id}`)} className="search-result-item">
+                <Link key={`al-${a.id}`} to={`/albums/${a.id}`} onClick={close} className="search-result-item">
                   <span>{a.title}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 8 }}>{a.artistName}</span>
-                </div>
+                </Link>
               ))}
             </div>
           ) : null}
@@ -133,10 +142,10 @@ export default function SearchBar() {
                 Tracks
               </div>
               {results.tracks.map(t => (
-                <div key={`t-${t.id}`} onClick={() => go(`/albums/${t.albumId}`)} className="search-result-item">
+                <Link key={`t-${t.id}`} to={`/albums/${t.albumId}`} onClick={close} className="search-result-item">
                   <span>{t.title}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 8 }}>{t.artistName}</span>
-                </div>
+                </Link>
               ))}
             </div>
           ) : null}

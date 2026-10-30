@@ -3,6 +3,7 @@ import { Modal, Loader, Button, Group, Textarea, Select, FileButton, SegmentedCo
 import { notifications } from '@mantine/notifications';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { readLyrics, uploadLyrics, saveLyricsFromEditor, publishLyrics, translateLyrics, generateSyncedLyrics, getLyricsVersions, restoreLyricsVersion, getTrackStreamUrl } from '../api';
+import { notifyError } from '../notify';
 
 interface Props {
   trackId: number;
@@ -131,8 +132,14 @@ function SyncedLyricsPlayer({ content, trackId }: { content: string; trackId: nu
 
   const togglePlay = useCallback(() => {
     if (!audioRef.current) return;
-    if (audioRef.current.paused) audioRef.current.play();
-    else audioRef.current.pause();
+    if (audioRef.current.paused) {
+      audioRef.current.play().catch((err: DOMException) => {
+        // AbortError just means a pause/seek interrupted loading.
+        if (err?.name !== 'AbortError') notifyError('Playback failed', err, 'Could not play this track');
+      });
+    } else {
+      audioRef.current.pause();
+    }
   }, []);
 
   const formatTime = (s: number) => {
@@ -153,6 +160,7 @@ function SyncedLyricsPlayer({ content, trackId }: { content: string; trackId: nu
       }}>
         <button
           onClick={togglePlay}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
           style={{
             background: 'var(--accent-primary)', border: 'none', borderRadius: '50%',
             width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -170,6 +178,7 @@ function SyncedLyricsPlayer({ content, trackId }: { content: string; trackId: nu
           max={duration || 1}
           value={currentTime}
           onChange={(e) => seekTo(parseFloat(e.target.value))}
+          aria-label="Seek"
           style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
         />
         <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 40, textAlign: 'right', flexShrink: 0 }}>
@@ -293,7 +302,7 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
       queryClient.invalidateQueries({ queryKey: ['lyrics-versions', trackId] });
       queryClient.invalidateQueries({ queryKey: ['album', String(albumId)] });
     },
-    onError: () => notifications.show({ title: 'Error', message: 'Failed to restore', color: 'red' }),
+    onError: (err) => notifyError('Error', err, 'Failed to restore'),
   });
 
   useEffect(() => {
@@ -315,7 +324,7 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
       queryClient.invalidateQueries({ queryKey: ['album', String(albumId)] });
       queryClient.invalidateQueries({ queryKey: ['lyrics-read', trackId] });
     },
-    onError: () => notifications.show({ title: 'Error', message: 'Failed to save', color: 'red' }),
+    onError: (err) => notifyError('Error', err, 'Failed to save'),
   });
 
   const publishMutation = useMutation({

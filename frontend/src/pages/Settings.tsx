@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup, getProfiles } from '../api';
 import PageHeader from '../components/PageHeader';
+import { notifyError } from '../notify';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -17,6 +18,25 @@ export default function SettingsPage() {
 
   const updateField = (section: string, key: string, value: any) => {
     setForm((prev: any) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+  };
+
+  // Mantine's NumberInput reports a cleared field as ''. Keep that in the form
+  // so the box can be emptied and retyped, but never send it: saving is
+  // blocked until every port is a valid number.
+  const portError = (v: unknown) => {
+    const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+    return (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 65535)
+      ? undefined : 'Enter a port between 1 and 65535';
+  };
+  const lidarrPortError = form.lidarr ? portError(form.lidarr.port ?? 8686) : undefined;
+  const generalPortError = form.general ? portError(form.general.port ?? 6868) : undefined;
+
+  const handleSave = () => {
+    if (lidarrPortError || generalPortError) {
+      notifications.show({ title: 'Not saved', message: 'Fix the highlighted fields first', color: 'orange' });
+      return;
+    }
+    saveMutation.mutate(form);
   };
 
   const saveMutation = useMutation({
@@ -33,7 +53,7 @@ export default function SettingsPage() {
       notifications.show({ title: 'Settings saved', message: 'Changes applied', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['settings'] });
     },
-    onError: () => notifications.show({ title: 'Error', message: 'Failed to save settings', color: 'red' }),
+    onError: (err) => notifyError('Failed to save settings', err),
   });
 
   const testMutation = useMutation({
@@ -49,7 +69,7 @@ export default function SettingsPage() {
   const testNotifMutation = useMutation({
     mutationFn: testNotification,
     onSuccess: (data: any) => notifications.show({ title: 'Sent', message: data.message || 'Test sent', color: 'green' }),
-    onError: () => notifications.show({ title: 'Error', message: 'Failed to send', color: 'red' }),
+    onError: (err) => notifyError('Error', err, 'Failed to send'),
   });
 
   const handleExport = async () => {
@@ -92,7 +112,7 @@ export default function SettingsPage() {
         subtitle="Configure Lyrarr"
         actions={
           <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-            onClick={() => saveMutation.mutate(form)} loading={saveMutation.isPending}>
+            onClick={handleSave} loading={saveMutation.isPending}>
             Save Settings
           </Button>
         }
@@ -108,8 +128,9 @@ export default function SettingsPage() {
           <div />
           <TextInput label="Host" placeholder="127.0.0.1" value={form.lidarr?.ip || ''}
             onChange={(e) => updateField('lidarr', 'ip', e.currentTarget.value)} styles={inputStyles} />
-          <NumberInput label="Port" placeholder="8686" min={1} max={65535}
-            value={form.lidarr?.port || 8686} onChange={(v) => updateField('lidarr', 'port', v)} styles={inputStyles} />
+          <NumberInput label="Port" placeholder="8686" min={1} max={65535} allowDecimal={false}
+            value={form.lidarr?.port ?? 8686} onChange={(v) => updateField('lidarr', 'port', v)}
+            error={lidarrPortError} styles={inputStyles} />
           <TextInput label="Base URL" placeholder="/" value={form.lidarr?.base_url || ''}
             onChange={(e) => updateField('lidarr', 'base_url', e.currentTarget.value)} styles={inputStyles} />
           <TextInput label="API Key" placeholder="Your Lidarr API key" value={form.lidarr?.apikey || ''}
@@ -248,8 +269,12 @@ export default function SettingsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <TextInput label="Instance Name" placeholder="Lyrarr" value={form.general?.instance_name || ''}
             onChange={(e) => updateField('general', 'instance_name', e.currentTarget.value)} styles={inputStyles} />
-          <NumberInput label="Port" min={1} max={65535} value={form.general?.port || 6868}
-            onChange={(v) => updateField('general', 'port', v)} styles={inputStyles} />
+          <NumberInput label="Port" min={1} max={65535} allowDecimal={false} value={form.general?.port ?? 6868}
+            onChange={(v) => updateField('general', 'port', v)} error={generalPortError} styles={inputStyles} />
+          <TextInput label="URL Base" placeholder="/lyrarr"
+            description="For reverse proxies serving Lyrarr under a subpath. Requires restart."
+            value={form.general?.base_url || ''}
+            onChange={(e) => updateField('general', 'base_url', e.currentTarget.value)} styles={inputStyles} />
           <Select
             label="Default Profile for New Albums"
             description="Automatically assign this profile to newly synced albums"
@@ -268,7 +293,7 @@ export default function SettingsPage() {
         <h3>🎤 Whisper (AI Lyrics Sync)</h3>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
           Settings for generating synced lyrics from plain text using audio transcription.
-          Requires <code>faster-whisper</code> and <code>ffmpeg</code>.
+          Requires <code>faster-whisper</code> (included in the Docker image).
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <Select label="Model" description="Larger = more accurate but slower"

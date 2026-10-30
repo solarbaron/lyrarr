@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Loader, SimpleGrid, Button } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../notify';
 import { searchCovers, downloadCover } from '../api';
 
 interface Props {
@@ -25,9 +26,7 @@ export default function CoverSearchModal({ albumId, opened, onClose }: Props) {
       queryClient.invalidateQueries({ queryKey: ['album', String(albumId)] });
       onClose();
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to download cover art', color: 'red' });
-    },
+    onError: (err) => notifyError('Error', err, 'Failed to download cover art'),
   });
 
   const results = data?.results || [];

@@ -19,6 +19,8 @@ export interface Artist {
   updated_at_timestamp: string | null;
 }
 
+export type AlbumLyricsStatus = 'complete' | 'partial' | 'missing' | 'unknown';
+
 export interface Album {
   lidarrAlbumId: number;
   mbId: string;
@@ -32,7 +34,12 @@ export interface Album {
   genres: string;
   albumType: string;
   cover_status: 'missing' | 'available' | 'manual';
-  lyrics_status: 'unknown' | 'partial' | 'complete';
+  /**
+   * Derived from the album's tracks (blacklisted ignored, instrumental counts
+   * as satisfied): complete = all tracks have lyrics, partial = some,
+   * missing = none, unknown = no tracks with files.
+   */
+  lyrics_status: AlbumLyricsStatus;
   missing_covers: string;
   missing_lyrics: string;
   profileId: number | null;
@@ -155,6 +162,9 @@ export interface SSEEvent {
     is_synced?: boolean;
     service?: string;
     healthy?: boolean;
+    synced?: number;
+    /** Set on *_complete events when the batch failed. */
+    error?: string;
   };
 }
 

@@ -1,18 +1,39 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import type {
   Artist, Album, Track, Profile, HistoryEntry,
   PaginatedResponse, PaginationParams, DashboardStats,
   CoverResult, LyricsResult,
 } from './types';
+import { BASE_URL } from './baseUrl';
 
-const api = axios.create({ baseURL: '/api' });
+const api = axios.create({
+  baseURL: `${BASE_URL}/api`,
+  // The backend's CSRF guard accepts state-changing requests only when they
+  // carry this header (or JSON / an API key). Send it on everything.
+  headers: { 'X-Requested-With': 'XMLHttpRequest' },
+});
 
-// Redirect to login on 401 (except for auth endpoints)
+// Fired when a request comes back 401 — App re-checks /auth/status and shows
+// the login page if the session is gone.
+export const AUTH_EXPIRED_EVENT = 'lyrarr-auth-expired';
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // An /api call answered with HTML is never a real API response: it's the
+    // SPA fallback or a reverse proxy's error/login page. Treat it as an error
+    // instead of handing an HTML string to code expecting JSON.
+    const contentType = String(response.headers?.['content-type'] || '');
+    if (contentType.includes('text/html')) {
+      return Promise.reject(new AxiosError(
+        'Unexpected HTML response from the API (is a proxy or base URL misconfigured?)',
+        'ERR_BAD_RESPONSE', response.config, response.request, response,
+      ));
+    }
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401 && !error.config?.url?.includes('/auth/')) {
-      window.dispatchEvent(new CustomEvent('lyrarr-auth-expired'));
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
     return Promise.reject(error);
   }
@@ -22,7 +43,8 @@ api.interceptors.response.use(
 export type { PaginatedResponse, PaginationParams };
 
 // ---------- Auth ----------
-export const getAuthStatus = () => api.get('/auth/status').then(r => r.data);
+export interface AuthStatus { authType: string | null; authenticated: boolean; username?: string }
+export const getAuthStatus = () => api.get('/auth/status', { timeout: 10000 }).then(r => r.data as AuthStatus);
 export const authLogin = (username: string, password: string) =>
   api.post('/auth/login', { username, password }).then(r => r.data);
 export const authLogout = () => api.post('/auth/logout').then(r => r.data);
@@ -166,7 +188,8 @@ export const getProviderHealth = () => api.get('/metadata/providers/health').the
 export const resetProviderHealth = (provider?: string) => api.post('/metadata/providers/health', { provider }).then(r => r.data);
 export const updateTrack = (id: number, data: Record<string, unknown>) => api.put(`/tracks/${id}`, data).then(r => r.data);
 export const updateArtist = (id: number, data: Record<string, unknown>) => api.put(`/artists/${id}`, data).then(r => r.data);
-export const getTrackStreamUrl = (trackId: number) => `/api/tracks/${trackId}/stream`;
+export const getTrackStreamUrl = (trackId: number) => `${BASE_URL}/api/tracks/${trackId}/stream`;
+export const getEventsUrl = () => `${BASE_URL}/api/events`;
 export const resetLyricsRetry = (data: { trackIds?: number[]; all?: boolean }) =>
   api.post('/metadata/lyrics/reset-retry', data).then(r => r.data);
 export const checkLyricsCoherence = (albumId: number) =>
@@ -177,7 +200,7 @@ export const repairTrackLrc = (trackId: number) =>
   api.post(`/metadata/lyrics/validate-lrc/${trackId}`).then(r => r.data);
 
 // ---------- Search ----------
-export const globalSearch = (q: string) => api.get('/search', { params: { q } }).then(r => r.data);
+export const globalSearch = (q: string, signal?: AbortSignal) => api.get('/search', { params: { q }, signal }).then(r => r.data);
 
 // ---------- Dashboard ----------
 export const getDashboardStats = () => api.get('/dashboard/stats').then(r => r.data as DashboardStats);

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Loader, Code, ScrollArea, Badge, Progress } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../notify';
 import { getSystemStatus, getTasks, getLogs, getHealth, runTask, getProviderHealth, resetProviderHealth } from '../api';
 import PageHeader from '../components/PageHeader';
 
@@ -23,6 +24,7 @@ export default function SystemPage() {
       notifications.show({ title: 'Task triggered', message: `${taskId} started`, color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
+    onError: (err, taskId) => notifyError(`Failed to run ${taskId}`, err),
   });
 
   const { data: providerHealth } = useQuery({
@@ -37,6 +39,7 @@ export default function SystemPage() {
       notifications.show({ title: 'Reset', message: `Health stats reset for ${provider || 'all providers'}`, color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['provider-health'] });
     },
+    onError: (err) => notifyError('Failed to reset provider health', err),
   });
 
   return (
@@ -65,7 +68,24 @@ export default function SystemPage() {
               {health?.lidarr?.status || 'Unknown'}
             </span>
           </div>
+          {health?.auth && (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Authentication</div>
+              {/* Disabled auth is a warning, not an outage. */}
+              <span className={`status-badge ${health.auth.healthy ? 'available' : 'partial'}`}>
+                {health.auth.status || 'Unknown'}
+              </span>
+            </div>
+          )}
         </div>
+        {health?.auth && !health.auth.healthy && health.auth.error && (
+          <div role="alert" style={{
+            marginTop: 16, padding: '10px 14px', borderRadius: 10, fontSize: 13,
+            background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid rgba(250, 204, 21, 0.25)',
+          }}>
+            ⚠️ {health.auth.error}
+          </div>
+        )}
       </div>
 
       {/* Provider Health Dashboard */}

@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { Loader, Button, Select, Group, Badge, Pagination } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faDownload, faLanguage, faClock } from '@fortawesome/free-solid-svg-icons';
+import { lyricsStatusLabel } from '../albumStatus';
+import { notifyError } from '../notify';
 import { getArtist, getAlbums, getProfiles, massAssignProfile, updateArtist, batchDownload, batchTranslate, batchSyncGenerate } from '../api';
 
 const LANGUAGES = [
@@ -20,7 +22,6 @@ const LANGUAGES = [
 
 export default function ArtistDetailPage() {
   const { artistId } = useParams();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [profileId, setProfileId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -45,7 +46,9 @@ export default function ArtistDetailPage() {
     onSuccess: () => {
       notifications.show({ title: 'Done', message: 'Profile updated', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
+      queryClient.invalidateQueries({ queryKey: ['artist-albums', artistId] });
     },
+    onError: (err) => notifyError('Failed to set profile', err),
   });
 
   if (isLoading) {
@@ -70,7 +73,8 @@ export default function ArtistDetailPage() {
         variant="subtle"
         color="gray"
         leftSection={<FontAwesomeIcon icon={faArrowLeft} />}
-        onClick={() => navigate('/artists')}
+        component={Link}
+        to="/artists"
         mb="md"
       >
         Back to Artists
@@ -163,9 +167,7 @@ export default function ArtistDetailPage() {
                 onClick={() => {
                   batchTranslate({ artistIds: [Number(artistId)] }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || 'Translating lyrics...', color: 'cyan' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start translation', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Failed to start translation', err));
                 }}
               >
                 Translate Lyrics
@@ -178,9 +180,7 @@ export default function ArtistDetailPage() {
                 onClick={() => {
                   batchSyncGenerate({ artistIds: [Number(artistId)] }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start timing generation', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Failed to start timing generation', err));
                 }}
               >
                 Generate Timing
@@ -202,9 +202,10 @@ export default function ArtistDetailPage() {
                   data={LANGUAGES}
                   value={artist.translate_target_override || ''}
                   onChange={(v) => {
-                    updateArtist(Number(artistId), { translate_target_override: v || null });
-                    queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
-                    notifications.show({ title: 'Updated', message: 'Language override saved', color: 'green' });
+                    updateArtist(Number(artistId), { translate_target_override: v || null }).then(() => {
+                      queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
+                      notifications.show({ title: 'Updated', message: 'Language override saved', color: 'green' });
+                    }).catch((err) => notifyError('Failed to save language override', err));
                   }}
                   size="xs"
                   w={200}
@@ -248,15 +249,12 @@ export default function ArtistDetailPage() {
             </thead>
             <tbody>
               {albums.map((album: any) => (
-                <tr
-                  key={album.lidarrAlbumId}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}
-                >
+                <tr key={album.lidarrAlbumId} style={{ cursor: 'pointer' }}>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link"
+                      style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       {album.cover ? (
-                        <img src={album.cover} alt={album.title}
+                        <img src={album.cover} alt=""
                           style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
                       ) : (
                         <div style={{
@@ -265,19 +263,28 @@ export default function ArtistDetailPage() {
                         }}>💿</div>
                       )}
                       <div style={{ fontWeight: 600 }}>{album.title}</div>
-                    </div>
+                    </Link>
                   </td>
-                  <td>{album.year || '—'}</td>
-                  <td><span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{album.albumType || '—'}</span></td>
+                  {/* Secondary cells link too (mouse/middle-click); only the title is a tab stop. */}
+                  <td><Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>{album.year || '—'}</Link></td>
                   <td>
-                    <span className={`status-badge ${album.cover_status || 'missing'}`}>
-                      {album.cover_status || 'Missing'}
-                    </span>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{album.albumType || '—'}</span>
+                    </Link>
                   </td>
                   <td>
-                    <span className={`status-badge ${album.lyrics_status || 'unknown'}`}>
-                      {album.lyrics_status || 'Unknown'}
-                    </span>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span className={`status-badge ${album.cover_status || 'missing'}`}>
+                        {album.cover_status || 'Missing'}
+                      </span>
+                    </Link>
+                  </td>
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span className={`status-badge ${album.lyrics_status || 'unknown'}`}>
+                        {lyricsStatusLabel(album.lyrics_status)}
+                      </span>
+                    </Link>
                   </td>
                 </tr>
               ))}

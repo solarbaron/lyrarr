@@ -397,6 +397,8 @@ body {
 .status-badge.available { background: var(--ok-bg); color: var(--ok); border-color: rgba(34, 197, 94, 0.25); }
 .status-badge.missing { background: var(--err-bg); color: var(--err); border-color: rgba(239, 68, 68, 0.25); }
 .status-badge.partial { background: var(--warn-bg); color: var(--warn); border-color: rgba(250, 204, 21, 0.25); }
+.status-badge.complete,
+.status-badge.manual { background: var(--ok-bg); color: var(--ok); border-color: rgba(34, 197, 94, 0.25); }
 .status-badge.unknown { background: rgba(148, 163, 184, 0.14); color: #94a3b8; border-color: rgba(148, 163, 184, 0.22); }
 
 /* ============================================================
@@ -460,6 +462,12 @@ body {
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+a.album-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
 }
 
 .album-card:hover {
@@ -548,6 +556,29 @@ body {
 }
 
 .search-result-item:hover { background: var(--accent-soft); }
+a.search-result-item { text-decoration: none; }
+.search-result-item:focus-visible { background: var(--accent-soft); outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+
+/* Table cells that navigate: a real link fills the cell so keyboard focus,
+   middle-click and "open in new tab" all work. */
+.cell-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.cell-link:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 4px; }
+
+/* Reset for <button>s that should look like plain content (e.g. disclosure rows). */
+.unstyled-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.unstyled-button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 4px; }
 
 /* ============================================================
    Empty state

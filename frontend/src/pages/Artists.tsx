@@ -2,13 +2,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TextInput, Pagination, Group, Select, Button, Checkbox } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { getArtists, getProfiles, massAssignProfile, batchDownload } from '../api';
 import PageHeader from '../components/PageHeader';
+import { notifyError } from '../notify';
 import { SkeletonTable } from '../components/Skeleton';
 
 export default function ArtistsPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -31,7 +31,9 @@ export default function ArtistsPage() {
       notifications.show({ title: 'Done', message: data.message, color: 'green' });
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ['artists'] });
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
     },
+    onError: (err) => notifyError('Failed to set profile', err),
   });
 
   const downloadMutation = useMutation({
@@ -71,6 +73,7 @@ export default function ArtistsPage() {
 
       <Group mb="lg" gap="md" align="end" wrap="wrap">
         <TextInput
+          aria-label="Search artists"
           placeholder="Search artists..."
           value={search}
           onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
@@ -146,6 +149,7 @@ export default function ArtistsPage() {
                     indeterminate={selected.length > 0 && selected.length < artists.length}
                     onChange={toggleAll}
                     color="violet"
+                    aria-label="Select all artists on this page"
                   />
                 </th>
                 <th>Artist</th>
@@ -157,15 +161,17 @@ export default function ArtistsPage() {
             <tbody>
               {artists.map((artist: any) => (
                 <tr key={artist.lidarrArtistId} style={{ cursor: 'pointer' }}>
-                  <td onClick={(e) => e.stopPropagation()}>
+                  <td>
                     <Checkbox
                       checked={selected.includes(artist.lidarrArtistId)}
                       onChange={() => toggleSelect(artist.lidarrArtistId)}
                       color="violet"
+                      aria-label={`Select ${artist.name}`}
                     />
                   </td>
-                  <td onClick={() => navigate(`/artists/${artist.lidarrArtistId}`)}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <td>
+                    <Link to={`/artists/${artist.lidarrArtistId}`} className="cell-link"
+                      style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       {artist.poster ? (
                         <img src={artist.poster} alt={artist.name}
                           style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
@@ -176,22 +182,29 @@ export default function ArtistsPage() {
                         }}>🎤</div>
                       )}
                       <div style={{ fontWeight: 600 }}>{artist.name}</div>
-                    </div>
+                    </Link>
                   </td>
-                  <td onClick={() => navigate(`/artists/${artist.lidarrArtistId}`)}>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      {artist.path ? artist.path.split('/').slice(-2).join('/') : '—'}
-                    </span>
+                  {/* Secondary cells link too (mouse/middle-click); only the name is a tab stop. */}
+                  <td>
+                    <Link to={`/artists/${artist.lidarrArtistId}`} className="cell-link" tabIndex={-1}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {artist.path ? artist.path.split('/').slice(-2).join('/') : '—'}
+                      </span>
+                    </Link>
                   </td>
-                  <td onClick={() => navigate(`/artists/${artist.lidarrArtistId}`)}>
-                    <span style={{ fontSize: 13, color: 'var(--accent-primary)' }}>
-                      {artist.profileName || '—'}
-                    </span>
+                  <td>
+                    <Link to={`/artists/${artist.lidarrArtistId}`} className="cell-link" tabIndex={-1}>
+                      <span style={{ fontSize: 13, color: 'var(--accent-primary)' }}>
+                        {artist.profileName || '—'}
+                      </span>
+                    </Link>
                   </td>
-                  <td onClick={() => navigate(`/artists/${artist.lidarrArtistId}`)}>
-                    <span className={`status-badge ${artist.monitored ? 'available' : 'missing'}`}>
-                      {artist.monitored ? 'Yes' : 'No'}
-                    </span>
+                  <td>
+                    <Link to={`/artists/${artist.lidarrArtistId}`} className="cell-link" tabIndex={-1}>
+                      <span className={`status-badge ${artist.monitored ? 'available' : 'missing'}`}>
+                        {artist.monitored ? 'Yes' : 'No'}
+                      </span>
+                    </Link>
                   </td>
                 </tr>
               ))}

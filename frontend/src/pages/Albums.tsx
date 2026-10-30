@@ -2,13 +2,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TextInput, Pagination, Group, Select, Button, Checkbox, SegmentedControl } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { getAlbums, getProfiles, massAssignProfile, batchDownload } from '../api';
 import PageHeader from '../components/PageHeader';
 import { SkeletonGrid, SkeletonTable } from '../components/Skeleton';
+import { notifyError } from '../notify';
+import { lyricsStatusLabel } from '../albumStatus';
 
 export default function AlbumsPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -34,7 +35,9 @@ export default function AlbumsPage() {
       notifications.show({ title: 'Done', message: data.message, color: 'green' });
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ['albums'] });
+      queryClient.invalidateQueries({ queryKey: ['album'] });
     },
+    onError: (err) => notifyError('Failed to set profile', err),
   });
 
   const downloadMutation = useMutation({
@@ -97,6 +100,7 @@ export default function AlbumsPage() {
 
       <Group mb="lg" gap="md" align="end" wrap="wrap">
         <TextInput
+          aria-label="Search albums"
           placeholder="Search albums..."
           value={search}
           onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
@@ -104,6 +108,7 @@ export default function AlbumsPage() {
           styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
         />
         <Select
+          aria-label="Sort by"
           placeholder="Sort by"
           data={[
             { value: 'title', label: 'Title' },
@@ -120,6 +125,7 @@ export default function AlbumsPage() {
           {sortDir === 'asc' ? '↑ A-Z' : '↓ Z-A'}
         </Button>
         <Select
+          aria-label="Cover status filter"
           placeholder="Cover status"
           data={[
             { value: '', label: 'All covers' },
@@ -134,11 +140,14 @@ export default function AlbumsPage() {
           styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
         />
         <Select
+          aria-label="Lyrics status filter"
           placeholder="Lyrics status"
           data={[
             { value: '', label: 'All lyrics' },
-            { value: 'available', label: '✓ Has lyrics' },
-            { value: 'missing', label: '✗ Missing lyrics' },
+            { value: 'complete', label: '✓ Complete' },
+            { value: 'incomplete', label: '◐ Incomplete' },
+            { value: 'partial', label: '◐ Partial' },
+            { value: 'missing', label: '✗ None' },
           ]}
           value={lyricsFilter}
           onChange={(v) => { setLyricsFilter(v || ''); setPage(1); }}
@@ -191,7 +200,7 @@ export default function AlbumsPage() {
         <>
           <div className="album-grid">
             {albums.map((album: any) => (
-              <div key={album.lidarrAlbumId} className="album-card" onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
+              <Link key={album.lidarrAlbumId} className="album-card" to={`/albums/${album.lidarrAlbumId}`}>
                 <div className="album-card-cover">
                   {album.cover ? (
                     <img src={album.cover} alt={album.title} />
@@ -200,7 +209,7 @@ export default function AlbumsPage() {
                   )}
                   <div className="album-card-badges">
                     <span className={`status-badge ${album.cover_status || 'missing'}`} style={{ fontSize: 10, padding: '2px 8px' }}>
-                      {album.cover_status === 'available' ? '✓' : '✗'} Cover
+                      {album.cover_status === 'available' || album.cover_status === 'manual' ? '✓' : '✗'} Cover
                     </span>
                   </div>
                 </div>
@@ -209,7 +218,7 @@ export default function AlbumsPage() {
                   <div className="album-card-artist">{album.artistName || '—'}</div>
                   {album.year && <div className="album-card-year">{album.year}</div>}
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
 
@@ -232,6 +241,7 @@ export default function AlbumsPage() {
                     indeterminate={selected.length > 0 && selected.length < albums.length}
                     onChange={toggleAll}
                     color="violet"
+                    aria-label="Select all albums on this page"
                   />
                 </th>
                 <th>Album</th>
@@ -245,17 +255,19 @@ export default function AlbumsPage() {
             <tbody>
               {albums.map((album: any) => (
                 <tr key={album.lidarrAlbumId} style={{ cursor: 'pointer' }}>
-                  <td onClick={(e) => e.stopPropagation()}>
+                  <td>
                     <Checkbox
                       checked={selected.includes(album.lidarrAlbumId)}
                       onChange={() => toggleSelect(album.lidarrAlbumId)}
                       color="violet"
+                      aria-label={`Select ${album.title}`}
                     />
                   </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link"
+                      style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       {album.cover ? (
-                        <img src={album.cover} alt={album.title}
+                        <img src={album.cover} alt=""
                           style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover' }} />
                       ) : (
                         <div style={{
@@ -267,24 +279,35 @@ export default function AlbumsPage() {
                         <div style={{ fontWeight: 600 }}>{album.title}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{album.albumType || ''}</div>
                       </div>
-                    </div>
+                    </Link>
                   </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span style={{ color: 'var(--text-secondary)' }}>{album.artistName || '—'}</span>
+                  {/* Secondary cells link too (mouse/middle-click); only the title is a tab stop. */}
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span style={{ color: 'var(--text-secondary)' }}>{album.artistName || '—'}</span>
+                    </Link>
                   </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>{album.year || '—'}</td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span style={{ fontSize: 13, color: 'var(--accent-primary)' }}>{album.profileName || '—'}</span>
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>{album.year || '—'}</Link>
                   </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span className={`status-badge ${album.cover_status || 'missing'}`}>
-                      {album.cover_status || 'Missing'}
-                    </span>
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span style={{ fontSize: 13, color: 'var(--accent-primary)' }}>{album.profileName || '—'}</span>
+                    </Link>
                   </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span className={`status-badge ${album.lyrics_status || 'unknown'}`}>
-                      {album.lyrics_status || 'Unknown'}
-                    </span>
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span className={`status-badge ${album.cover_status || 'missing'}`}>
+                        {album.cover_status || 'Missing'}
+                      </span>
+                    </Link>
+                  </td>
+                  <td>
+                    <Link to={`/albums/${album.lidarrAlbumId}`} className="cell-link" tabIndex={-1}>
+                      <span className={`status-badge ${album.lyrics_status || 'unknown'}`}>
+                        {lyricsStatusLabel(album.lyrics_status)}
+                      </span>
+                    </Link>
                   </td>
                 </tr>
               ))}

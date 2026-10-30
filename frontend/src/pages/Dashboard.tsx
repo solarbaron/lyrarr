@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SimpleGrid, Button, Progress, Group } from '@mantine/core';
 import PageHeader from '../components/PageHeader';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../notify';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUser, faCompactDisc, faMusic, faMagnifyingGlass, faRotate, faLanguage, faFileImport } from '@fortawesome/free-solid-svg-icons';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -30,6 +31,7 @@ export default function DashboardPage() {
         queryClient.invalidateQueries({ queryKey: ['wanted-lyrics'] });
       }, 5000);
     },
+    onError: (err) => notifyError('Sync failed to start', err),
   });
 
   const redetectMutation = useMutation({
@@ -38,6 +40,7 @@ export default function DashboardPage() {
       notifications.show({ title: 'Started', message: 'Re-detecting languages for all lyrics...', color: 'violet' });
       setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 10000);
     },
+    onError: (err) => notifyError('Failed to start language detection', err),
   });
 
   const stats = [
@@ -115,7 +118,7 @@ export default function DashboardPage() {
                   importSidecarLyrics().then(() => {
                     notifications.show({ title: 'Started', message: 'Scanning for existing .lrc sidecar files...', color: 'violet' });
                     setTimeout(() => queryClient.invalidateQueries({ queryKey: ['language-stats'] }), 15000);
-                  });
+                  }).catch((err) => notifyError('Failed to start sidecar import', err));
                 }}
               >
                 Import Sidecar Files
@@ -130,9 +133,7 @@ export default function DashboardPage() {
                       queryClient.invalidateQueries({ queryKey: ['language-stats'] });
                       queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
                     }, 15000);
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start lyrics audit', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Error', err, 'Failed to start lyrics audit'));
                 }}
               >
                 Audit Lyrics State
@@ -253,6 +254,7 @@ export default function DashboardPage() {
                   <span style={{ fontWeight: 500, fontSize: 13 }}>{a.name}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                     {a.totalAlbums} albums · {a.totalTracks} tracks
+                    {a.missing > 0 ? ` · ${a.missing} missing` : ''}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>

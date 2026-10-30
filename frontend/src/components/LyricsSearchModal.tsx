@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Loader, Badge, Button, Group, Progress, Tooltip, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { notifyError } from '../notify';
 import { useState } from 'react';
 import { searchLyrics, downloadLyrics, blacklistLyrics } from '../api';
 import type { LyricsResult } from '../types';
@@ -32,26 +33,29 @@ function MatchScoreBar({ label, score, detail }: { label: string; score: number;
 
 export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened, onClose }: Props) {
   const queryClient = useQueryClient();
+  // `customQuery` is what's in the input box; `submittedQuery` is what we
+  // actually searched for. Only submitting (Enter / Search) changes the query
+  // key, so typing doesn't fire a provider search per keystroke.
   const [customQuery, setCustomQuery] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
+  const [submittedQuery, setSubmittedQuery] = useState('');
 
-  // Custom search function that supports manual query override
-  const searchFn = async () => {
-    if (useCustom && customQuery.trim()) {
-      // Send a manual search query as track_name with no artist
-      const resp = await api.get(`/metadata/lyrics/search/${trackId}`, {
-        params: { custom_query: customQuery.trim() },
-      });
-      return resp.data as { results: LyricsResult[] };
-    }
-    return searchLyrics(trackId);
-  };
-
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ['lyrics-search', trackId, useCustom ? customQuery : ''],
-    queryFn: searchFn,
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['lyrics-search', trackId, submittedQuery],
+    queryFn: async () => {
+      if (submittedQuery) {
+        // Send a manual search query as track_name with no artist
+        const resp = await api.get(`/metadata/lyrics/search/${trackId}`, {
+          params: { custom_query: submittedQuery },
+        });
+        return resp.data as { results: LyricsResult[] };
+      }
+      return searchLyrics(trackId);
+    },
     enabled: opened,
   });
+
+  const submitSearch = () => setSubmittedQuery(customQuery.trim());
+  const clearSearch = () => { setCustomQuery(''); setSubmittedQuery(''); };
 
   const downloadMutation = useMutation({
     mutationFn: (result: LyricsResult) => downloadLyrics(trackId, {
@@ -62,11 +66,11 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
     onSuccess: () => {
       notifications.show({ title: 'Done', message: 'Lyrics saved!', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['album', String(albumId)] });
+      queryClient.invalidateQueries({ queryKey: ['lyrics-read', trackId] });
+      queryClient.invalidateQueries({ queryKey: ['wanted-lyrics'] });
       onClose();
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to save lyrics', color: 'red' });
-    },
+    onError: (err) => notifyError('Error', err, 'Failed to save lyrics'),
   });
 
   const blacklistMutation = useMutation({
@@ -78,11 +82,10 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
     }),
     onSuccess: () => {
       notifications.show({ title: 'Blacklisted', message: 'This result won\'t be auto-selected again', color: 'orange' });
-      refetch();  // re-run so the blacklisted result drops out of the list
+      // Re-run the current search so the blacklisted result drops out.
+      queryClient.invalidateQueries({ queryKey: ['lyrics-search', trackId, submittedQuery] });
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to blacklist', color: 'red' });
-    },
+    onError: (err) => notifyError('Error', err, 'Failed to blacklist'),
   });
 
   const results = data?.results || [];
@@ -126,38 +129,25 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
               },
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && customQuery.trim()) {
-                setUseCustom(true);
-                refetch();
-              }
+              if (e.key === 'Enter') submitSearch();
             }}
+            aria-label="Custom lyrics search query"
           />
           <Button
             variant="light"
             color="violet"
             size="xs"
-            onClick={() => {
-              if (customQuery.trim()) {
-                setUseCustom(true);
-                refetch();
-              } else {
-                setUseCustom(false);
-                refetch();
-              }
-            }}
+            onClick={submitSearch}
+            loading={isFetching && !isLoading}
           >
-            {customQuery.trim() ? 'Search' : 'Reset'}
+            {customQuery.trim() || !submittedQuery ? 'Search' : 'Reset'}
           </Button>
-          {useCustom && (
+          {(submittedQuery || customQuery) && (
             <Button
               variant="subtle"
               color="gray"
               size="xs"
-              onClick={() => {
-                setCustomQuery('');
-                setUseCustom(false);
-                refetch();
-              }}
+              onClick={clearSearch}
             >
               Clear
             </Button>
@@ -174,7 +164,7 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
         <div style={{ textAlign: 'center', padding: 40 }}>
           <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>📝</div>
           <p style={{ color: 'var(--text-secondary)' }}>No lyrics found from any provider.</p>
-          {!useCustom && (
+          {!submittedQuery && (
             <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 }}>
               Try entering a custom search query above with different title/artist spelling.
             </p>

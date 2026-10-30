@@ -123,6 +123,9 @@ export default function ProfilesPage() {
       notifications.show({ title: 'Done', message: 'Default profile updated', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
     },
+    onError: (err: any) => {
+      notifications.show({ title: 'Error', message: err?.response?.data?.message || 'Failed to set default profile', color: 'red' });
+    },
   });
 
   const bulkAssignMutation = useMutation({

@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Loader, Button, Select, Group, Badge, FileButton } from '@mantine/core';
+import { useParams, Link } from 'react-router-dom';
+import { Loader, Button, Select, Group, Badge, FileButton, Modal } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faMagnifyingGlass, faUpload, faPenToSquare, faBan, faRotateLeft, faDownload, faLanguage, faClock } from '@fortawesome/free-solid-svg-icons';
 import { getAlbum, getProfiles, massAssignProfile, uploadAlbumCover, updateTrack, batchDownload, batchTranslate, batchSyncGenerate } from '../api';
+import { lyricsStatusColor, lyricsStatusLabel } from '../albumStatus';
+import { notifyError } from '../notify';
 import CoverSearchModal from '../components/CoverSearchModal';
 import LyricsSearchModal from '../components/LyricsSearchModal';
 import LyricsEditorModal from '../components/LyricsEditorModal';
@@ -13,13 +15,14 @@ import ImageLightbox from '../components/ImageLightbox';
 
 export default function AlbumDetailPage() {
   const { albumId } = useParams();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [profileId, setProfileId] = useState<string | null>(null);
   const [coverSearchOpen, setCoverSearchOpen] = useState(false);
   const [lyricsTrack, setLyricsTrack] = useState<any>(null);
   const [editorTrack, setEditorTrack] = useState<any>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // Track awaiting confirmation before being marked "no lyrics" (blacklisted).
+  const [skipTrack, setSkipTrack] = useState<any>(null);
 
   const { data: album, isLoading } = useQuery({
     queryKey: ['album', albumId],
@@ -35,6 +38,26 @@ export default function AlbumDetailPage() {
       notifications.show({ title: 'Done', message: 'Profile updated', color: 'green' });
       queryClient.invalidateQueries({ queryKey: ['album', albumId] });
     },
+    onError: (err) => notifyError('Failed to set profile', err),
+  });
+
+  // Blacklist (skip) or un-blacklist a track's lyrics.
+  const trackStatusMutation = useMutation({
+    mutationFn: ({ track, status }: { track: any; status: 'missing' | 'blacklisted' }) =>
+      updateTrack(track.lidarrTrackId, { lyrics_status: status }),
+    onSuccess: (_data, { track, status }) => {
+      setSkipTrack(null);
+      queryClient.invalidateQueries({ queryKey: ['album', albumId] });
+      queryClient.invalidateQueries({ queryKey: ['albums'] });
+      queryClient.invalidateQueries({ queryKey: ['wanted-lyrics'] });
+      queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
+      notifications.show({
+        title: status === 'blacklisted' ? 'Blacklisted' : 'Un-blacklisted',
+        message: `${track.title} ${status === 'blacklisted' ? 'will be skipped by the downloader' : 'is now eligible for lyrics download'}`,
+        color: status === 'blacklisted' ? 'red' : 'green',
+      });
+    },
+    onError: (err) => notifyError('Failed to update track status', err),
   });
 
   const uploadMutation = useMutation({
@@ -68,7 +91,8 @@ export default function AlbumDetailPage() {
         variant="subtle"
         color="gray"
         leftSection={<FontAwesomeIcon icon={faArrowLeft} />}
-        onClick={() => navigate('/albums')}
+        component={Link}
+        to="/albums"
         mb="md"
       >
         Back to Albums
@@ -84,6 +108,10 @@ export default function AlbumDetailPage() {
                 alt={album.title}
                 style={{ width: 180, height: 180, borderRadius: 12, objectFit: 'cover', cursor: 'pointer' }}
                 onClick={() => setLightboxOpen(true)}
+                role="button"
+                tabIndex={0}
+                aria-label="View cover full size"
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxOpen(true); } }}
               />
             ) : (
               <div style={{
@@ -130,11 +158,11 @@ export default function AlbumDetailPage() {
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
               {album.albumType && <Badge variant="outline" color="violet">{album.albumType}</Badge>}
-              <Badge color={album.cover_status === 'available' ? 'green' : 'red'}>
+              <Badge color={album.cover_status === 'available' || album.cover_status === 'manual' ? 'green' : 'red'}>
                 Cover: {album.cover_status || 'missing'}
               </Badge>
-              <Badge color={album.lyrics_status === 'complete' ? 'green' : album.lyrics_status === 'partial' ? 'yellow' : 'red'}>
-                Lyrics: {album.lyrics_status || 'unknown'}
+              <Badge color={lyricsStatusColor(album.lyrics_status)}>
+                Lyrics: {lyricsStatusLabel(album.lyrics_status)}
               </Badge>
             </div>
 
@@ -183,9 +211,7 @@ export default function AlbumDetailPage() {
                 onClick={() => {
                   batchTranslate({ albumIds: [Number(albumId)] }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || 'Translating lyrics...', color: 'cyan' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start translation', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Failed to start translation', err));
                 }}
               >
                 Translate Lyrics
@@ -198,9 +224,7 @@ export default function AlbumDetailPage() {
                 onClick={() => {
                   batchSyncGenerate({ albumIds: [Number(albumId)] }).then((r: any) => {
                     notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start timing generation', color: 'red' });
-                  });
+                  }).catch((err) => notifyError('Failed to start timing generation', err));
                 }}
               >
                 Generate Timing
@@ -299,17 +323,13 @@ export default function AlbumDetailPage() {
                       size="xs"
                       leftSection={<FontAwesomeIcon icon={track.lyrics_status === 'blacklisted' ? faRotateLeft : faBan} />}
                       onClick={() => {
-                        const newStatus = track.lyrics_status === 'blacklisted' ? 'missing' : 'blacklisted';
-                        updateTrack(track.lidarrTrackId, { lyrics_status: newStatus }).then(() => {
-                          queryClient.invalidateQueries({ queryKey: ['album', albumId] });
-                          notifications.show({
-                            title: newStatus === 'blacklisted' ? 'Blacklisted' : 'Un-blacklisted',
-                            message: `${track.title} ${newStatus === 'blacklisted' ? 'will be skipped by the downloader' : 'is now eligible for lyrics download'}`,
-                            color: newStatus === 'blacklisted' ? 'red' : 'green',
-                          });
-                        }).catch(() => {
-                          notifications.show({ title: 'Error', message: 'Failed to update track status', color: 'red' });
-                        });
+                        // Skipping deletes the track's lyrics file (archived to
+                        // version history first) — confirm. Unblocking is harmless.
+                        if (track.lyrics_status === 'blacklisted') {
+                          trackStatusMutation.mutate({ track, status: 'missing' });
+                        } else {
+                          setSkipTrack(track);
+                        }
                       }}
                       title={track.lyrics_status === 'blacklisted' ? 'Un-blacklist' : 'Blacklist (instrumental/no lyrics)'}
                     >
@@ -324,6 +344,35 @@ export default function AlbumDetailPage() {
       )}
 
       {/* Modals */}
+      <Modal
+        opened={!!skipTrack}
+        onClose={() => setSkipTrack(null)}
+        title="Skip lyrics for this track?"
+        size="sm"
+      >
+        <p style={{ fontSize: 13, marginTop: 0 }}>
+          <strong>{skipTrack?.title}</strong> will be marked as having no lyrics (e.g. instrumental)
+          and skipped by the downloader.
+        </p>
+        {skipTrack?.lyrics_status && skipTrack.lyrics_status !== 'missing' && (
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            Its current lyrics file will be removed. A copy is archived to the track's version
+            history, so it can be restored from the lyrics editor.
+          </p>
+        )}
+        <Group justify="flex-end" mt="md">
+          <Button variant="subtle" color="gray" size="xs" onClick={() => setSkipTrack(null)}>Cancel</Button>
+          <Button
+            color="red"
+            size="xs"
+            loading={trackStatusMutation.isPending}
+            onClick={() => trackStatusMutation.mutate({ track: skipTrack, status: 'blacklisted' })}
+          >
+            Skip Track
+          </Button>
+        </Group>
+      </Modal>
+
       <CoverSearchModal
         albumId={Number(albumId)}
         opened={coverSearchOpen}
