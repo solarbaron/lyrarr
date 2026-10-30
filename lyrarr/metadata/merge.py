@@ -80,30 +80,30 @@ def merge_provider_results(results, selection_mode='best_score'):
         if r['_content_hash']:
             hash_groups[r['_content_hash']].append(r)
 
-    # Step 3: Mark agreement count and boost scores
+    # Step 3: Mark agreement count and boost scores. Boost every member of a
+    # group *before* picking its representative, so the pick compares like
+    # with like (boosting one member at a time favoured whichever came first —
+    # a plain copy could beat the synced copy of the same lyrics).
+    for group in hash_groups.values():
+        providers_agree = len(set(g.get('_provider', '') for g in group))
+        for g in group:
+            g['providers_agree'] = providers_agree
+            if providers_agree > 1:
+                boost = AGREEMENT_BOOST * (providers_agree - 1)
+                g['score'] = min(1.0, (g.get('score', 0) or 0) + boost)
+
     seen_hashes = set()
     enhanced = []
 
     for r in results:
         h = r['_content_hash']
         if h and h in hash_groups:
-            group = hash_groups[h]
-            providers_agree = len(set(g.get('_provider', '') for g in group))
-            r['providers_agree'] = providers_agree
-
-            # Boost score if multiple providers agree
-            if providers_agree > 1:
-                original_score = r.get('score', 0)
-                boost = AGREEMENT_BOOST * (providers_agree - 1)
-                r['score'] = min(1.0, original_score + boost)
-
             # Only keep the best-scoring entry per hash (de-duplicate)
             if h not in seen_hashes:
                 seen_hashes.add(h)
-                # Pick the best entry from the group
+                group = hash_groups[h]
                 best = max(group, key=lambda x: (x.get('score', 0), 1 if x.get('synced_lyrics') else 0))
-                best['providers_agree'] = providers_agree
-                if providers_agree > 1:
+                if best['providers_agree'] > 1:
                     agreeing_names = sorted(set(g.get('_provider', '?') for g in group))
                     best['agreement_providers'] = agreeing_names
                 enhanced.append(best)
@@ -124,12 +124,12 @@ def merge_provider_results(results, selection_mode='best_score'):
         if not already:
             enhanced.append(comp)
 
-    # Clean up internal keys before returning
+    # Clean up internal hash keys before returning. '_provider' stays: the
+    # download worker attributes the saved lyrics (history, logs) to it.
     for r in enhanced:
         r.pop('_synced_hash', None)
         r.pop('_plain_hash', None)
         r.pop('_content_hash', None)
-        r.pop('_provider', None)
 
     return enhanced
 

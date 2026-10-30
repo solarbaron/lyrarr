@@ -15,14 +15,34 @@ import logging
 import re
 from collections import Counter
 
+from lyrarr.metadata.lrc_repair import LRC_META_TAG, LRC_TIMESTAMP
+
 logger = logging.getLogger(__name__)
 
-# Patterns indicating instrumental content
-_INSTRUMENTAL_MARKERS = re.compile(
-    r'^\s*[\[\(]?\s*(?:instrumental|no lyrics|no vocal|'
+# A line that, on its own, says "this track has no lyrics". Only counts when the
+# whole content is made of such markers (plus section headers): Genius keeps
+# "[Intro]" / "[Outro]" headers in real lyrics, so one marker line among lyric
+# lines means nothing.
+_INSTRUMENTAL_MARKER_LINE = re.compile(
+    r'^\s*[\[\(]?\s*(?:instrumental|no lyrics|no vocals?|'
     r'without vocals?|interlude|intro|outro|skit)\s*[\]\)]?\s*$',
-    re.IGNORECASE | re.MULTILINE
+    re.IGNORECASE
 )
+
+# Section header line ("[Verse 1]", "[Chorus: Artist]"). Parenthesised lines
+# are ad-libs/backing vocals — real lyrics — so they don't count.
+_SECTION_HEADER = re.compile(r'^\s*\[[^\]]*\]\s*$')
+
+# Provider "nothing here" placeholders — not lyrics, and not evidence of an
+# instrumental either (the provider just lacks them).
+_PLACEHOLDER_LINE = re.compile(
+    r'^\s*(?:lyrics?\s+(?:not\s+(?:available|found)|unavailable|coming\s+soon)|'
+    r'no\s+lyrics\s+(?:found|available)|lyrics\s+will\s+be\s+available\s+soon)[.!]*\s*$',
+    re.IGNORECASE
+)
+
+# Musixmatch's free-tier footer must never end up in a saved file.
+_PROVIDER_DISCLAIMER = re.compile(r'This Lyrics is NOT for Commercial use', re.IGNORECASE)
 
 # Patterns indicating an instrumental track *by its title*. These tracks have no
 # lyrics, so any "match" a provider returns is a different (vocal) song — exactly
@@ -49,11 +69,10 @@ def is_instrumental_title(title):
         return False
     return bool(_INSTRUMENTAL_TITLE.search(title))
 
-# LRC timestamp pattern
-_LRC_TS = re.compile(r'^\[\d{1,2}:\d{2}[.:]\d{2,3}\]')
-
-# LRC metadata tag pattern
-_LRC_META = re.compile(r'^\[(?:ar|ti|al|au|length|by|offset|re|ve|id|la):.*\]$')
+# LRC timestamps / metadata tags (shared definitions — [mm:ss] without a
+# fraction and unknown [tool:..] tags included)
+_LRC_TS = LRC_TIMESTAMP
+_LRC_META = LRC_META_TAG
 
 # Garbage character patterns (encoding artifacts)
 _GARBAGE_CHARS = re.compile(r'[ïœãâ]{3,}|\\x[0-9a-f]{2}|&#\d{3,};')
@@ -69,7 +88,7 @@ DUPLICATE_LINE_THRESHOLD = 0.5
 
 
 def validate_lyrics(content, track_title=None, artist_name=None,
-                    duration_ms=None, detected_language=None,
+                    duration_s=None, detected_language=None,
                     artist_language=None):
     """Validate lyrics content quality and return issues found.
 
@@ -77,7 +96,7 @@ def validate_lyrics(content, track_title=None, artist_name=None,
         content: Lyrics text (may include LRC timestamps)
         track_title: Track title for context
         artist_name: Artist name for context
-        duration_ms: Track duration in milliseconds
+        duration_s: Track duration in seconds (TableTracks.duration)
         detected_language: Language detected in the lyrics (ISO 639-1)
         artist_language: Known language for this artist (ISO 639-1)
 
@@ -112,7 +131,7 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     # ------------------------------------------------------------------
     # 1. Instrumental detection (by title or by content)
     # ------------------------------------------------------------------
-    if is_instrumental_title(track_title) or _is_instrumental(content, clean_text, clean_lines):
+    if is_instrumental_title(track_title) or _is_instrumental(clean_lines):
         is_instrumental = True
         issues.append({
             'type': 'instrumental',
@@ -127,10 +146,19 @@ def validate_lyrics(content, track_title=None, artist_name=None,
             'language_mismatch': False,
         }
 
+    metadata_only = _is_metadata_only(content)
+
+    if clean_lines and all(_PLACEHOLDER_LINE.match(line) for line in clean_lines):
+        issues.append({
+            'type': 'placeholder',
+            'severity': 'error',
+            'message': 'Content is a provider placeholder, not lyrics',
+        })
+
     # ------------------------------------------------------------------
-    # 2. Too short / minimal content
+    # 2. Too short / minimal content (metadata-only LRC reports its own error)
     # ------------------------------------------------------------------
-    if len(clean_text) < MIN_LYRICS_LENGTH:
+    if len(clean_text) < MIN_LYRICS_LENGTH and not metadata_only:
         issues.append({
             'type': 'too_short',
             'severity': 'error',
@@ -140,15 +168,28 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     # ------------------------------------------------------------------
     # 3. Truncation detection
     # ------------------------------------------------------------------
-    if duration_ms and duration_ms > 120000:  # Track > 2 minutes
+    try:
+        duration_s = float(duration_s) if duration_s else None
+    except (TypeError, ValueError):
+        duration_s = None
+    if duration_s and duration_s > 120 and not metadata_only:  # Track > 2 minutes
         if line_count < MIN_LINES_LONG_TRACK:
             is_truncated = True
             issues.append({
                 'type': 'truncated',
                 'severity': 'warning',
-                'message': f'Only {line_count} lines for a {duration_ms // 1000}s track — '
+                'message': f'Only {line_count} lines for a {int(duration_s)}s track — '
                            f'lyrics may be truncated (free API tier?)',
             })
+
+    # Musixmatch's commercial-use footer marks a free-tier excerpt
+    if _PROVIDER_DISCLAIMER.search(content):
+        is_truncated = True
+        issues.append({
+            'type': 'provider_disclaimer',
+            'severity': 'error',
+            'message': 'Lyrics contain a provider "not for commercial use" footer (partial excerpt)',
+        })
 
     # Also check for Musixmatch truncation marker
     if '...' in content[-50:] and line_count < 20:
@@ -187,7 +228,7 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     # ------------------------------------------------------------------
     # 6. LRC metadata-only (no actual lyrics lines)
     # ------------------------------------------------------------------
-    if _is_metadata_only(content):
+    if metadata_only:
         issues.append({
             'type': 'metadata_only',
             'severity': 'error',
@@ -232,23 +273,27 @@ def _strip_to_text_lines(content):
         if _LRC_META.match(stripped):
             continue
         # Remove LRC timestamps
-        cleaned = re.sub(r'\[\d{1,2}:\d{2}[.:]\d{2,3}\]\s*', '', stripped).strip()
+        cleaned = _LRC_TS.sub('', stripped).strip()
         if cleaned:
             lines.append(cleaned)
     return lines
 
 
-def _is_instrumental(content, clean_text, clean_lines):
-    """Detect if content indicates an instrumental track."""
-    # Check for explicit instrumental markers
-    if _INSTRUMENTAL_MARKERS.search(content):
-        return True
+def _is_instrumental(clean_lines):
+    """Detect content that only says "instrumental".
 
-    # Very short content with only a marker-like phrase
-    if len(clean_lines) <= 2 and len(clean_text) < 30:
-        return True
-
-    return False
+    True only when there is at least one marker line and every remaining line
+    is a marker or a section header — never for real lyrics that happen to
+    contain an "[Intro]" header. Tiny content alone is not evidence (that's a
+    too_short error, not an instrumental track).
+    """
+    has_marker = False
+    for line in clean_lines:
+        if _INSTRUMENTAL_MARKER_LINE.match(line):
+            has_marker = True
+        elif not _SECTION_HEADER.match(line):
+            return False
+    return has_marker
 
 
 def _is_metadata_only(content):
@@ -264,7 +309,7 @@ def _is_metadata_only(content):
             has_metadata = True
         elif _LRC_TS.match(stripped):
             # Has a timestamp — check if there's text after it
-            text_after = re.sub(r'\[\d{1,2}:\d{2}[.:]\d{2,3}\]\s*', '', stripped).strip()
+            text_after = _LRC_TS.sub('', stripped).strip()
             if text_after:
                 has_lyrics = True
         elif stripped and not stripped.startswith('['):

@@ -82,7 +82,7 @@ class LyricsProvider(ABC):
             track_name: Track/song title
             artist_name: Artist name
             album_name: Album name
-            duration: Track duration in milliseconds (from Lidarr)
+            duration: Track duration in seconds (TableTracks.duration)
             mb_recording_id: MusicBrainz Recording ID (optional)
 
         Returns:
@@ -95,8 +95,16 @@ class LyricsProvider(ABC):
         """
         ...
 
+    # Hard gates: a result failing one is a different recording no matter how
+    # well the title matches ("Hello" by Adele is not "Hello" by Lionel Richie),
+    # so its score is capped at GATE_SCORE_CAP — below the worker's acceptance
+    # floor — and match_details['gate'] names the reason.
+    ARTIST_GATE_MIN = 60          # artist similarity (0-100) required when the query has an artist
+    DURATION_GATE_MAX_S = 10.0    # max |duration difference| in seconds when both are known
+    GATE_SCORE_CAP = 0.3
+
     @staticmethod
-    def score_result(query_title, query_artist, query_duration_ms,
+    def score_result(query_title, query_artist, query_duration_s,
                      result_title, result_artist, result_duration_s=None):
         """Compute a weighted fuzzy match score with component breakdown.
 
@@ -105,10 +113,15 @@ class LyricsProvider(ABC):
 
         Weights: title=0.45, artist=0.35, duration=0.20
 
+        Hard gates (score capped at GATE_SCORE_CAP, 'gate' set):
+          - 'artist_missing': the query has an artist but the result has none
+          - 'artist_mismatch': artist similarity below ARTIST_GATE_MIN
+          - 'duration_mismatch': both durations known and > DURATION_GATE_MAX_S apart
+
         Args:
             query_title: Original track title from library
             query_artist: Original artist name from library
-            query_duration_ms: Track duration in milliseconds (or None)
+            query_duration_s: Track duration in seconds (or None)
             result_title: Title returned by the lyrics provider
             result_artist: Artist returned by the lyrics provider
             result_duration_s: Duration in seconds from provider (or None)
@@ -124,6 +137,8 @@ class LyricsProvider(ABC):
                 artist_query: str (normalized query artist)
                 artist_result: str (normalized result artist)
                 duration_diff: float (difference in seconds, or None)
+                raw_score: float (composite before any gate cap)
+                gate: str or None (reason the result failed a hard gate)
         """
         # Normalize inputs
         q_title = normalize_title(query_title or '')
@@ -177,11 +192,10 @@ class LyricsProvider(ABC):
 
         # --- Duration Score ---
         duration_diff = None
-        if query_duration_ms is not None and result_duration_s is not None:
+        if query_duration_s and result_duration_s:
             try:
-                q_dur_s = int(query_duration_ms) / 1000 if int(query_duration_ms) > 1000 else int(query_duration_ms)
-                r_dur_s = float(result_duration_s)
-                duration_diff = abs(q_dur_s - r_dur_s)
+                # Both sides are seconds — no unit guessing.
+                duration_diff = abs(float(query_duration_s) - float(result_duration_s))
                 # 10% penalty per second of difference, floored at 0
                 duration_score = max(0, int(100 - duration_diff * 10))
             except (ValueError, TypeError):
@@ -192,8 +206,20 @@ class LyricsProvider(ABC):
         # --- Composite ---
         composite = (title_score * 0.45 + artist_score * 0.35 + duration_score * 0.20) / 100.0
 
+        # --- Hard gates ---
+        gate = None
+        if q_artist and not r_artist:
+            gate = 'artist_missing'
+        elif q_artist and artist_score < LyricsProvider.ARTIST_GATE_MIN:
+            gate = 'artist_mismatch'
+        elif duration_diff is not None and duration_diff > LyricsProvider.DURATION_GATE_MAX_S:
+            gate = 'duration_mismatch'
+        score = min(composite, LyricsProvider.GATE_SCORE_CAP) if gate else composite
+
         return {
-            'score': round(composite, 3),
+            'score': round(score, 3),
+            'raw_score': round(composite, 3),
+            'gate': gate,
             'title_score': title_score,
             'artist_score': artist_score,
             'duration_score': duration_score,

@@ -6,7 +6,7 @@ import requests
 from lyrarr import __version__
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
-from lyrarr.metadata.normalize import clean_for_search, duration_ms_to_seconds, normalize_title
+from lyrarr.metadata.normalize import clean_for_search, duration_seconds, normalize_title
 from lyrarr.metadata.provider_utils import (
     ProviderTransientError,
     is_transient_status,
@@ -63,7 +63,7 @@ class LRCLIBProvider(LyricsProvider):
             return []
 
         meta = clean_for_search(track_name, artist_name or '')
-        duration_s = duration_ms_to_seconds(duration)
+        duration_s = duration_seconds(duration)
         results = []
         seen_ids = set()
 
@@ -220,9 +220,17 @@ class LRCLIBProvider(LyricsProvider):
                         exact.get('artist_name', ''),
                         exact.get('duration')
                     )
+                    match['mb_matched'] = True
+                    # The recording was identified via its MusicBrainz ID, so
+                    # an artist-spelling gate (library "Beatles" vs MB "The
+                    # Beatles") isn't evidence of a wrong song — restore the
+                    # raw score. A duration gate still stands: a different
+                    # length means a different edit, and the sync would be off.
+                    if match.get('gate') in ('artist_mismatch', 'artist_missing'):
+                        match['gate'] = None
+                        match['score'] = match['raw_score']
                     exact['score'] = match['score']
                     exact['match_details'] = match
-                    exact['match_details']['mb_matched'] = True
                     results.append(exact)
                     if exact.get('instrumental'):
                         return results

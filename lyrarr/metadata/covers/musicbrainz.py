@@ -4,6 +4,8 @@ import logging
 import requests
 
 from lyrarr.metadata.base import CoverProvider
+from lyrarr.metadata.cover_fetch import safe_download
+from lyrarr.metadata.provider_utils import is_transient_status, note_transient_error
 
 logger = logging.getLogger(__name__)
 
@@ -73,18 +75,15 @@ class MusicBrainzCoverProvider(CoverProvider):
             elif response.status_code == 404:
                 logger.debug(f"No cover art found at {url}")
             else:
+                if is_transient_status(response.status_code):
+                    note_transient_error()
                 logger.warning(f"CAA returned {response.status_code} for {url}")
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.error(f"MusicBrainz cover art fetch error: {e}")
 
         return results
 
     def download(self, url):
-        """Download cover art image from URL. Returns bytes or None."""
-        try:
-            response = requests.get(url, timeout=30)
-            if response.status_code == 200:
-                return response.content
-        except requests.exceptions.RequestException as e:
-            logger.error(f"MusicBrainz cover art download error: {e}")
-        return None
+        """Download cover art image from URL (allow-listed hosts only). Returns bytes or None."""
+        return safe_download(url, self.name)

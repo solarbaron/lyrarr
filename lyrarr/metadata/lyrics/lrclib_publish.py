@@ -24,6 +24,9 @@ _TIMEOUT = (5, 15)
 # a legitimate challenge essentially never hits this.
 _MAX_ATTEMPTS = 400_000_000
 
+# Shortest track duration (seconds) accepted for publishing.
+_MIN_PUBLISH_DURATION_S = 5
+
 
 class LrclibPublishError(Exception):
     """Publishing to LRCLIB failed; the message is user-presentable."""
@@ -76,6 +79,16 @@ def publish_lyrics(track_name, artist_name, album_name, duration_s,
         raise LrclibPublishError('Track and artist name are required to publish')
     if not duration_s:
         raise LrclibPublishError('Track duration is required to publish')
+    try:
+        duration_s = float(duration_s)
+    except (TypeError, ValueError):
+        raise LrclibPublishError('Track duration must be a number of seconds') from None
+    # Sanity bound: LRCLIB matches on duration (seconds), so a value that was
+    # divided by 1000 one time too many would publish under a bogus length.
+    if duration_s < _MIN_PUBLISH_DURATION_S:
+        raise LrclibPublishError(
+            f'Track duration {duration_s:g}s is implausibly short — refusing to publish'
+        )
 
     prefix, target = _request_challenge()
     logger.info(f"Solving LRCLIB publish challenge for '{track_name}'...")

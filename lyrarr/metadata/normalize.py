@@ -50,12 +50,17 @@ _NOISE_TERMS = re.compile(
     re.IGNORECASE
 )
 
-# Featuring patterns — captures the featured artist(s)
+# Featuring patterns — captures the featured artist(s). Two forms:
+#   - bracketed: "(feat. X)", "[ft. X]", "(with X)" — "with" only counts inside
+#     brackets, so titles like "Stay With Me" keep their words;
+#   - bare: " feat. X" / " featuring X" at the end, which needs a preceding
+#     space so "Left", "Lift" or "Soft Cell" aren't cut at their "ft".
+# extract_featuring reads group(1) or group(2).
 _FEAT_PATTERN = re.compile(
-    r'\s*[\(\[]?\s*'
-    r'(?:feat\.?|ft\.?|featuring|with)\s+'
-    r'([^\)\]]+?)'
-    r'\s*[\)\]]?\s*$',
+    r'\s*(?:'
+    r'[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+?)\s*[\)\]]'
+    r'|(?<=\s)(?:feat\.?|ft\.?|featuring)\s+([^\(\)\[\]]+?)'
+    r')\s*$',
     re.IGNORECASE
 )
 
@@ -77,8 +82,9 @@ _STRIP_PUNCTUATION = re.compile(r'[!@#$%^*()_+=\[\]{};:"|\\<>?/~`]')
 # Collapse whitespace
 _MULTI_SPACE = re.compile(r'\s{2,}')
 
-# Quotation marks to normalize
-_QUOTES = re.compile(r'[''""«»„]')
+# Quotation marks to normalize (curly/typographic quotes, primes, acute and
+# grave accents used as apostrophes) — all fold to a plain apostrophe.
+_QUOTES = re.compile('[\u2018\u2019\u201a\u201b\u2032\u00b4`\u201c\u201d\u201e\u201f"\u00ab\u00bb]')
 
 
 # ---------- Core Functions ----------
@@ -221,7 +227,7 @@ def extract_featuring(title: str) -> tuple:
     # Try end-of-title pattern first: "Title (feat. X)"
     match = _FEAT_PATTERN.search(title)
     if match:
-        feat_str = match.group(1).strip()
+        feat_str = (match.group(1) or match.group(2)).strip()
         clean_title = title[:match.start()].strip()
         # Split featured artists by separators
         feat_artists = _ARTIST_SEPARATORS.split(feat_str)
@@ -330,33 +336,26 @@ def clean_for_search(title: str, artist: str) -> dict:
     }
 
 
-def duration_ms_to_seconds(duration) -> int | None:
-    """Safely convert a track duration to seconds.
+def duration_seconds(duration) -> int | None:
+    """Safely coerce a track duration to whole seconds.
 
-    Handles the ambiguity of Lidarr's duration field which stores
-    values in milliseconds (typically > 1000).
+    Durations are seconds everywhere in lyrarr (Lidarr sync converts its
+    milliseconds once, at import). No unit guessing: a 1200 s track is 1200 s.
 
     Args:
-        duration: Duration value (int or None), expected in milliseconds
+        duration: Duration in seconds (int/float/str or None)
 
     Returns:
-        Duration in whole seconds, or None
+        Duration in whole seconds, or None when missing/invalid/non-positive
     """
     if duration is None:
         return None
 
     try:
-        dur = int(duration)
+        dur = int(round(float(duration)))
     except (ValueError, TypeError):
         return None
 
     if dur <= 0:
         return None
-
-    # Lidarr stores duration in milliseconds
-    # Anything > 1000 is almost certainly ms (a 1-second track is implausible)
-    if dur > 1000:
-        return dur // 1000
-
-    # Already in seconds (edge case / manual input)
     return dur

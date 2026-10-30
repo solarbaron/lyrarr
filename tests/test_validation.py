@@ -37,13 +37,13 @@ class TestValidateLyrics:
         assert r["valid"] is False
 
     def test_good_lyrics_pass(self):
-        r = validate_lyrics(GOOD_LYRICS, duration_ms=200000)
+        r = validate_lyrics(GOOD_LYRICS, duration_s=200)
         assert r["valid"] is True
         assert r["is_instrumental"] is False
 
     def test_truncation_for_long_track(self):
         # Two short lines for a 4-minute track => likely truncated.
-        r = validate_lyrics("First line here\nSecond line here also", duration_ms=240000)
+        r = validate_lyrics("First line here\nSecond line here also", duration_s=240)
         assert r["is_truncated"] is True
         assert any(i["type"] == "truncated" for i in r["issues"])
 
@@ -54,7 +54,7 @@ class TestValidateLyrics:
 
     def test_language_mismatch_flagged(self):
         r = validate_lyrics(
-            GOOD_LYRICS, duration_ms=200000,
+            GOOD_LYRICS, duration_s=200,
             detected_language="ja", artist_language="en",
         )
         assert r["language_mismatch"] is True
@@ -89,7 +89,7 @@ class TestInstrumentalTitle:
     def test_validate_lyrics_marks_instrumental_by_title(self):
         # Even with real-looking lyrics content, an instrumental title wins so a
         # wrong vocal-version match isn't saved.
-        r = validate_lyrics(GOOD_LYRICS, track_title="Song (Instrumental)", duration_ms=200000)
+        r = validate_lyrics(GOOD_LYRICS, track_title="Song (Instrumental)", duration_s=200)
         assert r["is_instrumental"] is True
         assert r["valid"] is True
 

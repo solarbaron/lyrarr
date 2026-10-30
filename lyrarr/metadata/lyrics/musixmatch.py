@@ -11,7 +11,8 @@ import requests
 
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
-from lyrarr.metadata.normalize import clean_for_search, duration_ms_to_seconds
+from lyrarr.metadata.normalize import clean_for_search, duration_seconds
+from lyrarr.metadata.provider_utils import ProviderTransientError, is_transient_status, note_transient_error
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class MusixmatchProvider(LyricsProvider):
         result_artist = track_info.get('artist_name', '')
 
         # Step 3: Get plain lyrics
-        plain_lyrics = self._get_lyrics(mxm_track_id)
+        plain_lyrics, plain_truncated = self._get_lyrics(mxm_track_id)
 
         # Step 4: Try to get synced lyrics (subtitle)
         synced_lyrics = self._get_subtitle(mxm_track_id)
@@ -87,6 +88,8 @@ class MusixmatchProvider(LyricsProvider):
             results.append({
                 'synced_lyrics': synced_lyrics,
                 'plain_lyrics': plain_lyrics,
+                # Free-tier excerpt: the plain text is only part of the song.
+                'plain_truncated': plain_truncated,
                 'provider': self.name,
                 'score': match['score'],
                 'match_details': match,
@@ -96,15 +99,64 @@ class MusixmatchProvider(LyricsProvider):
 
         return results
 
+    def _api_get(self, endpoint, params):
+        """GET a Musixmatch endpoint and return its message.body dict, or None.
+
+        Musixmatch reports most failures inside an HTTP 200 envelope
+        (message.header.status_code) with body "" — never assume body is a
+        dict. Rate limits / quota (402, 429) and server errors are transient:
+        they're flagged and raised so the worker retries soon and the health
+        tracker sees the failure, instead of reading as "no lyrics".
+        """
+        try:
+            response = requests.get(
+                f"{MUSIXMATCH_BASE}/{endpoint}",
+                params={'apikey': self._api_key, **params},
+                timeout=15
+            )
+        except requests.exceptions.RequestException as e:
+            note_transient_error()
+            raise ProviderTransientError(f"Musixmatch {endpoint} error: {e}") from e
+
+        if is_transient_status(response.status_code):
+            note_transient_error()
+            raise ProviderTransientError(f"Musixmatch {endpoint} returned HTTP {response.status_code}")
+        if response.status_code != 200:
+            logger.debug(f"Musixmatch {endpoint} returned HTTP {response.status_code}")
+            return None
+
+        try:
+            data = response.json()
+        except ValueError:
+            logger.debug(f"Musixmatch {endpoint} returned a non-JSON body")
+            return None
+        message = data.get('message') if isinstance(data, dict) else None
+        if not isinstance(message, dict):
+            return None
+        header = message.get('header') if isinstance(message.get('header'), dict) else {}
+        status = header.get('status_code', 200)
+        try:
+            status = int(status)
+        except (TypeError, ValueError):
+            status = 200
+        if status == 402 or is_transient_status(status):
+            # 402 = daily quota exhausted; resets on its own.
+            note_transient_error()
+            raise ProviderTransientError(f"Musixmatch {endpoint} status {status}")
+        if status != 200:
+            logger.debug(f"Musixmatch {endpoint} status {status}")
+            return None
+        body = message.get('body')
+        return body if isinstance(body, dict) else None
+
     def _find_best_track(self, title, artist=None, album=None,
-                         duration_ms=None, orig_title=None, orig_artist=None):
+                         duration_s=None, orig_title=None, orig_artist=None):
         """Search for a track and return the best-scoring match info.
 
         Instead of blindly returning track_list[0], we score all results
         and pick the best match.
         """
         params = {
-            'apikey': self._api_key,
             'q_track': title,
             's_track_rating': 'desc',
             'page_size': 5,
@@ -114,99 +166,83 @@ class MusixmatchProvider(LyricsProvider):
         if album:
             params['q_album'] = album
 
-        duration_s = duration_ms_to_seconds(duration_ms)
+        duration_s = duration_seconds(duration_s)
         if duration_s:
             params['f_track_length'] = duration_s
 
-        try:
-            response = requests.get(
-                f"{MUSIXMATCH_BASE}/track.search",
-                params=params,
-                timeout=15
+        body = self._api_get('track.search', params)
+        track_list = (body or {}).get('track_list') or []
+        if not track_list:
+            return None
+
+        # Score all results and pick the best
+        best = None
+        best_score = -1
+
+        for item in track_list:
+            track = (item or {}).get('track') or {}
+            result_title = track.get('track_name', '')
+            result_artist = track.get('artist_name', '')
+            result_duration = track.get('track_length')  # seconds
+
+            match = self.score_result(
+                orig_title or title, orig_artist or artist, duration_s,
+                result_title, result_artist, result_duration
             )
-            if response.status_code == 200:
-                data = response.json()
-                body = data.get('message', {}).get('body', {})
-                track_list = body.get('track_list', [])
 
-                if not track_list:
-                    return None
+            if match['score'] > best_score:
+                best_score = match['score']
+                best = {
+                    'track_id': track.get('track_id'),
+                    'track_name': result_title,
+                    'artist_name': result_artist,
+                    'duration': result_duration,
+                }
 
-                # Score all results and pick the best
-                best = None
-                best_score = -1
-
-                for item in track_list:
-                    track = item.get('track', {})
-                    result_title = track.get('track_name', '')
-                    result_artist = track.get('artist_name', '')
-                    result_duration = track.get('track_length')
-
-                    match = self.score_result(
-                        orig_title or title, orig_artist or artist, duration_ms,
-                        result_title, result_artist, result_duration
-                    )
-
-                    if match['score'] > best_score:
-                        best_score = match['score']
-                        best = {
-                            'track_id': track.get('track_id'),
-                            'track_name': result_title,
-                            'artist_name': result_artist,
-                            'duration': result_duration,
-                        }
-
-                return best
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Musixmatch track search error: {e}")
-
-        return None
+        return best
 
     def _get_lyrics(self, track_id):
-        """Get plain lyrics for a track by its Musixmatch ID."""
-        try:
-            response = requests.get(
-                f"{MUSIXMATCH_BASE}/track.lyrics.get",
-                params={'apikey': self._api_key, 'track_id': track_id},
-                timeout=15
-            )
-            if response.status_code == 200:
-                data = response.json()
-                body = data.get('message', {}).get('body', {})
-                lyrics = body.get('lyrics', {})
-                lyrics_body = lyrics.get('lyrics_body', '')
-                if lyrics_body:
-                    # Musixmatch free tier includes a disclaimer at the end — remove it
-                    disclaimer_marker = '******* This Lyrics is NOT'
-                    if disclaimer_marker in lyrics_body:
-                        lyrics_body = lyrics_body[:lyrics_body.index(disclaimer_marker)].strip()
-                    return lyrics_body if lyrics_body else None
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Musixmatch lyrics fetch error: {e}")
+        """Get plain lyrics for a track by its Musixmatch ID.
 
-        return None
+        Returns (lyrics, truncated). The free tier only returns ~30% of the
+        lyrics, ending in "..." followed by a "NOT for Commercial use" footer;
+        the footer is always stripped, and truncated=True tells the worker the
+        excerpt must never be saved as the song's lyrics.
+        """
+        body = self._api_get('track.lyrics.get', {'track_id': track_id})
+        lyrics = (body or {}).get('lyrics')
+        lyrics_body = (lyrics.get('lyrics_body') or '') if isinstance(lyrics, dict) else ''
+        return split_musixmatch_disclaimer(lyrics_body)
 
     def _get_subtitle(self, track_id):
         """Get synced lyrics (subtitle) for a track by its Musixmatch ID."""
-        try:
-            response = requests.get(
-                f"{MUSIXMATCH_BASE}/track.subtitle.get",
-                params={
-                    'apikey': self._api_key,
-                    'track_id': track_id,
-                    'subtitle_format': 'lrc',
-                },
-                timeout=15
-            )
-            if response.status_code == 200:
-                data = response.json()
-                body = data.get('message', {}).get('body', {})
-                subtitle = body.get('subtitle', {})
-                subtitle_body = subtitle.get('subtitle_body', '')
-                if subtitle_body:
-                    return subtitle_body
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Musixmatch subtitle fetch error: {e}")
+        body = self._api_get('track.subtitle.get', {
+            'track_id': track_id,
+            'subtitle_format': 'lrc',
+        })
+        subtitle = (body or {}).get('subtitle')
+        subtitle_body = subtitle.get('subtitle_body') if isinstance(subtitle, dict) else None
+        if subtitle_body:
+            subtitle_body, _ = split_musixmatch_disclaimer(subtitle_body)
+        return subtitle_body or None
 
-        return None
+
+_DISCLAIMER_MARKER = '******* This Lyrics is NOT'
+
+
+def split_musixmatch_disclaimer(text):
+    """Strip Musixmatch's commercial-use footer. Returns (text or None, truncated).
+
+    truncated is True when the footer was present and the remaining text ends
+    in an ellipsis — the free tier's partial-lyrics signature.
+    """
+    if not text:
+        return None, False
+    truncated = False
+    if _DISCLAIMER_MARKER in text:
+        text = text[:text.index(_DISCLAIMER_MARKER)].rstrip()
+        if text.endswith(('...', '…')):
+            truncated = True
+            text = text.rstrip('.…').rstrip()
+    text = text.strip()
+    return (text or None), truncated

@@ -12,10 +12,30 @@ import requests
 
 from lyrarr.metadata.base import LyricsProvider
 from lyrarr.metadata.normalize import clean_for_search
+from lyrarr.metadata.provider_utils import ProviderTransientError, is_transient_status, note_transient_error
 
 logger = logging.getLogger(__name__)
 
 NETEASE_API_BASE = 'https://music.163.com'
+
+# NetEase answers HTTP 200 with a JSON "code" for throttling / anti-abuse
+# (-460 "cheating", -462 verification required, 405 too frequent).
+_THROTTLE_CODES = {-460, -462, 405, 429, 503}
+
+
+def _json(response):
+    """Response JSON as a dict ({} for non-JSON / non-object bodies)."""
+    try:
+        data = response.json()
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _raise_transient(what):
+    """Flag the current search as transiently failed and abort the cascade."""
+    note_transient_error()
+    raise ProviderTransientError(f"NetEase {what}")
 
 
 class NetEaseProvider(LyricsProvider):
@@ -97,7 +117,9 @@ class NetEaseProvider(LyricsProvider):
         """Search for a song and return the best-scoring match.
 
         Uses fuzzy matching instead of substring checks to find the
-        best match from search results.
+        best match from search results. Timeouts, 429/5xx and NetEase's
+        throttle codes raise ProviderTransientError (flagged as transient) so
+        they don't read as "no lyrics exist".
         """
         query = f"{artist_clean} {title_clean}".strip() if artist_clean else title_clean
         if not query:
@@ -115,49 +137,55 @@ class NetEaseProvider(LyricsProvider):
                 headers=self._headers,
                 timeout=15
             )
-            if response.status_code == 200:
-                data = response.json()
-                songs = data.get('result', {}).get('songs', [])
-
-                if not songs:
-                    return None
-
-                # Score all results and pick the best
-                best = None
-                best_score = -1
-
-                for song in songs:
-                    song_name = song.get('name', '')
-                    artists = [a.get('name', '') for a in song.get('artists', [])]
-                    combined_artist = ', '.join(artists) if artists else ''
-                    # NetEase duration is in milliseconds
-                    song_duration_ms = song.get('duration')
-                    song_duration_s = song_duration_ms / 1000 if song_duration_ms else None
-
-                    match = self.score_result(
-                        orig_title or title_clean, orig_artist or artist_clean,
-                        orig_duration,
-                        song_name, combined_artist,
-                        song_duration_s
-                    )
-
-                    if match['score'] > best_score:
-                        best_score = match['score']
-                        best = {
-                            'id': song.get('id'),
-                            'name': song_name,
-                            'artist_name': combined_artist,
-                            'duration': song_duration_s,
-                            'match_score': match['score'],
-                        }
-
-                # Only return if score is reasonable (> 0.3)
-                if best and best_score > 0.3:
-                    return best
-
         except requests.exceptions.RequestException as e:
-            logger.error(f"NetEase search error: {e}")
+            _raise_transient(f"search error: {e}")
 
+        if is_transient_status(response.status_code):
+            _raise_transient(f"search returned HTTP {response.status_code}")
+        if response.status_code != 200:
+            logger.debug(f"NetEase search returned HTTP {response.status_code}")
+            return None
+
+        data = _json(response)
+        if data.get('code') in _THROTTLE_CODES:
+            _raise_transient(f"search throttled (code {data.get('code')})")
+        songs = (data.get('result') or {}).get('songs') or []
+        if not songs:
+            return None
+
+        # Score all results and pick the best
+        best = None
+        best_score = -1
+
+        for song in songs:
+            song_name = song.get('name', '')
+            artists = [a.get('name', '') for a in (song.get('artists') or [])]
+            combined_artist = ', '.join(artists) if artists else ''
+            # NetEase duration is in milliseconds
+            song_duration_ms = song.get('duration')
+            song_duration_s = song_duration_ms / 1000 if song_duration_ms else None
+
+            match = self.score_result(
+                orig_title or title_clean, orig_artist or artist_clean,
+                orig_duration,
+                song_name, combined_artist,
+                song_duration_s
+            )
+
+            if match['score'] > best_score:
+                best_score = match['score']
+                best = {
+                    'id': song.get('id'),
+                    'name': song_name,
+                    'artist_name': combined_artist,
+                    'duration': song_duration_s,
+                    'match_score': match['score'],
+                }
+
+        # Only return if score is reasonable (> 0.3; gate-failed results are
+        # capped at 0.3 so they never come back)
+        if best and best_score > 0.3:
+            return best
         return None
 
     def _get_lyrics(self, song_id):
@@ -174,38 +202,42 @@ class NetEaseProvider(LyricsProvider):
                 headers=self._headers,
                 timeout=15
             )
-            if response.status_code == 200:
-                data = response.json()
-
-                # lrc = synced lyrics in LRC format
-                lrc_data = data.get('lrc', {}).get('lyric', '')
-
-                # tlyric = translated lyrics (often English translations)
-                # klyric = karaoke lyrics (word-level sync)
-                # We use lrc as our primary source
-
-                synced_lyrics = None
-                plain_lyrics = None
-
-                if lrc_data and self._is_valid_lrc(lrc_data):
-                    synced_lyrics = lrc_data
-                    # Also extract plain lyrics from LRC
-                    plain_lyrics = self._lrc_to_plain(lrc_data)
-                elif lrc_data:
-                    # No timestamps, treat as plain
-                    plain_lyrics = lrc_data
-
-                if synced_lyrics or plain_lyrics:
-                    return {
-                        'synced_lyrics': synced_lyrics,
-                        'plain_lyrics': plain_lyrics,
-                        'provider': self.name,
-                        'score': 0.0,  # Will be replaced by computed score
-                    }
-
         except requests.exceptions.RequestException as e:
-            logger.error(f"NetEase lyrics fetch error: {e}")
+            _raise_transient(f"lyrics fetch error: {e}")
 
+        if is_transient_status(response.status_code):
+            _raise_transient(f"lyrics fetch returned HTTP {response.status_code}")
+        if response.status_code != 200:
+            return None
+
+        data = _json(response)
+        if data.get('code') in _THROTTLE_CODES:
+            _raise_transient(f"lyrics fetch throttled (code {data.get('code')})")
+
+        # lrc = synced lyrics in LRC format
+        # tlyric = translated lyrics (often English translations)
+        # klyric = karaoke lyrics (word-level sync)
+        # We use lrc as our primary source
+        lrc_data = (data.get('lrc') or {}).get('lyric') or ''
+
+        synced_lyrics = None
+        plain_lyrics = None
+
+        if lrc_data and self._is_valid_lrc(lrc_data):
+            synced_lyrics = lrc_data
+            # Also extract plain lyrics from LRC
+            plain_lyrics = self._lrc_to_plain(lrc_data)
+        elif lrc_data:
+            # No timestamps, treat as plain
+            plain_lyrics = lrc_data
+
+        if synced_lyrics or plain_lyrics:
+            return {
+                'synced_lyrics': synced_lyrics,
+                'plain_lyrics': plain_lyrics,
+                'provider': self.name,
+                'score': 0.0,  # Will be replaced by computed score
+            }
         return None
 
     def _is_valid_lrc(self, lrc_text):

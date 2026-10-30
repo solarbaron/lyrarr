@@ -31,6 +31,7 @@ def search_cover_art(album):
                 kwargs['mb_release_group_id'] = album.get('mbId')
             elif provider_name == 'fanart':
                 kwargs['mb_artist_id'] = album.get('artistMbId')
+                kwargs['mb_album_id'] = album.get('mbId')
             else:
                 # Deezer, iTunes, TheAudioDB use artist + album name search
                 kwargs['artist_name'] = album.get('artistName')
@@ -81,8 +82,18 @@ def search_lyrics(track):
     return results
 
 
+def album_track_paths(album_id):
+    """File paths of an album's tracks (for embedding into every disc folder)."""
+    rows = database.execute(
+        select(TableTracks.path).where(TableTracks.albumId == album_id)
+    ).scalars().all()
+    return [p for p in rows if p]
+
+
 def save_cover_art(album_id, image_data, provider_name):
-    """Save cover art to disk for an album."""
+    """Save cover art to disk for an album (manual pick — replaces the embedded front cover)."""
+    from lyrarr.metadata.cover_fetch import sniff_image
+
     album = database.execute(
         select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
     ).scalars().first()
@@ -91,9 +102,15 @@ def save_cover_art(album_id, image_data, provider_name):
         logger.error(f"Album {album_id} not found or has no path")
         return False
 
+    sniffed = sniff_image(image_data)
+    if not sniffed:
+        logger.error(f"Cover art for album {album_id} is not a JPEG/PNG/WebP/GIF image")
+        return False
+
     try:
         filename = settings.metadata.covers.folder_art_filename
-        filepath = os.path.join(album.path, f"{filename}.jpg")
+        # Extension from the actual bytes, so a PNG isn't saved as .jpg
+        filepath = os.path.join(album.path, f"{filename}.{sniffed[0]}")
 
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -136,7 +153,8 @@ def save_cover_art(album_id, image_data, provider_name):
                     select(TableProfiles).where(TableProfiles.is_default == True)
                 ).scalars().first()
             if profile and profile.embed_cover_art:
-                embed_cover_in_files(album.path, image_data, profile.cover_format or 'jpg')
+                embed_cover_in_files(album.path, image_data, sniffed[0],
+                                     track_paths=album_track_paths(album_id), overwrite=True)
         except Exception as e:
             logger.error(f"Error embedding cover art for album {album_id}: {e}")
 
@@ -147,7 +165,7 @@ def save_cover_art(album_id, image_data, provider_name):
         return False
 
 
-def save_lyrics(track_id, lyrics_data, provider_name):
+def save_lyrics(track_id, lyrics_data, provider_name, source='manual'):
     """Save lyrics to disk as .lrc for a track (manual/interactive path).
 
     Thin wrapper over the shared persist path so manual saves, uploads, and the
@@ -169,7 +187,7 @@ def save_lyrics(track_id, lyrics_data, provider_name):
     if not content:
         return False
 
-    result = persist_lyrics(track, content, provider_name, detect_lang=True)
+    result = persist_lyrics(track, content, provider_name, source=source, detect_lang=True)
     if not result:
         return False
 
@@ -248,7 +266,10 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
     try:
         translator = get_translator(target_lang)
 
-        lrc_ts = re.compile(r'(\[\d{1,2}:\d{2}[.:]\d{2,3}\])\s*(.*)')
+        from lyrarr.metadata.lrc_repair import LRC_META_TAG
+
+        # One or more leading timestamps (compressed LRC shares a line).
+        lrc_ts = re.compile(r'((?:\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\])+)\s*(.*)')
 
         # Parse each line into (tag, text). tag is the LRC timestamp ('' for
         # plain lyrics); text is the lyric to translate ('' for blank lines).
@@ -256,7 +277,9 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
         for line in content.split('\n'):
             stripped = line.strip()
             m = lrc_ts.match(stripped)
-            if m:
+            if LRC_META_TAG.match(stripped):
+                parsed.append((stripped, ''))  # [ar:..]/[ti:..] tag — keep, don't translate
+            elif m:
                 parsed.append((m.group(1), m.group(2)))
             elif stripped:
                 parsed.append(('', stripped))

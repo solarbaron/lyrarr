@@ -3,7 +3,7 @@
 
 from lyrarr.metadata.normalize import (
     clean_for_search,
-    duration_ms_to_seconds,
+    duration_seconds,
     extract_featuring,
     get_primary_artist,
     normalize_artist,
@@ -99,20 +99,24 @@ class TestCleanForSearch:
         assert len(meta["title_variants"]) == len(set(meta["title_variants"]))
 
 
-class TestDurationMsToSeconds:
-    def test_milliseconds(self):
-        assert duration_ms_to_seconds(180000) == 180
+class TestDurationSeconds:
+    def test_seconds_pass_through(self):
+        assert duration_seconds(180) == 180
 
-    def test_already_seconds(self):
-        # values <= 1000 are treated as already-seconds (edge case)
-        assert duration_ms_to_seconds(200) == 200
+    def test_long_tracks_are_not_mistaken_for_ms(self):
+        # A 20-minute track is 1200 s — the old ">1000 means ms" heuristic made it 1 s.
+        assert duration_seconds(1200) == 1200
+        assert duration_seconds(3600) == 3600
+
+    def test_float_rounds(self):
+        assert duration_seconds(245.6) == 246
 
     def test_none(self):
-        assert duration_ms_to_seconds(None) is None
+        assert duration_seconds(None) is None
 
     def test_zero_and_negative(self):
-        assert duration_ms_to_seconds(0) is None
-        assert duration_ms_to_seconds(-5) is None
+        assert duration_seconds(0) is None
+        assert duration_seconds(-5) is None
 
     def test_non_numeric(self):
-        assert duration_ms_to_seconds("abc") is None
+        assert duration_seconds("abc") is None
