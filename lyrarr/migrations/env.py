@@ -3,6 +3,7 @@ Alembic migration environment for Lyrarr.
 Uses the same database URL and models as the main application.
 """
 
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -10,9 +11,17 @@ from alembic import context
 # Alembic Config object
 config = context.config
 
-# Interpret the config file for Python logging
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Interpret the config file for Python logging — only for the standalone
+# `alembic` CLI. When lyrarr runs Alembic in-process (init_db stamps the
+# database) the app's logging is already configured; fileConfig would replace
+# its handlers, drop the root level to WARNING and disable every existing
+# logger for the rest of the process.
+if (
+    config.config_file_name is not None
+    and config.attributes.get('configure_logger', True)
+    and not logging.getLogger().handlers
+):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Import the app's models metadata for autogenerate
 import os

@@ -1,13 +1,17 @@
 {
   "name": "lyrarr-frontend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Lyrarr - Lidarr Companion for Music Metadata",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "npm run check",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "npm run check:themes && npm run check:colors",
+    "check:themes": "node --experimental-strip-types scripts/check-themes.mjs",
+    "check:colors": "node scripts/check-colors.mjs"
   },
   "dependencies": {
     "@mantine/core": "^8.3.9",

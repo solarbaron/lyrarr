@@ -10,6 +10,8 @@ import logging
 import requests
 
 from lyrarr.metadata.base import CoverProvider
+from lyrarr.metadata.cover_fetch import safe_download
+from lyrarr.metadata.provider_utils import is_transient_status, note_transient_error
 
 logger = logging.getLogger(__name__)
 
@@ -64,18 +66,15 @@ class ITunesCoverProvider(CoverProvider):
                             'artist': item.get('artistName', ''),
                         })
             else:
+                if is_transient_status(response.status_code):
+                    note_transient_error()
                 logger.warning(f"iTunes API returned {response.status_code}")
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.error(f"iTunes cover search error: {e}")
 
         return results
 
     def download(self, url):
-        """Download cover art image from URL. Returns bytes or None."""
-        try:
-            response = requests.get(url, timeout=30)
-            if response.status_code == 200:
-                return response.content
-        except requests.exceptions.RequestException as e:
-            logger.error(f"iTunes cover download error: {e}")
-        return None
+        """Download cover art image from URL (allow-listed hosts only). Returns bytes or None."""
+        return safe_download(url, self.name)

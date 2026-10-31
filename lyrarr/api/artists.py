@@ -3,6 +3,7 @@ from flask import request
 from flask_restx import Namespace, Resource
 
 from lyrarr.app.database import TableArtists, TableProfiles, database, func, select, update
+from lyrarr.utilities.pagination import page_params
 
 api_ns_artists = Namespace('artists', description='Artist operations')
 
@@ -11,8 +12,7 @@ api_ns_artists = Namespace('artists', description='Artist operations')
 class ArtistList(Resource):
     def get(self):
         """List all artists with pagination, search, sort, and filter."""
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 25, type=int)
+        page, page_size = page_params(25)
         search = request.args.get('search', '', type=str)
         sort_by = request.args.get('sortBy', 'name', type=str)
         sort_dir = request.args.get('sortDir', 'asc', type=str)
@@ -39,12 +39,19 @@ class ArtistList(Resource):
 
         total = database.execute(count_query).scalar()
 
-        # Sorting
-        sort_col = TableArtists.sortName if sort_by == 'name' else TableArtists.sortName
+        # Sorting (sortName can be blank for artists Lidarr sent without one)
+        name_col = func.lower(func.coalesce(func.nullif(TableArtists.sortName, ''), TableArtists.name))
+        sort_map = {
+            'name': name_col,
+            'sortName': name_col,
+            'added': TableArtists.created_at_timestamp,
+            'monitored': TableArtists.monitored,
+        }
+        sort_col = sort_map.get(sort_by, name_col)
         if sort_dir == 'desc':
-            query = query.order_by(sort_col.desc())
+            query = query.order_by(sort_col.desc(), name_col)
         else:
-            query = query.order_by(sort_col)
+            query = query.order_by(sort_col, name_col)
 
         query = query.offset((page - 1) * page_size).limit(page_size)
 

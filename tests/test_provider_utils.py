@@ -8,6 +8,7 @@ from lyrarr.metadata.provider_utils import (
     begin_search,
     is_transient_status,
     note_transient_error,
+    retry_after_seconds,
     search_had_transient_error,
 )
 
@@ -66,3 +67,24 @@ class TestIsTransientStatus:
 
 def test_transient_error_is_exception():
     assert issubclass(ProviderTransientError, Exception)
+
+
+class _Resp:
+    def __init__(self, headers=None):
+        self.headers = headers or {}
+
+
+class TestRetryAfter:
+    def test_header_seconds(self):
+        assert retry_after_seconds(_Resp({'Retry-After': '1.5'})) == 1.5
+
+    def test_capped(self):
+        assert retry_after_seconds(_Resp({'Retry-After': '120'}), cap=2.0) == 2.0
+
+    def test_missing_or_garbage_uses_default(self):
+        assert retry_after_seconds(_Resp(), default=1.0) == 1.0
+        assert retry_after_seconds(_Resp({'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT'}), default=0.5) == 0.5
+        assert retry_after_seconds(None, default=1.0) == 1.0
+
+    def test_never_negative(self):
+        assert retry_after_seconds(_Resp({'Retry-After': '-5'})) == 0.0

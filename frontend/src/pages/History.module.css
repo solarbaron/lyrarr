@@ -1,0 +1,61 @@
+/* History (DESIGN.md 8.7). Tokens only. */
+
+.day {
+  font-variant-numeric: tabular-nums;
+}
+
+.time {
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.type {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ly-text-2);
+  white-space: nowrap;
+}
+
+.typeIcon {
+  width: 13px;
+  color: var(--ly-muted);
+}
+
+.text2 {
+  color: var(--ly-text-2);
+}
+
+.muted {
+  color: var(--ly-muted);
+}
+
+/* Truncated from the left so the file name stays visible. */
+.path {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.path bdi {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.pathTip {
+  font-family: var(--ly-font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* Same rhythm as Albums / Artists: the filter bar never sits flush on the table. */
+.filters {
+  margin-bottom: 16px;
+}

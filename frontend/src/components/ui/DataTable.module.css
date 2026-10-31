@@ -1,0 +1,408 @@
+/* DataTable (DESIGN.md 7.6). Base th/td/tr styles come from theme/mantine.module.css. */
+
+.root {
+  position: relative;
+  min-width: 0;
+}
+
+.framed {
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  box-shadow: var(--ly-shadow-card);
+  /* clip, not hidden: keeps rounded corners without breaking the sticky header */
+  overflow: clip;
+}
+
+.table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+/* The sticky header must sit above row content (thumbs, chips) */
+.table thead {
+  z-index: var(--ly-z-sticky, 10);
+}
+
+.table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* ---------- Header ---------- */
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.sortButton:hover {
+  color: var(--ly-text);
+}
+
+.sortButton[data-align='right'] {
+  flex-direction: row-reverse;
+}
+
+th[data-sorted] {
+  color: var(--ly-text);
+}
+
+.sortIcon {
+  width: 10px;
+  height: 10px;
+  color: var(--ly-accent-text);
+}
+
+.checkCell {
+  width: 44px;
+  padding-inline: 16px 0 !important;
+}
+
+.actionsHead {
+  padding: 0;
+}
+
+/* ---------- Rows ---------- */
+.row[data-clickable] {
+  cursor: pointer;
+}
+
+.row:focus {
+  outline: none;
+}
+
+/* Selected: neutral active fill + 3px accent edge (hover keeps the fill) */
+.row[data-selected] > td,
+.table[data-hover] .row[data-selected]:hover > td {
+  background: var(--ly-active);
+}
+
+.row[data-selected] > td:first-child {
+  box-shadow: inset 3px 0 0 var(--ly-accent);
+}
+
+/* Cursor: 2px focus outline around the row, no fill change (distinct from selection) */
+.row[data-cursor] {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: -2px;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: -2px;
+}
+
+/* High contrast: 3px ring (4.6), kept inside the row so the framed panel's
+   overflow: clip doesn't cut its left and right edges. */
+:global(html[data-contrast='high']) .row[data-cursor],
+:global(html[data-contrast='high']) .row:focus-visible,
+:global(html[data-contrast='high']) .card[data-cursor],
+:global(html[data-contrast='high']) .card:focus-visible {
+  outline-width: 3px;
+  outline-offset: -3px;
+}
+
+.table tbody[data-refetching] {
+  opacity: 0.6;
+  transition: opacity var(--ly-dur-base) var(--ly-ease);
+}
+
+/* Right-aligned numeric cells */
+.table td[data-align='right'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Row actions ---------- */
+.actionsCell {
+  padding-inline: 4px 12px !important;
+  /* Clip like the other cells: in the collapsed-border model an unclipped
+     cell paints its selected/hover fill over the row's top hairline. The 4px
+     clip margin leaves room for the icon buttons' focus rings. */
+  overflow: clip !important;
+  overflow-clip-margin: 4px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--ly-dur-fast) var(--ly-ease);
+}
+
+.row:hover .actions,
+.row:focus-within .actions,
+.row[data-cursor] .actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
+
+/* ---------- Title cell ---------- */
+.titleCell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.thumb {
+  display: block;
+  flex: none;
+  width: var(--ly-thumb, 40px);
+  height: var(--ly-thumb, 40px);
+}
+
+.titleText {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.titleLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.titleLink,
+.titlePlain {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ly-body, 14px);
+  font-weight: 500;
+  color: var(--ly-text);
+  text-decoration: none;
+}
+
+.titleLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:global(html[data-contrast='high']) .titleLink {
+  text-decoration: underline;
+}
+
+.titleLink:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.secondary {
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ly-muted);
+}
+
+:global([data-density='compact']) .secondary {
+  display: none;
+}
+
+/* ---------- Group header / expand / banner / state rows ---------- */
+.groupRow > .groupCell {
+  height: 34px;
+  padding: 0 16px;
+  background: var(--ly-surface);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ly-muted);
+  text-align: left;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.table[data-sticky] .groupRow > .groupCell {
+  position: sticky;
+  top: calc(var(--ly-sticky-top, 56px) + 40px);
+  z-index: 2;
+}
+
+.groupRow:hover > .groupCell {
+  background: var(--ly-surface);
+}
+
+.expandRow > .expandCell {
+  height: auto;
+  padding: 0;
+  white-space: normal;
+  background: color-mix(in srgb, var(--ly-text) 3%, var(--ly-surface));
+}
+
+.table[data-hover] .expandRow:hover > td,
+.table[data-hover] .bannerRow:hover > td,
+.table[data-hover] .stateRow:hover > td {
+  background: transparent;
+}
+
+.table[data-hover] .expandRow:hover > .expandCell {
+  background: color-mix(in srgb, var(--ly-text) 3%, var(--ly-surface));
+}
+
+.bannerRow > td,
+.stateRow > td {
+  height: auto;
+  padding: 0 !important;
+  white-space: normal;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 40px;
+  padding: 4px 16px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  background: var(--ly-accent-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  border-top: 1px solid var(--ly-border);
+}
+
+.root:not(.framed) .footer {
+  border-top: 1px solid var(--ly-border);
+}
+
+/* ---------- Mobile cards (< 768px) ---------- */
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cards[data-refetching] {
+  opacity: 0.6;
+}
+
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 8px 12px 14px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.card[data-clickable] {
+  cursor: pointer;
+}
+
+.card:last-child {
+  border-bottom: 0;
+}
+
+.card[data-selected] {
+  background: var(--ly-active);
+  box-shadow: inset 3px 0 0 var(--ly-accent);
+}
+
+.card[data-cursor],
+.card:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: -2px;
+}
+
+.cardGroup {
+  padding: 10px 14px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ly-muted);
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.cardCheck {
+  padding-top: 2px;
+}
+
+.cardMain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardLine1 {
+  min-width: 0;
+}
+
+.cardTitle {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+  min-width: 0;
+}
+
+.cardMetaItem {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardMetaItem + .cardMetaItem::before {
+  content: '·';
+  padding: 0 6px;
+  color: var(--ly-muted);
+}
+
+.cardStatus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.cardExpand {
+  margin-top: 4px;
+}
+
+.cardMore {
+  flex: none;
+}
+
+.cardActions {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+}

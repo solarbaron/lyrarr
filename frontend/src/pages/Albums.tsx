@@ -1,304 +1,352 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TextInput, Pagination, Group, Select, Button, Checkbox, SegmentedControl } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getAlbums, getProfiles, massAssignProfile, batchDownload } from '../api';
-import PageHeader from '../components/PageHeader';
-import { SkeletonGrid, SkeletonTable } from '../components/Skeleton';
+import { useCallback, useMemo, useState } from 'react';
+import { useQueries, useQuery, keepPreviousData } from '@tanstack/react-query';
+import { Button } from '@mantine/core';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faAlignLeft, faCompactDisc, faDownload, faFilterCircleXmark, faImage, faSliders } from '@fortawesome/free-solid-svg-icons';
+import { getAlbums, getArtists, getProfiles } from '../api';
+import { ARTIST_TOTAL_KEY } from '../queryRefresh';
+import {
+  BulkBar, EmptyState, FilterBar, FilterPill, PageHeader, Pager, SortMenu, ViewTabs, type SortOption,
+} from '../components/ui';
+import { AlbumTable, getAlbumId, type AlbumRow } from '../components/library/AlbumTable';
+import { AlbumGrid } from '../components/library/AlbumGrid';
+import { LibraryEmptyAction, SetProfileMenuButton, ViewToggle } from '../components/library/LibraryControls';
+import { fetchAllIds, useAssignProfileMutation, useDownloadMutation, type DownloadType } from '../components/library/actions';
+import { useUrlPatch, useUrlState } from '../hooks/useUrlState';
+import { usePreferences } from '../theme/ThemeProvider';
+import { plural } from '../format';
+import lc from '../components/library/library.module.css';
+
+/** Saved views (DESIGN.md 8.4): each is a cover / lyrics filter. */
+const VIEWS = [
+  { value: 'all', label: 'All', filter: {} },
+  { value: 'missing-cover', label: 'Missing cover', filter: { coverStatus: 'missing' } },
+  { value: 'missing-lyrics', label: 'Missing lyrics', filter: { lyricsStatus: 'missing' } },
+  { value: 'partial', label: 'Partial', filter: { lyricsStatus: 'partial' } },
+  { value: 'complete', label: 'Complete', filter: { lyricsStatus: 'complete' } },
+] as const satisfies readonly { value: string; label: string; filter: { coverStatus?: string; lyricsStatus?: string } }[];
+
+type ViewId = (typeof VIEWS)[number]['value'];
+
+const COVER_OPTIONS = [
+  { value: 'available', label: 'Saved or manual' },
+  { value: 'missing', label: 'Missing' },
+];
+
+const LYRICS_OPTIONS = [
+  { value: 'complete', label: 'Complete' },
+  { value: 'incomplete', label: 'Incomplete' },
+  { value: 'partial', label: 'Partial' },
+  { value: 'missing', label: 'Missing' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+const MONITORED_OPTIONS = [
+  { value: 'true', label: 'Monitored' },
+  { value: 'false', label: 'Unmonitored' },
+];
+
+const SORT_OPTIONS: SortOption[] = [
+  { value: 'title', label: 'Title', dirLabels: { asc: 'A–Z', desc: 'Z–A' } },
+  { value: 'year', label: 'Year', dirLabels: { asc: 'oldest first', desc: 'newest first' } },
+  { value: 'added', label: 'Date added', dirLabels: { asc: 'oldest first', desc: 'newest first' } },
+  { value: 'lyricsStatus', label: 'Lyrics status' },
+];
+
+const PAGE_SIZES = [25, 50, 100];
 
 export default function AlbumsPage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<number[]>([]);
-  const [assignProfileId, setAssignProfileId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem('lyrarr-album-view') || 'table');
-  const [sortBy, setSortBy] = useState('title');
-  const [sortDir, setSortDir] = useState('asc');
-  const [coverFilter, setCoverFilter] = useState('');
-  const [lyricsFilter, setLyricsFilter] = useState('');
-  const pageSize = 25;
+  const { albumView, setAlbumView } = usePreferences();
+  const patchUrl = useUrlPatch();
+  const [viewParam] = useUrlState<string>('view', 'all');
+  const [search] = useUrlState<string>('q', '');
+  const [coverFilter] = useUrlState<string>('cover', '');
+  const [lyricsFilter] = useUrlState<string>('lyrics', '');
+  const [monitored] = useUrlState<string>('monitored', '');
+  const [profileFilter] = useUrlState<string>('profile', '');
+  const [sortBy] = useUrlState<string>('sort', 'title');
+  const [sortDirParam] = useUrlState<string>('dir', 'asc');
+  const [page, setPage] = useUrlState<number>('page', 1);
+  const [pageSize] = useUrlState<number>('size', 50);
+  const [showMore, setShowMore] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [selectingAll, setSelectingAll] = useState(false);
 
-  const { data: result, isLoading } = useQuery({
-    queryKey: ['albums', page, search, sortBy, sortDir, coverFilter, lyricsFilter],
-    queryFn: () => getAlbums({ page, pageSize, search, sortBy, sortDir, coverStatus: coverFilter || undefined, lyricsStatus: lyricsFilter || undefined }),
+  const view: ViewId = VIEWS.some(v => v.value === viewParam) ? (viewParam as ViewId) : 'all';
+  const sortDir: 'asc' | 'desc' = sortDirParam === 'desc' ? 'desc' : 'asc';
+  const viewFilter: { coverStatus?: string; lyricsStatus?: string } = VIEWS.find(v => v.value === view)!.filter;
+
+  // Filters shared by the list and the tab counts (everything except the view).
+  const base = useMemo(() => ({
+    search: search || undefined,
+    monitored: monitored || undefined,
+    profileId: profileFilter ? Number(profileFilter) : undefined,
+  }), [search, monitored, profileFilter]);
+
+  // A pill (More filters) wins over the view for the same field.
+  const params = useMemo(() => ({
+    ...base,
+    sortBy,
+    sortDir,
+    coverStatus: coverFilter || viewFilter.coverStatus,
+    lyricsStatus: lyricsFilter || viewFilter.lyricsStatus,
+  }), [base, sortBy, sortDir, coverFilter, lyricsFilter, viewFilter.coverStatus, viewFilter.lyricsStatus]);
+
+  const { data: result, isLoading, isError, error, refetch, isPlaceholderData } = useQuery({
+    queryKey: ['albums', page, pageSize, params],
+    queryFn: () => getAlbums({ page, pageSize, ...params }),
+    placeholderData: keepPreviousData,
+  });
+
+  // Tab counts: five cached pageSize=1 queries.
+  const counts = useQueries({
+    queries: VIEWS.map(v => ({
+      queryKey: ['albums', 'count', v.value, base],
+      queryFn: () => getAlbums({ ...base, ...v.filter, page: 1, pageSize: 1 }),
+      staleTime: 30_000,
+      placeholderData: keepPreviousData,
+    })),
+  });
+
+  const { data: artistTotal } = useQuery({
+    queryKey: ARTIST_TOTAL_KEY,
+    queryFn: () => getArtists({ page: 1, pageSize: 1 }),
+    staleTime: 5 * 60_000,
+    select: d => d.total,
   });
 
   const { data: profiles = [] } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
 
-  const assignMutation = useMutation({
-    mutationFn: () => massAssignProfile({ profileId: Number(assignProfileId), albumIds: selected }),
-    onSuccess: (data: any) => {
-      notifications.show({ title: 'Done', message: data.message, color: 'green' });
-      setSelected([]);
-      queryClient.invalidateQueries({ queryKey: ['albums'] });
-    },
-  });
+  const download = useDownloadMutation();
+  const assign = useAssignProfileMutation();
 
-  const downloadMutation = useMutation({
-    mutationFn: () => batchDownload({ albumIds: selected, type: 'all' }),
-    onSuccess: (data: any) => {
-      notifications.show({ title: 'Download Started', message: data.message, color: 'blue' });
-      setSelected([]);
-    },
-    onError: (err: any) => {
-      notifications.show({
-        title: 'Not Started',
-        message: err?.response?.data?.message || 'Failed to start download',
-        color: 'orange',
-      });
-    },
-  });
-
-  const albums = result?.data || [];
+  const albums: AlbumRow[] = result?.data || [];
   const total = result?.total || 0;
-  const totalPages = Math.ceil(total / pageSize);
+  // Tab counts fall back to the list's own total for the active view (no pill
+  // overriding it) when their count query hasn't answered (e.g. rate limited).
+  const tabCounts = VIEWS.map((v, i) => counts[i].data?.total
+    ?? (v.value === view && !coverFilter && !lyricsFilter && !isPlaceholderData ? result?.total : undefined));
+  const libraryTotal = tabCounts[0];
+  const filtered = !!(search || coverFilter || lyricsFilter || monitored || profileFilter);
+  const loadError = isError
+    ? { title: "Couldn't load albums", message: (error as Error)?.message, onRetry: () => refetch() }
+    : null;
 
-  const toggleSelect = (id: number) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const resetPage = { page: [1, 1] as [number, number] };
+
+  const setView = (v: string) => {
+    // A view sets the same field as the matching pill: drop the pill.
+    const f: { coverStatus?: string; lyricsStatus?: string } = VIEWS.find(x => x.value === v)?.filter ?? {};
+    patchUrl({
+      view: [v, 'all'],
+      ...(f.coverStatus ? { cover: ['', ''] as [string, string] } : {}),
+      ...(f.lyricsStatus ? { lyrics: ['', ''] as [string, string] } : {}),
+      ...resetPage,
+    });
   };
 
-  const toggleAll = () => {
-    if (selected.length === albums.length) {
-      setSelected([]);
-    } else {
-      setSelected(albums.map((a: any) => a.lidarrAlbumId));
+  const setPill = (key: 'cover' | 'lyrics' | 'monitored' | 'profile', value: string | null) => {
+    const conflicts =
+      (key === 'cover' && value && viewFilter.coverStatus) ||
+      (key === 'lyrics' && value && viewFilter.lyricsStatus);
+    patchUrl({ [key]: [value ?? '', ''], ...(conflicts ? { view: ['all', 'all'] } : {}), ...resetPage });
+  };
+
+  const clearFilters = () => {
+    patchUrl({
+      q: ['', ''], cover: ['', ''], lyrics: ['', ''], monitored: ['', ''], profile: ['', ''], view: ['all', 'all'], ...resetPage,
+    });
+  };
+
+  const setSort = (key: string, dir: 'asc' | 'desc') => patchUrl({ sort: [key, 'title'], dir: [dir, 'asc'], ...resetPage });
+
+  const selectAllMatching = useCallback(async () => {
+    setSelectingAll(true);
+    try {
+      const ids = await fetchAllIds((p, size) => getAlbums({ ...params, page: p, pageSize: size }), getAlbumId);
+      setSelected(ids);
+    } finally {
+      setSelectingAll(false);
     }
-  };
+  }, [params]);
 
-  const handleViewChange = (val: string) => {
-    setViewMode(val);
-    localStorage.setItem('lyrarr-album-view', val);
-  };
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+  const selectedIds = [...selected];
+
+  const runDownload = (type: DownloadType) =>
+    download.mutate({ target: { albumIds: selectedIds }, type }, { onSuccess: clearSelection });
+
+  const moreOpen = showMore || !!coverFilter || !!lyricsFilter;
+  const profileOptions = profiles.map(p => ({ value: String(p.id), label: p.name }));
+
+  let empty;
+  if (libraryTotal === 0 && !filtered) {
+    empty = (
+      <EmptyState
+        size="sm"
+        icon={faCompactDisc}
+        title="No albums yet"
+        message="Sync with Lidarr to see your library here."
+        action={<LibraryEmptyAction />}
+      />
+    );
+  } else if (view === 'complete' && !filtered) {
+    empty = (
+      <EmptyState
+        size="sm"
+        tone="success"
+        icon={faAlignLeft}
+        title="No complete albums yet"
+        message="Albums show up here once every track has lyrics."
+      />
+    );
+  } else {
+    empty = (
+      <EmptyState
+        size="sm"
+        icon={faFilterCircleXmark}
+        title="No albums match these filters"
+        action={<Button variant="default" onClick={clearFilters}>Clear filters</Button>}
+      />
+    );
+  }
+
+  const pager = (
+    <Pager
+      page={page}
+      pageSize={pageSize}
+      total={total}
+      onPage={p => setPage(p, { replace: false })}
+      pageSizeOptions={PAGE_SIZES}
+      onPageSize={n => patchUrl({ size: [n, 50], ...resetPage })}
+      noun="albums"
+    />
+  );
+
+  const selection = { selected, onChange: setSelected };
 
   return (
-    <div className="fade-in">
+    <div className="ly-page">
       <PageHeader
         title="Albums"
-        subtitle={`${total} albums synced from Lidarr`}
-        actions={
-          <SegmentedControl
-            value={viewMode}
-            onChange={handleViewChange}
-            data={[
-              { label: '☰ Table', value: 'table' },
-              { label: '▦ Grid', value: 'grid' },
-            ]}
-            size="xs"
-            styles={{
-              root: { background: 'var(--card-bg)', border: '1px solid var(--card-border)' },
-              label: { color: 'var(--text-secondary)', fontSize: 12 },
-            }}
-          />
-        }
+        count={libraryTotal}
+        subtitle={artistTotal !== undefined ? `from ${plural(artistTotal, 'artist')}` : undefined}
+        actions={<ViewToggle value={albumView} onChange={setAlbumView} noun="albums" />}
       />
 
-      <Group mb="lg" gap="md" align="end" wrap="wrap">
-        <TextInput
-          placeholder="Search albums..."
-          value={search}
-          onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
-          style={{ flex: 1, minWidth: 200 }}
-          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
+      <div className={lc.tabsRow}>
+        <ViewTabs
+          aria-label="Album views"
+          tabs={VIEWS.map((v, i) => ({ value: v.value, label: v.label, count: tabCounts[i] }))}
+          value={view}
+          onChange={setView}
         />
-        <Select
-          placeholder="Sort by"
-          data={[
-            { value: 'title', label: 'Title' },
-            { value: 'year', label: 'Year' },
-          ]}
-          value={sortBy}
-          onChange={(v) => { setSortBy(v || 'title'); setPage(1); }}
-          w={120}
-          size="sm"
-          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-        />
-        <Button variant="subtle" color="gray" size="sm" px={8}
-          onClick={() => { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); setPage(1); }}>
-          {sortDir === 'asc' ? '↑ A-Z' : '↓ Z-A'}
-        </Button>
-        <Select
-          placeholder="Cover status"
-          data={[
-            { value: '', label: 'All covers' },
-            { value: 'available', label: '✓ Has cover' },
-            { value: 'missing', label: '✗ Missing cover' },
-          ]}
-          value={coverFilter}
-          onChange={(v) => { setCoverFilter(v || ''); setPage(1); }}
-          w={150}
-          size="sm"
-          clearable
-          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-        />
-        <Select
-          placeholder="Lyrics status"
-          data={[
-            { value: '', label: 'All lyrics' },
-            { value: 'available', label: '✓ Has lyrics' },
-            { value: 'missing', label: '✗ Missing lyrics' },
-          ]}
-          value={lyricsFilter}
-          onChange={(v) => { setLyricsFilter(v || ''); setPage(1); }}
-          w={150}
-          size="sm"
-          clearable
-          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-        />
-        {selected.length > 0 && (
+      </div>
+
+      <FilterBar
+        className={lc.filters}
+        search={{
+          value: search,
+          onChange: v => patchUrl({ q: [v, ''], ...resetPage }),
+          placeholder: 'Filter by album title…',
+          'aria-label': 'Filter albums by title',
+        }}
+        filters={(
           <>
-            <Select
-              placeholder="Assign profile..."
-              data={profiles.map((p: any) => ({ value: String(p.id), label: p.name }))}
-              value={assignProfileId}
-              onChange={setAssignProfileId}
-              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-            />
-            <Button
-              variant="gradient"
-              gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-              disabled={!assignProfileId}
-              onClick={() => assignMutation.mutate()}
-              loading={assignMutation.isPending}
-            >
-              Set Profile ({selected.length})
-            </Button>
-            <Button
-              variant="light" color="green"
-              onClick={() => downloadMutation.mutate()}
-              loading={downloadMutation.isPending}
-            >
-              ⬇ Download Missing ({selected.length})
-            </Button>
+            <FilterPill label="Monitored" value={monitored || null} options={MONITORED_OPTIONS} onChange={v => setPill('monitored', v)} />
+            <FilterPill label="Profile" value={profileFilter || null} options={profileOptions} onChange={v => setPill('profile', v)} />
+            {moreOpen && (
+              <>
+                <FilterPill label="Cover" value={coverFilter || null} options={COVER_OPTIONS} onChange={v => setPill('cover', v)} />
+                <FilterPill label="Lyrics" value={lyricsFilter || null} options={LYRICS_OPTIONS} onChange={v => setPill('lyrics', v)} />
+              </>
+            )}
+            {!coverFilter && !lyricsFilter && (
+              <Button
+                variant="subtle"
+                color="gray"
+                size="sm"
+                className={lc.moreButton}
+                data-active={moreOpen || undefined}
+                aria-expanded={moreOpen}
+                leftSection={<FontAwesomeIcon icon={faSliders} />}
+                onClick={() => setShowMore(o => !o)}
+              >
+                {moreOpen ? 'Fewer filters' : 'More filters'}
+              </Button>
+            )}
           </>
         )}
-      </Group>
+        right={<SortMenu options={SORT_OPTIONS} value={sortBy} dir={sortDir} onChange={setSort} />}
+      />
 
-      {isLoading ? (
-        viewMode === 'grid' ? <SkeletonGrid count={12} /> : <SkeletonTable rows={10} />
-      ) : albums.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon">💿</div>
-          <div className="empty-state-title">No Albums Found</div>
-          <div className="empty-state-message">
-            {total === 0 ? 'Sync with Lidarr to see your albums here.' : 'No albums match your search.'}
-          </div>
-        </div>
-      ) : viewMode === 'grid' ? (
-        /* Grid View */
-        <>
-          <div className="album-grid">
-            {albums.map((album: any) => (
-              <div key={album.lidarrAlbumId} className="album-card" onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                <div className="album-card-cover">
-                  {album.cover ? (
-                    <img src={album.cover} alt={album.title} />
-                  ) : (
-                    <div className="album-card-placeholder">💿</div>
-                  )}
-                  <div className="album-card-badges">
-                    <span className={`status-badge ${album.cover_status || 'missing'}`} style={{ fontSize: 10, padding: '2px 8px' }}>
-                      {album.cover_status === 'available' ? '✓' : '✗'} Cover
-                    </span>
-                  </div>
-                </div>
-                <div className="album-card-info">
-                  <div className="album-card-title">{album.title}</div>
-                  <div className="album-card-artist">{album.artistName || '—'}</div>
-                  {album.year && <div className="album-card-year">{album.year}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {totalPages > 1 && (
-            <Group justify="center" mt="xl">
-              <Pagination total={totalPages} value={page} onChange={setPage} color="violet" />
-            </Group>
-          )}
-        </>
+      {albumView === 'grid' ? (
+        <AlbumGrid
+          aria-label="Albums"
+          rows={albums}
+          loading={isLoading}
+          refetching={isPlaceholderData}
+          error={loadError}
+          empty={empty}
+          footer={pager}
+          selection={selection}
+        />
       ) : (
-        /* Table View */
-        <>
-          <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th style={{ width: 40 }}>
-                  <Checkbox
-                    checked={selected.length === albums.length && albums.length > 0}
-                    indeterminate={selected.length > 0 && selected.length < albums.length}
-                    onChange={toggleAll}
-                    color="violet"
-                  />
-                </th>
-                <th>Album</th>
-                <th>Artist</th>
-                <th>Year</th>
-                <th>Profile</th>
-                <th>Cover Art</th>
-                <th>Lyrics</th>
-              </tr>
-            </thead>
-            <tbody>
-              {albums.map((album: any) => (
-                <tr key={album.lidarrAlbumId} style={{ cursor: 'pointer' }}>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      checked={selected.includes(album.lidarrAlbumId)}
-                      onChange={() => toggleSelect(album.lidarrAlbumId)}
-                      color="violet"
-                    />
-                  </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {album.cover ? (
-                        <img src={album.cover} alt={album.title}
-                          style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover' }} />
-                      ) : (
-                        <div style={{
-                          width: 44, height: 44, borderRadius: 8, background: 'var(--card-border)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, opacity: 0.5
-                        }}>💿</div>
-                      )}
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{album.title}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{album.albumType || ''}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span style={{ color: 'var(--text-secondary)' }}>{album.artistName || '—'}</span>
-                  </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>{album.year || '—'}</td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span style={{ fontSize: 13, color: 'var(--accent-primary)' }}>{album.profileName || '—'}</span>
-                  </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span className={`status-badge ${album.cover_status || 'missing'}`}>
-                      {album.cover_status || 'Missing'}
-                    </span>
-                  </td>
-                  <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                    <span className={`status-badge ${album.lyrics_status || 'unknown'}`}>
-                      {album.lyrics_status || 'Unknown'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-
-          {totalPages > 1 && (
-            <Group justify="center" mt="xl">
-              <Pagination total={totalPages} value={page} onChange={setPage} color="violet" />
-            </Group>
-          )}
-        </>
+        <AlbumTable
+          aria-label="Albums"
+          rows={albums}
+          profiles={profiles}
+          loading={isLoading}
+          refetching={isPlaceholderData}
+          error={loadError}
+          empty={empty}
+          footer={total > 0 ? pager : undefined}
+          selection={selection}
+          selectAllMatching={{ total, onSelectAll: selectAllMatching, busy: selectingAll }}
+          sort={{ key: sortBy, dir: sortDir, onChange: setSort }}
+        />
       )}
+
+      <BulkBar count={selected.size} noun="album" onClear={clearSelection}>
+        <Button
+          size="sm"
+          variant="filled"
+          leftSection={<FontAwesomeIcon icon={faDownload} />}
+          loading={download.isPending && download.variables?.type === 'all'}
+          disabled={download.isPending}
+          onClick={() => runDownload('all')}
+        >
+          Download missing
+        </Button>
+        <Button
+          size="sm"
+          variant="default"
+          leftSection={<FontAwesomeIcon icon={faImage} />}
+          loading={download.isPending && download.variables?.type === 'covers'}
+          disabled={download.isPending}
+          onClick={() => runDownload('covers')}
+        >
+          Covers
+        </Button>
+        <Button
+          size="sm"
+          variant="default"
+          leftSection={<FontAwesomeIcon icon={faAlignLeft} />}
+          loading={download.isPending && download.variables?.type === 'lyrics'}
+          disabled={download.isPending}
+          onClick={() => runDownload('lyrics')}
+        >
+          Lyrics
+        </Button>
+        <SetProfileMenuButton
+          profiles={profiles}
+          loading={assign.isPending}
+          onPick={p => assign.mutate(
+            { target: { albumIds: selectedIds }, profileId: p.id, profileName: p.name },
+            { onSuccess: clearSelection },
+          )}
+        />
+      </BulkBar>
     </div>
   );
 }

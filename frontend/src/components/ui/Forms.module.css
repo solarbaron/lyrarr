@@ -1,0 +1,128 @@
+/* SettingsRow, SaveBar (DESIGN.md 7.8) */
+.row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, 360px);
+  align-items: center;
+  gap: 8px 24px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.text {
+  min-width: 0;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ly-text);
+}
+
+.description {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ly-muted);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Switches and checkboxes sit at the right edge */
+.control > :global(.mantine-Switch-root),
+.control > :global(.mantine-Checkbox-root) {
+  align-self: flex-end;
+}
+
+.source {
+  font-size: 12px;
+  color: var(--ly-muted);
+  text-align: right;
+}
+
+@media (max-width: 767px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .control > :global(.mantine-Switch-root),
+  .control > :global(.mantine-Checkbox-root) {
+    align-self: flex-start;
+  }
+
+  .source {
+    text-align: left;
+  }
+}
+
+.group + .group {
+  margin-top: 20px;
+}
+
+.groupTitle {
+  padding-bottom: 4px;
+}
+
+/* ---------- SaveBar ---------- */
+.saveBar {
+  position: sticky;
+  z-index: var(--ly-z-bulkbar, 150);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Full width (capped) even as a child of a flex column, where auto margins would shrink it. */
+  width: 100%;
+  max-width: 880px;
+  min-height: 52px;
+  margin: 24px auto 0;
+  padding: 8px 8px 8px 16px;
+  background: var(--ly-raised);
+  border: 1px solid var(--ly-border-strong);
+  border-radius: 12px;
+  box-shadow: var(--ly-shadow);
+  animation: ly-save-in var(--ly-dur-slow) var(--ly-ease);
+}
+
+@keyframes ly-save-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.saveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ly-warning);
+  flex: none;
+}
+
+.saveMessage {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+/* The buttons keep their labels; a long message ellipsizes first. */
+.saveButton {
+  flex: none;
+  white-space: nowrap;
+}
+
+.saveSpacer {
+  flex: 1 1 auto;
+}

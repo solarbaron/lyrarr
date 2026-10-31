@@ -11,6 +11,8 @@ import requests
 
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import CoverProvider
+from lyrarr.metadata.cover_fetch import safe_download
+from lyrarr.metadata.provider_utils import is_transient_status, note_transient_error
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,10 @@ class TheAudioDBCoverProvider(CoverProvider):
                 if album and isinstance(album, list) and len(album) > 0:
                     album = album[0]
                     results.extend(self._extract_art(album))
+            elif is_transient_status(response.status_code):
+                note_transient_error()
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.error(f"TheAudioDB MBID lookup error: {e}")
 
         return results
@@ -78,7 +83,10 @@ class TheAudioDBCoverProvider(CoverProvider):
                 data = response.json()
                 for album in (data.get('album') or [])[:3]:
                     results.extend(self._extract_art(album))
+            elif is_transient_status(response.status_code):
+                note_transient_error()
         except requests.exceptions.RequestException as e:
+            note_transient_error()
             logger.error(f"TheAudioDB name search error: {e}")
 
         return results
@@ -114,11 +122,5 @@ class TheAudioDBCoverProvider(CoverProvider):
         return results
 
     def download(self, url):
-        """Download cover art image from URL. Returns bytes or None."""
-        try:
-            response = requests.get(url, timeout=30)
-            if response.status_code == 200:
-                return response.content
-        except requests.exceptions.RequestException as e:
-            logger.error(f"TheAudioDB cover download error: {e}")
-        return None
+        """Download cover art image from URL (allow-listed hosts only). Returns bytes or None."""
+        return safe_download(url, self.name)

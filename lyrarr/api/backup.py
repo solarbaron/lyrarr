@@ -8,7 +8,7 @@ import json
 from flask import Response, request
 from flask_restx import Namespace, Resource
 
-from lyrarr.app.config import settings
+from lyrarr.app.config import SettingsError, save_settings, settings
 from lyrarr.app.database import TableProfiles, database, select
 
 api_ns_backup = Namespace('backup', description='Backup and restore')
@@ -42,7 +42,7 @@ class BackupExport(Resource):
 
         # Gather settings (dynaconf to dict)
         settings_data = {}
-        for section in ['general', 'lidarr', 'fanart', 'genius', 'notifications', 'auth', 'metadata']:
+        for section in ['general', 'lidarr', 'fanart', 'genius', 'notifications', 'auth', 'metadata', 'audit']:
             try:
                 section_obj = getattr(settings, section, None)
                 if section_obj:
@@ -68,15 +68,45 @@ class BackupExport(Resource):
 class BackupRestore(Resource):
     def post(self):
         """Restore profiles and settings from JSON."""
-        data = request.get_json()
-        if not data or 'version' not in data:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or 'version' not in data:
+            return {'message': 'Invalid backup file'}, 400
+        if not isinstance(data.get('settings', {}), dict) or not isinstance(data.get('profiles', []), list) \
+                or not all(isinstance(p, dict) for p in data.get('profiles', [])):
             return {'message': 'Invalid backup file'}, 400
 
         restored_profiles = 0
         restored_settings = 0
 
+        # Restore settings first: it validates everything and applies nothing
+        # on error, so a bad/tampered file is refused before profiles change.
+        # Merged key-by-key into the live settings (then persisted), so the
+        # next settings save can't revert it. Exports redact the password and
+        # the flask secret key — blank secrets keep the current value instead
+        # of wiping it (which would lock the user out). Unknown keys from
+        # other versions are skipped; Dynaconf '@' tokens are refused.
+        notes = ''
+        if data.get('settings'):
+            sections = dict(data['settings'])
+            auth = sections.get('auth')
+            if isinstance(auth, dict) and auth.get('type') and not auth.get('password') \
+                    and not getattr(settings.auth, 'password', ''):
+                # The export has no password and none is set here: enabling
+                # auth would lock everyone out, so leave auth off for now.
+                sections['auth'] = {k: v for k, v in auth.items() if k != 'type'}
+                notes = ' (authentication left disabled: set a password in Settings to enable it)'
+            items = list(sections.items())
+            try:
+                result = save_settings(items, unknown='skip', keep_blank_secrets=True)
+            except SettingsError as e:
+                return {'message': f'Backup settings rejected: {e}'}, 400
+            restored_settings = len(items)
+
+            from lyrarr.api.system import apply_settings_side_effects
+            apply_settings_side_effects(result)
+
         # Restore profiles
-        if 'profiles' in data:
+        if data.get('profiles'):
             from datetime import datetime
 
             from sqlalchemy.dialects.sqlite import insert
@@ -120,32 +150,36 @@ class BackupRestore(Resource):
 
                 restored_profiles += 1
 
-        # Restore settings (write to config file)
-        if 'settings' in data:
-            import os
-
-            import yaml
-
-            from lyrarr.app.get_args import args
-
-            config_path = os.path.join(args.config_dir, 'config', 'config.yaml')
-            try:
-                with open(config_path) as f:
-                    current_config = yaml.safe_load(f) or {}
-            except Exception:
-                current_config = {}
-
-            for section, values in data['settings'].items():
-                current_config[section] = values
-                restored_settings += 1
-
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            with open(config_path, 'w') as f:
-                yaml.dump(current_config, f, default_flow_style=False)
+            _ensure_single_default_profile(
+                [p.get('name') for p in data['profiles'] if p.get('is_default') and p.get('name')]
+            )
 
         return {
-            'message': f'Restored {restored_profiles} profiles and {restored_settings} setting sections',
+            'message': f'Restored {restored_profiles} profiles and {restored_settings} setting sections{notes}',
         }
+
+
+def _ensure_single_default_profile(restored_default_names=()):
+    """Leave exactly one default profile after a restore.
+
+    The last profile the backup marked as default wins; otherwise the existing
+    default with the lowest id is kept (or the first profile becomes default).
+    """
+    from lyrarr.app.database import update
+
+    profiles = database.execute(select(TableProfiles).order_by(TableProfiles.id)).scalars().all()
+    if not profiles:
+        return
+    by_name = {p.name: p for p in profiles}
+    chosen = None
+    for name in reversed(list(restored_default_names)):
+        if name in by_name:
+            chosen = by_name[name]
+            break
+    if chosen is None:
+        chosen = next((p for p in profiles if p.is_default), profiles[0])
+    database.execute(update(TableProfiles).where(TableProfiles.id != chosen.id).values(is_default=False))
+    database.execute(update(TableProfiles).where(TableProfiles.id == chosen.id).values(is_default=True))
 
 
 def run_scheduled_backup():

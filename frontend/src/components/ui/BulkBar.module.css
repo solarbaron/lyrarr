@@ -1,0 +1,74 @@
+/* BulkBar (DESIGN.md 7.6) */
+.bar {
+  position: fixed;
+  z-index: var(--ly-z-bulkbar, 150);
+  /* Centred in the content area, not under the sidebar (the shell sets --ly-content-left) */
+  left: calc(var(--ly-content-left, 0px) + (100vw - var(--ly-content-left, 0px)) / 2);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  width: max-content;
+  max-width: min(760px, calc(100vw - var(--ly-content-left, 0px) - 32px));
+  padding: 0 8px 0 18px;
+  background: var(--ly-raised);
+  border: 1px solid var(--ly-border-strong);
+  border-radius: 12px;
+  box-shadow: var(--ly-shadow);
+  animation: ly-bulk-in var(--ly-dur-slow) var(--ly-ease);
+}
+
+@keyframes ly-bulk-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.count {
+  flex: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.actions::-webkit-scrollbar {
+  display: none;
+}
+
+.divider {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  background: var(--ly-border-strong);
+}
+
+@media (max-width: 767px) {
+  .bar {
+    left: 50%;
+    width: calc(100vw - 24px);
+    max-width: none;
+    padding-left: 14px;
+  }
+
+  .count {
+    font-size: 13px;
+  }
+}

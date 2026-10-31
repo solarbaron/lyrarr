@@ -1,0 +1,187 @@
+/* CoverSearchModal (DESIGN.md 8.16) */
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.loading {
+  min-height: 240px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+}
+
+@media (max-width: 767px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The clickable cover: a real button, so Enter / Space save */
+.face {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--ly-border);
+  transition: box-shadow var(--ly-dur-fast) var(--ly-ease);
+}
+
+.tile[data-current] .face {
+  cursor: default;
+}
+
+button.face:hover:not(:disabled),
+button.face:focus-visible {
+  box-shadow: 0 0 0 2px var(--ly-accent);
+}
+
+button.face:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 3px;
+}
+
+.grid[data-busy] button.face {
+  cursor: wait;
+}
+
+.grid[data-busy] .tile:not([data-saving]) {
+  opacity: 0.55;
+}
+
+/* Loading placeholder: only while the tile's <img> exists and hasn't loaded */
+.pending {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.pendingLoader {
+  --loader-color: var(--ly-muted);
+}
+
+.face:has(img:not([data-loaded])) .pending {
+  display: grid;
+}
+
+/* Hover / focus overlay: "Use this cover" */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: end center;
+  padding: 10px;
+  border-radius: 12px;
+  opacity: 0;
+  transition: opacity var(--ly-dur-fast) var(--ly-ease);
+  pointer-events: none;
+}
+
+button.face:hover:not(:disabled) .overlay,
+button.face:focus-visible .overlay,
+.tile[data-saving] .overlay {
+  opacity: 1;
+}
+
+/* Keyboard focus wins over a resting pointer: one highlighted tile at a time
+   (moving the mouse onto a tile moves focus to it, see followPointer) */
+.grid:has(button.face:focus-visible) button.face:hover:not(:focus-visible) {
+  box-shadow: 0 0 0 1px var(--ly-border);
+}
+
+.grid:has(button.face:focus-visible) button.face:hover:not(:focus-visible) .overlay {
+  opacity: 0;
+}
+
+.tile[data-saving] .overlay {
+  place-items: center;
+  background: color-mix(in srgb, var(--ly-bg) 55%, transparent);
+}
+
+.use {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--ly-accent);
+  color: var(--ly-on-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: var(--ly-shadow);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meta {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Corner "Preview" button: on hover / focus / touch */
+.previewBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity var(--ly-dur-fast) var(--ly-ease);
+}
+
+.tile:hover .previewBtn,
+.tile:focus-within .previewBtn {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .previewBtn {
+    opacity: 1;
+  }
+}

@@ -1,5 +1,7 @@
 
+import html
 import logging
+import re
 
 import requests
 
@@ -54,18 +56,25 @@ class GeniusProvider(LyricsProvider):
         genius.timeout = 15
         # Skip non-song results (articles, interviews, book excerpts)
         genius.skip_non_songs = True
-        genius.excluded_terms = [
-            "(Remix)", "(Live)", "(Demo)",
-        ]
+        # Keep lyricsgenius' defaults (tracklist, liner notes, credits, ...):
+        # extend, never replace.
+        genius.excluded_terms.extend(_EXTRA_EXCLUDED_TERMS)
         return genius
 
-    def search(self, track_name=None, artist_name=None, duration=None, **kwargs):
+    def search(self, track_name=None, artist_name=None, album_name=None, duration=None,
+               mb_recording_id=None, *, alt_artist_names=(), strict=True, **kwargs):
         """
         Search for lyrics on Genius.
 
-        Returns a list of lyrics results with computed match scores:
-        [{'plain_lyrics': str, 'synced_lyrics': None, 'provider': str,
-          'score': float, 'match_details': dict}]
+        Every song hit of one search_all() call is scored; lyrics are fetched
+        only for the best ungated hit (with strict=False: the best hit), and
+        for the next one if that page is empty. Genius' own "instrumental"
+        flag is never used.
+
+        Returns at most one result:
+        [{'plain_lyrics': str, 'synced_lyrics': None, 'provider', 'score',
+          'match_details', 'strategy': 'search', 'source_id', 'source_url',
+          'track_name', 'artist_name', 'album_name': None, 'duration': None}]
         """
         if not self._api_key:
             logger.debug("Genius API key not configured, skipping")
@@ -75,47 +84,68 @@ class GeniusProvider(LyricsProvider):
             return []
 
         meta = clean_for_search(track_name, artist_name or '')
+        alt = tuple(a for a in alt_artist_names or () if a)
         results = []
 
         try:
             genius = self._get_client()
 
-            # Add featuring artists to excluded terms to avoid matching
-            # a completely different song by a featured artist
+            # Featured artists' names in a hit's title usually mean a different
+            # song by the guest — unless the library title names them too.
             for feat in meta.get('featuring', []):
                 genius.excluded_terms.append(f"({feat})")
 
-            # Search with normalized title and primary artist
-            song = genius.search_song(
-                meta['title_clean'],
-                meta['artist_primary'] or meta['artist_clean']
-            )
+            title_q = meta['title_query'] or meta['title_clean']
+            query = f"{title_q} {meta['artist_primary'] or meta['artist_query']}".strip()
+            response = genius.search_all(query, per_page=5)
 
-            if song and song.lyrics:
-                lyrics = song.lyrics
-
-                # lyricsgenius sometimes prepends the song title + "Lyrics" header
-                # and appends an embed/contributor count suffix — clean those
-                lyrics = self._clean_lyrics(lyrics, song.title)
-
-                if lyrics and len(lyrics.strip()) > 10:
-                    # Compute real match score (Genius has no duration info)
-                    match = self.score_result(
+            candidates = []
+            for hit in _song_hits(response):
+                title = hit.get('title') or ''
+                if self._excluded(title, genius.excluded_terms, track_name):
+                    continue
+                if hit.get('lyrics_state') not in (None, 'complete'):
+                    continue
+                match = None
+                for result_artist in _hit_artists(hit):
+                    m = self.score_result(
                         track_name, artist_name, duration,
-                        song.title or '', song.artist or '',
-                        None  # Genius doesn't provide duration
+                        title, result_artist, None,  # Genius has no duration
+                        alt_artists=alt,
                     )
+                    if match is None or _rank(m) > _rank(match):
+                        match = m
+                if match is None:
+                    continue
+                candidates.append((hit, match))
 
-                    results.append({
-                        'synced_lyrics': None,  # Genius doesn't provide synced lyrics
-                        'plain_lyrics': lyrics,
-                        'provider': self.name,
-                        'score': match['score'],
-                        'match_details': match,
-                        'source_url': song.url or '',
-                        'track_name': song.title or '',
-                        'artist_name': song.artist or '',
-                    })
+            candidates.sort(key=lambda c: _rank(c[1]), reverse=True)
+            if strict:
+                candidates = [c for c in candidates if not c[1].get('gate')]
+
+            for hit, match in candidates[:2]:
+                lyrics = genius.lyrics(song_id=hit.get('id'), song_url=hit.get('url'),
+                                       remove_section_headers=False)
+                lyrics = self._clean_lyrics(lyrics or '', hit.get('title'))
+                if not lyrics or len(lyrics.strip()) <= 10:
+                    continue
+                primary = (hit.get('primary_artist') or {}).get('name') if isinstance(
+                    hit.get('primary_artist'), dict) else None
+                results.append({
+                    'synced_lyrics': None,  # Genius doesn't provide synced lyrics
+                    'plain_lyrics': lyrics,
+                    'provider': self.name,
+                    'score': match['score'],
+                    'match_details': match,
+                    'strategy': 'search',
+                    'source_id': hit.get('id'),
+                    'source_url': hit.get('url') or '',
+                    'track_name': hit.get('title') or '',
+                    'artist_name': hit.get('artist_names') or primary or '',
+                    'album_name': None,
+                    'duration': None,
+                })
+                break
 
         except ImportError:
             logger.error(
@@ -137,6 +167,19 @@ class GeniusProvider(LyricsProvider):
         return results
 
     @staticmethod
+    def _excluded(title, terms, query_title):
+        """lyricsgenius-style literal, case-insensitive exclusion — except for
+        terms the library title itself contains ("Song (Live)" may match a
+        "(Live)" page)."""
+        t = (title or '').casefold()
+        q = (query_title or '').casefold()
+        for term in terms or ():
+            term_cf = (term or '').casefold()
+            if term_cf and term_cf in t and term_cf not in q:
+                return True
+        return False
+
+    @staticmethod
     def _clean_lyrics(lyrics, title=None):
         """Clean up lyrics text returned by lyricsgenius.
 
@@ -144,9 +187,9 @@ class GeniusProvider(LyricsProvider):
         - A title header line like "Song Title Lyrics" at the top
         - A contributor/embed suffix like "123Embed" at the end
         - "You might also like" text injected between sections
+        - HTML entities (&amp;, &#x27;) left in the scraped text
         """
-        import re
-
+        lyrics = html.unescape(lyrics or '')
         lines = lyrics.split('\n')
 
         # Strip leading title line (e.g. "Song Title Lyrics" or "ContributorsSong Title Lyrics")
@@ -166,3 +209,47 @@ class GeniusProvider(LyricsProvider):
         lyrics = re.sub(r'\n{3,}', '\n\n', lyrics)
 
         return lyrics
+
+
+_EXTRA_EXCLUDED_TERMS = ["(Remix)", "(Live)", "(Demo)"]
+
+
+def _song_hits(response):
+    """Song results from a search_all() response (top hit + song section),
+    de-duplicated by id, in Genius' order."""
+    seen = set()
+    out = []
+    sections = (response or {}).get('sections') if isinstance(response, dict) else None
+    for section in sections or []:
+        if not isinstance(section, dict):
+            continue
+        for hit in section.get('hits') or []:
+            if not isinstance(hit, dict):
+                continue
+            if section.get('type') not in ('song', 'top_hit') or hit.get('type', 'song') != 'song':
+                continue
+            result = hit.get('result')
+            if not isinstance(result, dict):
+                continue
+            key = result.get('id') or result.get('url') or id(result)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(result)
+    return out
+
+
+def _hit_artists(hit):
+    names = []
+    full = hit.get('artist_names')
+    if full:
+        names.append(full)
+    primary = hit.get('primary_artist')
+    if isinstance(primary, dict) and primary.get('name') and primary.get('name') not in names:
+        names.append(primary['name'])
+    return names or ['']
+
+
+def _rank(match):
+    """Ungated before gated, then score."""
+    return (0 if match.get('gate') else 1, match['score'], match.get('raw_score', match['score']))

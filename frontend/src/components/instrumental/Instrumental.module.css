@@ -1,0 +1,63 @@
+/* "Why instrumental" evidence (PLAN §5.3) */
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.votes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vote {
+  border: 1px solid var(--ly-border);
+  border-radius: 10px;
+  background: var(--ly-surface);
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.vote[data-veto] {
+  border-left: 3px solid var(--ly-warning);
+}
+
+.voteHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.voteTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ly-text);
+  overflow-wrap: anywhere;
+}
+
+.voteNote {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.voteKv {
+  margin-top: 4px;
+}
+
+.none {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.evidence[data-compact] .vote {
+  padding: 8px 10px;
+}

@@ -1,0 +1,37 @@
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 48px;
+  padding: 8px 16px;
+}
+
+.range {
+  font-size: 13px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.size {
+  width: 128px;
+}
+
+@media (max-width: 767px) {
+  .pager {
+    justify-content: center;
+  }
+
+  .range {
+    width: 100%;
+    text-align: center;
+  }
+}

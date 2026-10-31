@@ -1,0 +1,318 @@
+/* EmptyState, Banner, Skeletons (DESIGN.md 7.4) */
+
+/* ---------- EmptyState ---------- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 64px 24px;
+}
+
+.empty[data-size='sm'] {
+  padding: 32px 20px;
+}
+
+.emptyIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  font-size: 16px;
+  color: var(--ly-text-2);
+  background: var(--ly-neutral-soft);
+}
+
+.empty[data-tone='success'] .emptyIcon {
+  color: var(--ly-success);
+  background: var(--ly-success-soft);
+}
+
+.empty[data-tone='danger'] .emptyIcon {
+  color: var(--ly-danger);
+  background: var(--ly-danger-soft);
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ly-text);
+}
+
+.emptyMessage {
+  max-width: 420px;
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ly-text-2);
+  overflow-wrap: anywhere;
+}
+
+.emptyAction {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* ---------- Banner ---------- */
+/*
+ * Grid: icon | text | action | dismiss. The banner is its own size container, so
+ * a narrow column (phone, side panel) moves the action under the text, aligned
+ * with it, whatever the viewport width.
+ */
+.banner {
+  --tone: var(--ly-text-2);
+  --tone-soft: var(--ly-neutral-soft);
+  container: ly-banner / inline-size;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  row-gap: 8px;
+  min-height: 52px;
+  padding: 10px 12px 10px 14px;
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-left: 3px solid var(--tone);
+  border-radius: 12px;
+}
+
+.banner[data-tone='warning'] { --tone: var(--ly-warning); --tone-soft: var(--ly-warning-soft); }
+.banner[data-tone='danger']  { --tone: var(--ly-danger);  --tone-soft: var(--ly-danger-soft); }
+.banner[data-tone='info']    { --tone: var(--ly-info);    --tone-soft: var(--ly-info-soft); }
+.banner[data-tone='success'] { --tone: var(--ly-success); --tone-soft: var(--ly-success-soft); }
+
+/* Inside a padding="none" Panel the banners stack as rows */
+:global(.ly-banner-list) > .banner {
+  border-radius: 0;
+  border-width: 0 0 1px 3px;
+  border-bottom-color: var(--ly-border);
+}
+
+:global(.ly-banner-list) > .banner:last-child {
+  border-bottom-width: 0;
+}
+
+.bannerIcon {
+  grid-column: 1;
+  grid-row: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--tone);
+  background: var(--tone-soft);
+}
+
+/* Title and message flow inline when they fit; otherwise the message moves to
+   its own line instead of splitting the title mid-phrase. */
+.bannerText {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  margin-left: 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.bannerTitle {
+  font-weight: 600;
+  color: var(--ly-text);
+  overflow-wrap: anywhere;
+}
+
+.bannerMessage {
+  min-width: 0;
+  color: var(--ly-text-2);
+  overflow-wrap: anywhere;
+}
+
+.bannerAction {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+}
+
+.bannerDismiss {
+  grid-column: 4;
+  grid-row: 1;
+  display: flex;
+  margin-left: 6px;
+}
+
+@container ly-banner (max-width: 520px) {
+  .bannerIcon,
+  .bannerDismiss {
+    align-self: start;
+  }
+
+  .bannerText {
+    align-self: center;
+    min-height: 28px;
+    align-content: center;
+  }
+
+  /* Action under the text, left-aligned with it. */
+  .bannerAction {
+    grid-column: 2 / span 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+}
+
+/* ---------- Skeletons ---------- */
+.bone {
+  display: inline-block;
+  flex: none;
+  max-width: 100%;
+  background: var(--ly-hover);
+}
+
+.boneRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.boneLines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.boneTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+:global([data-density='compact']) .boneSecond {
+  display: none;
+}
+
+.skelFrame {
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  overflow: clip;
+}
+
+.skelTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.skelTable th {
+  height: 40px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ly-muted);
+  border-bottom: 1px solid var(--ly-border-strong);
+  white-space: nowrap;
+}
+
+.skelTable td {
+  height: var(--ly-row-h, 52px);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ly-border);
+  vertical-align: middle;
+}
+
+.skelTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.skelTable th:first-child,
+.skelTable td:first-child {
+  padding-left: 16px;
+}
+
+.skelCards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.skelCardRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.skelCardRow:last-child {
+  border-bottom: 0;
+}
+
+/* Phones: DataTable shows two-line cards, so the skeleton does too. */
+@media (max-width: 767px) {
+  .skelRoot[data-mobile='cards'] .skelTable {
+    display: none;
+  }
+
+  .skelRoot[data-mobile='cards'] .skelCards {
+    display: block;
+  }
+}
+
+.skelCard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: var(--ly-card-pad, 20px);
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+}
+
+.skelHero {
+  display: flex;
+  align-items: flex-end;
+  gap: 28px;
+  padding: 32px 0;
+}
+
+@media (max-width: 768px) {
+  .skelHero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .skelHeroArt {
+    width: 120px !important;
+    height: 120px !important;
+  }
+}
+
+.skelGrid {
+  display: grid;
+  gap: 20px 16px;
+}
+
+.skelList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 16px;
+}

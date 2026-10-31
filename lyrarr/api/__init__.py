@@ -4,6 +4,7 @@ from flask_restx import Api
 
 from .albums import api_ns_albums
 from .artists import api_ns_artists
+from .audit import api_ns_audit
 from .backup import api_ns_backup
 from .bulk import api_ns_bulk
 from .dashboard import api_ns_dashboard
@@ -30,6 +31,7 @@ api_ns_list = [
     api_ns_backup,
     api_ns_webhook,
     api_ns_bulk,
+    api_ns_audit,
 ]
 
 authorizations = {

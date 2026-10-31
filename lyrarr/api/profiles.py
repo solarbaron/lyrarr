@@ -3,6 +3,7 @@ from datetime import datetime
 
 from flask import request
 from flask_restx import Namespace, Resource
+from sqlalchemy.exc import IntegrityError
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableProfiles, database, delete, select, update
 
@@ -93,6 +94,19 @@ class ProfileItem(Resource):
             if field in data:
                 values[field] = data[field]
 
+        if 'name' in values:
+            name = str(values['name'] or '').strip()
+            if not name:
+                return {'message': 'Profile name is required'}, 400
+            clash = database.execute(
+                select(TableProfiles.id)
+                .where(TableProfiles.name == name)
+                .where(TableProfiles.id != profile_id)
+            ).first()
+            if clash:
+                return {'message': f'Profile "{name}" already exists'}, 409
+            values['name'] = name
+
         # If setting as default, unset all others first
         if data.get('is_default') is True or data.get('is_default') == 'True':
             database.execute(
@@ -100,11 +114,15 @@ class ProfileItem(Resource):
             )
             values['is_default'] = True
 
-        database.execute(
-            update(TableProfiles)
-            .where(TableProfiles.id == profile_id)
-            .values(**values)
-        )
+        try:
+            database.execute(
+                update(TableProfiles)
+                .where(TableProfiles.id == profile_id)
+                .values(**values)
+            )
+        except IntegrityError:
+            database.rollback()
+            return {'message': 'Profile name already exists'}, 409
 
         updated = database.execute(
             select(TableProfiles).where(TableProfiles.id == profile_id)
@@ -142,6 +160,17 @@ class ProfileItem(Resource):
         database.execute(
             delete(TableProfiles).where(TableProfiles.id == profile_id)
         )
+
+        # Don't leave the "default profile for new albums" setting pointing at
+        # a profile that no longer exists.
+        from lyrarr.app.config import settings, write_config
+        try:
+            current = settings.general.default_profile_id
+            if current is not None and int(current) == profile_id:
+                settings.general.default_profile_id = None
+                write_config()
+        except (TypeError, ValueError):
+            pass
         return {'message': 'Profile deleted'}
 
 

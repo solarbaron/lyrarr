@@ -1,0 +1,239 @@
+/* System (DESIGN.md 8.11). Tokens only. */
+
+.tabPanel {
+  padding-top: 20px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.strong {
+  font-weight: 500;
+  color: var(--ly-text);
+}
+
+.text2 {
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--ly-muted);
+}
+
+.inline {
+  display: inline-block;
+}
+
+.count {
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.count[data-bad] {
+  color: var(--ly-danger);
+  font-weight: 600;
+}
+
+.dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  white-space: nowrap;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary {
+  font-size: 13px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Status: health checks ---------- */
+.checks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto 92px;
+  align-items: center;
+  gap: 14px;
+  min-height: 60px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--ly-border);
+}
+
+.check:first-child {
+  border-top: 0;
+}
+
+.checkIcon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  background: var(--ly-neutral-soft);
+}
+
+.checkText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.checkName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.checkDetail {
+  font-size: 13px;
+  color: var(--ly-text-2);
+  overflow-wrap: anywhere;
+}
+
+.check > :last-child {
+  justify-self: end;
+}
+
+.checkLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.checkLink svg {
+  width: 11px;
+  height: 11px;
+}
+
+@media (max-width: 767px) {
+  .check {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+
+  .checkLink {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+}
+
+/* ---------- Logs ---------- */
+.logTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logTools :global(.mantine-Switch-root) {
+  margin-right: 6px;
+}
+
+.logPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.logViewer {
+  /* Fills the viewport below the header, tabs and toolbar. */
+  height: calc(100vh - 360px);
+  height: calc(100dvh - 360px - var(--ly-bottom-reserved, 0px));
+  min-height: 280px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--ly-surface);
+}
+
+.logPad {
+  padding: 16px;
+}
+
+.logLines {
+  padding: 12px 16px;
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ly-text);
+}
+
+.logLine {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 1px 0 1px 2ch;
+  text-indent: -2ch;
+}
+
+.logTime,
+.logSource {
+  color: var(--ly-muted);
+}
+
+.logLevel {
+  font-weight: 600;
+  color: var(--ly-text-2);
+}
+
+.logLevel[data-level='ERROR'],
+.logLevel[data-level='CRITICAL'] {
+  color: var(--ly-danger);
+}
+
+.logLevel[data-level='WARNING'] {
+  color: var(--ly-warning);
+}
+
+.logLevel[data-level='DEBUG'] {
+  color: var(--ly-muted);
+  font-weight: 500;
+}
+
+.logEmpty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--ly-text-2);
+}
+
+.logFoot {
+  padding: 8px 16px;
+  border-top: 1px solid var(--ly-border);
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 767px) {
+  .logViewer {
+    height: calc(100dvh - 380px - var(--ly-bottom-reserved, 0px));
+  }
+}
+
+/* Unit / label text for the < 768px DataTable cards, which have no column headers. */
+@media (min-width: 768px) {
+  .cardOnly {
+    display: none;
+  }
+}

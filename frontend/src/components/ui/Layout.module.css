@@ -1,0 +1,173 @@
+/* PageHeader + Panel (DESIGN.md 7.1) */
+
+/* ---------- PageHeader ---------- */
+.pageHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.pageHeaderText {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.pageTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ly-text);
+}
+
+.pageCount {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pageSubtitle {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pageActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 767px) {
+  .pageHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pageHeaderText {
+    flex: none;
+  }
+
+  .pageActions {
+    justify-content: flex-start;
+  }
+
+  /* The single primary (last) goes full width */
+  .pageActions > :last-child:global(.mantine-Button-root) {
+    flex: 1 1 100%;
+  }
+}
+
+/* ---------- Panel ---------- */
+.panel {
+  position: relative;
+  min-width: 0;
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  box-shadow: var(--ly-shadow-card);
+  /* clip (not hidden): rounded corners without breaking sticky table headers */
+  overflow: clip;
+  --pad: var(--ly-card-pad, 20px);
+}
+
+.panel[data-padding='sm'] {
+  --pad: 12px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px var(--pad) 0;
+}
+
+.panel[data-padding='none'] .panelHeader {
+  /* Same title centre line as padded panels (12px top + 40px row), so cards
+     side by side line their titles up; 16px sides match the table/list rows. */
+  min-height: 60px;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.panelHeading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ly-text);
+}
+
+.panelSubtitle {
+  font-size: 13px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.panelActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+/* Phones: wide actions (ViewTabs) wrap onto their own line instead of squeezing
+   the title to a word per line. */
+@media (max-width: 767px) {
+  .panelHeader {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .panelHeading {
+    flex: 1 1 auto;
+    min-width: min(100%, 160px);
+  }
+
+  .panelActions {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: auto;
+  }
+}
+
+.panelBody {
+  padding: var(--pad);
+}
+
+.panel[data-padding='none'] .panelBody {
+  padding: 0;
+}
+
+.panelHeader + .panelBody {
+  padding-top: 12px;
+}
+
+.panel[data-padding='none'] .panelHeader + .panelBody {
+  padding-top: 0;
+}

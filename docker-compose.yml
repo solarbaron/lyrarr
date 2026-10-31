@@ -1,13 +1,24 @@
 services:
   lyrarr:
-    build: .
-    image: lyrarr:latest
+    image: ghcr.io/solarbaron/lyrarr:latest
+    # Or build from this checkout instead of pulling the published image:
+    # build: .
     container_name: lyrarr
     restart: unless-stopped
     ports:
       - "6868:6868"
     volumes:
-      - ./data:/config
-      - /path/to/music:/music
+      - ./data:/config            # settings, database, logs, backups, Whisper models
+      - /path/to/music:/music     # must be the same path Lidarr uses for your library
     environment:
       - TZ=Europe/London
+      # Run as your host user instead of root (recommended for new installs).
+      # /config is chowned to this uid/gid on start; /music is not touched,
+      # so PUID/PGID needs write access to it for .lrc files and covers.
+      # Leave unset to keep running as root (existing installs).
+      # - PUID=1000
+      # - PGID=1000
+      # - UMASK=002
+      # Set when Lyrarr is only reached over HTTPS (e.g. behind a TLS reverse
+      # proxy): marks the session cookie Secure.
+      # - LYRARR_HTTPS=1

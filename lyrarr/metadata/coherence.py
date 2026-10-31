@@ -11,16 +11,16 @@ that may indicate wrong lyrics were matched:
 
 import logging
 import os
-import re
 from collections import Counter
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableTracks, database, select
+from lyrarr.metadata.lrc_repair import LRC_META_TAG, LRC_TIMESTAMP
 
 logger = logging.getLogger(__name__)
 
-# LRC timestamp pattern
-_LRC_TS = re.compile(r'\[\d{1,2}:\d{2}[.:]\d{2,3}\]\s*')
-_LRC_META = re.compile(r'^\[(?:ar|ti|al|au|length|by|offset|re|ve|id|la):.*\]$', re.IGNORECASE)
+# LRC timestamp / metadata tag patterns (shared definitions)
+_LRC_TS = LRC_TIMESTAMP
+_LRC_META = LRC_META_TAG
 
 # Minimum tracks needed for statistical analysis
 MIN_TRACKS_FOR_ANALYSIS = 4
@@ -75,12 +75,10 @@ def check_album_coherence(album_id):
         line_count = 0
 
         if os.path.isfile(filepath):
-            try:
-                with open(filepath, encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                line_count = _count_text_lines(content)
-            except Exception:
-                pass
+            from lyrarr.metadata.lyrics_store import read_sidecar
+            sr = read_sidecar(filepath)
+            if sr is not None:
+                line_count = _count_text_lines(sr.text)
 
         track_data.append({
             'id': track.lidarrTrackId,
@@ -134,7 +132,7 @@ def check_album_coherence(album_id):
         for t in track_data:
             if t['line_count'] > 0 and t['line_count'] < threshold:
                 # Also check if the track is short (< 60s) — short tracks naturally have fewer lines
-                duration_s = (t['duration'] or 0) / 1000
+                duration_s = t['duration'] or 0  # TableTracks.duration is seconds
                 if duration_s > 60:
                     issues.append({
                         'track_id': t['id'],

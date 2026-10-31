@@ -1,0 +1,277 @@
+/* Profiles (DESIGN.md 8.9) */
+
+.layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.listPanel {
+  position: sticky;
+  top: calc(var(--ly-sticky-top, 56px) + 16px);
+}
+
+@media (max-width: 1023px) {
+  .listPanel {
+    position: static;
+  }
+}
+
+/* ---------- List ---------- */
+.list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  border-radius: 0;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.item:hover {
+  background: var(--ly-hover);
+}
+
+.item[data-active] {
+  background: var(--ly-active);
+  box-shadow: inset 3px 0 0 var(--ly-accent);
+}
+
+.item:focus-visible {
+  outline-offset: -2px;
+}
+
+.itemHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.itemName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.itemDirty {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--ly-warning);
+}
+
+.itemMeta {
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.itemTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  font-size: 12px;
+  color: var(--ly-muted);
+}
+
+.itemTag + .itemTag::before {
+  content: '·';
+  margin: 0 6px;
+}
+
+/* ---------- Editor ---------- */
+.editorPanel {
+  min-width: 0;
+}
+
+.editorTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.editorName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.editor > * + * {
+  margin-top: 12px;
+}
+
+.blockRow {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.blockRow:last-child {
+  border-bottom: 0;
+}
+
+.blockLabel {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ly-text);
+}
+
+.blockDesc {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ly-muted);
+}
+
+.blockControl {
+  margin-top: 12px;
+}
+
+/* Minimum score: slider + number */
+.score {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.scoreSlider {
+  flex: 1 1 auto;
+}
+
+.scoreInput {
+  flex: none;
+  width: 84px;
+}
+
+/* ---------- Provider order ---------- */
+.providers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--ly-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.provider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 6px 8px 6px 14px;
+  background: var(--ly-surface);
+}
+
+.provider + .provider {
+  border-top: 1px solid var(--ly-border);
+}
+
+.provider[data-off] {
+  background: transparent;
+}
+
+.providerRank {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--ly-neutral-soft);
+  color: var(--ly-text-2);
+}
+
+.provider[data-off] .providerRank {
+  background: transparent;
+  color: var(--ly-muted);
+}
+
+.providerText {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.providerName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ly-text);
+}
+
+.provider[data-off] .providerName {
+  color: var(--ly-text-2);
+}
+
+.providerDesc {
+  font-size: 12.5px;
+  color: var(--ly-muted);
+}
+
+.providerMove {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+}
+
+/* ---------- Drawer (< 1024px) ---------- */
+.drawerBody {
+  padding-bottom: 24px;
+}
+
+.drawerTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.drawerActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: 8px;
+}
+
+/* Selection-mode options: short label + one-line explanation. */
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.optionHint {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ly-muted);
+}

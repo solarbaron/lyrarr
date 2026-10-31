@@ -1,0 +1,228 @@
+/* Shared library pieces: Albums, Artists, Artist detail, Album detail (DESIGN.md 8.2–8.5) */
+
+/* ---------- List | Grid toggle ---------- */
+.viewToggle {
+  flex: none;
+}
+
+.viewToggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.viewToggleLabel svg {
+  font-size: 12px;
+}
+
+.chevron {
+  font-size: 10px;
+  color: var(--ly-muted);
+}
+
+.menuCheck {
+  font-size: 11px;
+  color: var(--ly-accent-text);
+}
+
+/* ---------- AlbumTable cells ---------- */
+.artistLink,
+.mutedText,
+.secondaryText {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.artistLink {
+  color: var(--ly-text-2);
+  text-decoration: none;
+  font-size: 13.5px;
+}
+
+.artistLink:hover {
+  color: var(--ly-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:global(html[data-contrast='high']) .artistLink {
+  text-decoration: underline;
+}
+
+.secondaryText {
+  color: var(--ly-text-2);
+  font-size: 13px;
+}
+
+.mutedText {
+  color: var(--ly-muted);
+  font-size: 13px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-text-2);
+  font-size: 13px;
+}
+
+.lyricsCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Mobile card status line: "Cover ○ Missing · Lyrics ○ Missing 0/16" */
+.cardStatusItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cardStatusLabel {
+  flex: none;
+  /* Cover / Lyrics dots line up when the two wrap onto their own lines */
+  min-width: 42px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ly-muted);
+}
+
+/* A status dot that can sit inline (mobile card meta line: "Default · ○ Unmonitored") */
+.inlineStatus {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+/* In a table cell it is the only content: no inline line box around it */
+td > .inlineStatus,
+td > * > .inlineStatus {
+  display: flex;
+}
+
+.lyricsDot {
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+
+.mono {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+/* ---------- Cover grids ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 28px 20px;
+  margin: 0;
+  padding: 4px 0 8px;
+  list-style: none;
+}
+
+.grid[data-dim] {
+  opacity: 0.6;
+  transition: opacity var(--ly-dur-fast) var(--ly-ease);
+}
+
+@media (max-width: 767px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 20px 14px;
+  }
+}
+
+.gridFooter {
+  margin-top: 20px;
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  box-shadow: var(--ly-shadow-card);
+}
+
+.gridEmpty {
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+}
+
+/* ---------- Toolbar row: view tabs + view toggle ---------- */
+.tabsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.tabsRow > :first-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filters {
+  margin-bottom: 16px;
+}
+
+.moreButton[data-active] {
+  color: var(--ly-accent-text);
+}
+
+/* ---------- FileName: the shared head ellipsizes first, the tail stays ---------- */
+.fileName {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre;
+}
+
+.fileHead {
+  /* Shrinks long before the tail does (shrink is weighted by size). */
+  flex: 0 100000 auto;
+  min-width: 1.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileHead[data-collapsed] {
+  /* The shared prefix is the same on every row: always one fixed "…" */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.fileElided {
+  flex: none;
+  /* a gap so "… 01 - Song.flac" doesn't read as "...01" */
+  margin-inline-end: 0.3em;
+  color: var(--ly-muted);
+}
+
+.fileTail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

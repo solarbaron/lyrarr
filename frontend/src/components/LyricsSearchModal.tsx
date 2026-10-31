@@ -1,10 +1,23 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Modal, Loader, Badge, Button, Group, Progress, Tooltip, TextInput } from '@mantine/core';
+import { Modal, Loader, Button, Group, TextInput, Collapse, Kbd } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faAlignLeft, faArrowDown, faChevronDown, faCircleExclamation, faMagnifyingGlass, faRotateRight, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { errorMessage, notifyError } from '../notify';
+import { refreshQueries } from '../queryRefresh';
 import { searchLyrics, downloadLyrics, blacklistLyrics } from '../api';
 import type { LyricsResult } from '../types';
 import api from '../api';
+import { MOD_KEY } from '../shortcuts';
+import { Banner, EmptyState, Meter, StatusChip, Tag } from './ui';
+import LyricsCandidateList from './LyricsCandidateList';
+import { parseLrcLines } from './lyrics/lrc';
+import { providerName } from './lyrics/providers';
+import { useHiddenBelow } from './lyrics/useHiddenBelow';
+import { MatchDetails, resultScore, scoreTone } from './lyrics/MatchDetails';
+import c from './lyrics/LyricsSearchModal.module.css';
 
 interface Props {
   trackId: number;
@@ -12,46 +25,65 @@ interface Props {
   albumId: number;
   opened: boolean;
   onClose: () => void;
+  /** Context line under the title ("Swans · To Be Kind"). */
+  artistName?: string;
+  albumTitle?: string;
+  /** Called after a result was saved (before onClose), e.g. to move the Wanted cursor. */
+  onApplied?: (result: LyricsResult) => void;
 }
 
-function MatchScoreBar({ label, score, detail }: { label: string; score: number; detail?: string }) {
-  const color = score >= 90 ? 'green' : score >= 70 ? 'yellow' : score >= 50 ? 'orange' : 'red';
+/** Full text of a candidate for the preview pane: synced lines with muted timestamps. */
+function FullPreview({ result }: { result: LyricsResult }) {
+  const text = result.synced_lyrics || result.plain_lyrics || result.synced_preview || result.plain_preview || '';
+  const lines = useMemo(() => parseLrcLines(text), [text]);
+  if (!text.trim()) return <div className={c.previewEmpty}>(no preview)</div>;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, marginBottom: 4 }}>
-      <span style={{ width: 50, color: 'var(--text-secondary)', flexShrink: 0 }}>{label}</span>
-      <Progress value={score} color={color} size="sm" style={{ flex: 1 }} />
-      <span style={{ width: 30, textAlign: 'right', color: 'var(--text-secondary)', flexShrink: 0 }}>{score}%</span>
-      {detail && (
-        <Tooltip label={detail} withArrow>
-          <span style={{ cursor: 'help', color: 'var(--text-secondary)', fontSize: 10 }}>ⓘ</span>
-        </Tooltip>
-      )}
+    <div className={c.fullPreview} tabIndex={0} aria-label={`Lyrics from ${providerName(result.provider)}`}>
+      {lines.map(l => (
+        <div key={l.key} className={c.fullLine}>
+          {l.isTs && <span className={c.fullTs}>{l.tag}</span>}
+          <span>{l.text || ' '}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened, onClose }: Props) {
+/** The "Find lyrics" picker (DESIGN.md 8.14). */
+export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened, onClose, artistName, albumTitle, onApplied }: Props) {
   const queryClient = useQueryClient();
+  const fullScreen = useMediaQuery('(max-width: 767px)') ?? false;
+  const twoPane = useMediaQuery('(min-width: 1024px)') ?? true;
+  // `customQuery` is what's in the input box; `submittedQuery` is what we
+  // actually searched for. Only submitting (Enter / Search) changes the query
+  // key, so typing doesn't fire a provider search per keystroke.
   const [customQuery, setCustomQuery] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [highlighted, setHighlighted] = useState(0);
+  // null = automatic (open only when there is nothing to pick from)
+  const [refineToggled, setRefineToggled] = useState<boolean | null>(null);
 
-  // Custom search function that supports manual query override
-  const searchFn = async () => {
-    if (useCustom && customQuery.trim()) {
-      // Send a manual search query as track_name with no artist
-      const resp = await api.get(`/metadata/lyrics/search/${trackId}`, {
-        params: { custom_query: customQuery.trim() },
-      });
-      return resp.data as { results: LyricsResult[] };
-    }
-    return searchLyrics(trackId);
-  };
-
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ['lyrics-search', trackId, useCustom ? customQuery : ''],
-    queryFn: searchFn,
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
+    queryKey: ['lyrics-search', trackId, submittedQuery],
+    queryFn: async () => {
+      if (submittedQuery) {
+        // Send a manual search query as track_name with no artist
+        const resp = await api.get(`/metadata/lyrics/search/${trackId}`, {
+          params: { custom_query: submittedQuery },
+        });
+        return resp.data as { results: LyricsResult[] };
+      }
+      return searchLyrics(trackId);
+    },
     enabled: opened,
   });
+
+  const submitSearch = () => setSubmittedQuery(customQuery.trim());
+  const clearSearch = () => { setCustomQuery(''); setSubmittedQuery(''); };
+
+  const results = useMemo(() => data?.results || [], [data]);
+  useEffect(() => { setHighlighted(0); }, [results]);
+  const current = results[Math.min(highlighted, Math.max(0, results.length - 1))] as LyricsResult | undefined;
 
   const downloadMutation = useMutation({
     mutationFn: (result: LyricsResult) => downloadLyrics(trackId, {
@@ -59,14 +91,20 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
       plain_lyrics: result.plain_lyrics,
       provider: result.provider,
     }),
-    onSuccess: () => {
-      notifications.show({ title: 'Done', message: 'Lyrics saved!', color: 'green' });
+    onSuccess: (_data, result) => {
+      notifications.show({
+        title: 'Lyrics saved',
+        message: `Saved ${result.synced_lyrics ? 'synced' : 'plain'} lyrics from ${providerName(result.provider)}`,
+        color: 'success',
+      });
       queryClient.invalidateQueries({ queryKey: ['album', String(albumId)] });
+      queryClient.invalidateQueries({ queryKey: ['lyrics-read', trackId] });
+      // Every Wanted list (by track, by album), its stats and the sidebar counts.
+      refreshQueries(queryClient, ['wanted', 'nav']);
+      onApplied?.(result);
       onClose();
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to save lyrics', color: 'red' });
-    },
+    onError: (err) => notifyError('Lyrics not saved', err),
   });
 
   const blacklistMutation = useMutation({
@@ -77,256 +115,265 @@ export default function LyricsSearchModal({ trackId, trackTitle, albumId, opened
       rescan: false,  // just record it; don't touch the saved file from here
     }),
     onSuccess: () => {
-      notifications.show({ title: 'Blacklisted', message: 'This result won\'t be auto-selected again', color: 'orange' });
-      refetch();  // re-run so the blacklisted result drops out of the list
+      notifications.show({ title: 'Result blocked', message: 'This result won\'t be auto-selected again', color: 'warning' });
+      // Re-run the current search so the blacklisted result drops out.
+      queryClient.invalidateQueries({ queryKey: ['lyrics-search', trackId, submittedQuery] });
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to blacklist', color: 'red' });
-    },
+    onError: (err) => notifyError('Result not blocked', err),
   });
 
-  const results = data?.results || [];
-  const bestScore = results.length > 0 ? Math.round((results[0]?.score || 0) * 100) : 0;
+  // Once the first results arrive, focus moves from the header close button (Mantine's
+  // initial focus) to the highlighted candidate, unless the user already moved it.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const hasResults = results.length > 0;
+  useEffect(() => {
+    if (!opened || fullScreen || !hasResults) return;
+    // After Mantine's focus trap has placed its initial focus (also a timeout).
+    const timer = window.setTimeout(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body && !active.closest('.mantine-Modal-header')) return;
+      contentRef.current?.querySelector<HTMLElement>('li[aria-current]')?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [opened, fullScreen, hasResults]);
+
+  // The list pane can end flush with a card edge: say how many cards sit below it.
+  const listPane = useHiddenBelow(':scope > ol > li', [results, highlighted, refineToggled, submittedQuery]);
+
+  const bestScore = results.length > 0 ? resultScore(results[0]) : 0;
   const hasLowConfidence = results.length > 0 && bestScore < 60;
+  const refineOpen = refineToggled ?? (!isLoading && (results.length === 0 || !!submittedQuery));
+
+  const apply = () => {
+    if (current && !downloadMutation.isPending) downloadMutation.mutate(current);
+  };
+
+  // On the modal root, so the keys work from the moment it opens (Mantine focuses
+  // the header close button first, which sits outside the body).
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      apply();
+      return;
+    }
+    const t = e.target as HTMLElement;
+    const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable;
+    if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^[1-9]$/.test(e.key)) {
+      const i = Number(e.key) - 1;
+      if (i < results.length) {
+        e.preventDefault();
+        setHighlighted(i);
+      }
+    }
+  };
+
+  const context = [artistName, albumTitle].filter(Boolean).join(' · ');
+
+  const list = (
+    <LyricsCandidateList
+      results={results}
+      highlighted={highlighted}
+      onHighlight={setHighlighted}
+      onApply={r => downloadMutation.mutate(r)}
+      onNeverSelect={r => blacklistMutation.mutate(r)}
+      applying={downloadMutation.isPending}
+      neverSelecting={blacklistMutation.isPending}
+      showPreview={!twoPane}
+      autoFocusHighlighted={!fullScreen}
+    />
+  );
+
+  let body;
+  if (isLoading) {
+    body = (
+      <div className={c.loading} role="status">
+        <Loader />
+        <span>Searching lyrics providers…</span>
+      </div>
+    );
+  } else if (isError) {
+    body = (
+      <EmptyState
+        size="sm"
+        tone="danger"
+        icon={faCircleExclamation}
+        title="Couldn't search lyrics providers"
+        message={errorMessage(error, 'The search request failed.')}
+        action={<Button variant="default" leftSection={<FontAwesomeIcon icon={faRotateRight} />} loading={isFetching} onClick={() => refetch()}>Retry</Button>}
+      />
+    );
+  } else if (results.length === 0) {
+    body = (
+      <EmptyState
+        size="sm"
+        icon={faAlignLeft}
+        title="No lyrics found from any provider"
+        message={submittedQuery
+          ? 'Try a different spelling of the title or artist, or clear the custom query to go back to the automatic search.'
+          : 'Try a custom search query above with a different title or artist spelling.'}
+      />
+    );
+  } else if (twoPane && current) {
+    const score = resultScore(current);
+    body = (
+      <div className={c.panes}>
+        <div className={c.listPane} ref={listPane.ref}>
+          {list}
+          {listPane.hidden > 0 && (
+            <div className={c.moreBelow}>
+              {/* Pointer shortcut only: keyboard users move with the arrows / 1–9 and hear the list size. */}
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                className={c.moreBelowPill}
+                onClick={() => listPane.element?.scrollBy({ top: listPane.element.clientHeight * 0.8, behavior: 'smooth' })}
+              >
+                <FontAwesomeIcon icon={faArrowDown} />
+                {listPane.hidden} more below
+              </button>
+            </div>
+          )}
+        </div>
+        <section className={c.previewPane} aria-label="Preview of the highlighted result">
+          <div className={c.previewHead}>
+            <span className={c.previewProvider}>{providerName(current.provider)}</span>
+            <StatusChip domain="trackLyrics" status="available" synced={!!current.synced_lyrics} size="sm" withTooltip={false} />
+            {current.is_composite && <Tag>Composite</Tag>}
+            <span className={c.spacer} />
+            <Meter
+              segments={[{ value: score, tone: scoreTone(score), label: 'Match' }]}
+              total={100}
+              size="xs"
+              width={60}
+              withTooltip={false}
+              aria-label="Match score"
+            />
+            <span className={c.previewScore}>{score}%</span>
+          </div>
+          {(current.artist_name || current.track_name) && (
+            <div className={c.previewMeta}>
+              {current.artist_name ? `${current.artist_name} — ` : ''}{current.track_name || ''}
+            </div>
+          )}
+          <MatchDetails result={current} />
+          <FullPreview result={current} />
+        </section>
+      </div>
+    );
+  } else {
+    body = list;
+  }
 
   return (
     <Modal
       opened={opened}
       onClose={onClose}
-      title={`Lyrics: ${trackTitle}`}
-      size="lg"
-      styles={{
-        content: { background: 'var(--surface-bg)' },
-        header: { background: 'var(--surface-bg)' },
-      }}
-    >
-      {/* Custom Query Override */}
-      <div style={{
-        padding: '10px 14px',
-        borderRadius: 10,
-        background: 'var(--card-bg)',
-        border: '1px solid var(--card-border)',
-        marginBottom: 12,
-      }}>
-        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
-          Override automatic search with a custom query:
-        </div>
-        <Group gap="sm">
-          <TextInput
-            placeholder="e.g. Bohemian Rhapsody Queen"
-            value={customQuery}
-            onChange={(e) => setCustomQuery(e.currentTarget.value)}
-            size="xs"
-            style={{ flex: 1 }}
-            styles={{
-              input: {
-                background: 'rgba(0,0,0,0.2)',
-                border: '1px solid var(--card-border)',
-                color: 'var(--text-primary)',
-              },
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && customQuery.trim()) {
-                setUseCustom(true);
-                refetch();
-              }
-            }}
-          />
-          <Button
-            variant="light"
-            color="violet"
-            size="xs"
-            onClick={() => {
-              if (customQuery.trim()) {
-                setUseCustom(true);
-                refetch();
-              } else {
-                setUseCustom(false);
-                refetch();
-              }
-            }}
-          >
-            {customQuery.trim() ? 'Search' : 'Reset'}
-          </Button>
-          {useCustom && (
-            <Button
-              variant="subtle"
-              color="gray"
-              size="xs"
-              onClick={() => {
-                setCustomQuery('');
-                setUseCustom(false);
-                refetch();
-              }}
-            >
-              Clear
-            </Button>
-          )}
-        </Group>
-      </div>
-
-      {isLoading ? (
-        <div style={{ textAlign: 'center', padding: 40 }}>
-          <Loader color="violet" />
-          <p style={{ color: 'var(--text-secondary)', marginTop: 12 }}>Searching lyrics providers...</p>
-        </div>
-      ) : results.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40 }}>
-          <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>📝</div>
-          <p style={{ color: 'var(--text-secondary)' }}>No lyrics found from any provider.</p>
-          {!useCustom && (
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 }}>
-              Try entering a custom search query above with different title/artist spelling.
-            </p>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Low confidence warning */}
-          {hasLowConfidence && (
-            <div style={{
-              padding: '10px 14px',
-              borderRadius: 10,
-              background: 'rgba(255, 170, 0, 0.1)',
-              border: '1px solid rgba(255, 170, 0, 0.3)',
-              fontSize: 13,
-              color: '#ffa600',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}>
-              <span style={{ fontSize: 18 }}>⚠️</span>
-              <div>
-                <strong>Low confidence match</strong> (best: {bestScore}%) — these lyrics may not
-                match this track. Consider using a custom search query above or manually verifying.
-              </div>
-            </div>
-          )}
-
-          <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0 }}>
-            {results.length} result{results.length !== 1 ? 's' : ''} found. Click "Use" to save.
-          </p>
-
-          {results.map((result: LyricsResult, idx: number) => {
-            const md = result.match_details || {};
-            const overallScore = Math.round((result.score || 0) * 100);
-            const scoreColor = overallScore >= 80 ? 'green' : overallScore >= 60 ? 'yellow' : overallScore >= 40 ? 'orange' : 'red';
-
-            return (
-              <div
-                key={idx}
-                style={{
-                  borderRadius: 10,
-                  padding: 16,
-                  background: 'var(--card-bg)',
-                  border: '1px solid var(--card-border)',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent-primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--card-border)')}
-              >
-                <Group justify="space-between" mb={8}>
-                  <Group gap="xs">
-                    <Badge size="sm" color="violet" variant="filled">{result.provider}</Badge>
-                    {result.synced_lyrics && <Badge size="sm" color="green" variant="light">Synced</Badge>}
-                    {result.plain_lyrics && !result.synced_lyrics && <Badge size="sm" color="gray" variant="light">Plain</Badge>}
-                    {(result.providers_agree ?? 0) > 1 && (
-                      <Badge size="sm" color="teal" variant="light">✓ {result.providers_agree} providers agree</Badge>
-                    )}
-                    {result.is_composite && (
-                      <Badge size="sm" color="cyan" variant="light">Composite</Badge>
-                    )}
-                  </Group>
-                  <Group gap="xs">
-                    <Badge size="sm" color={scoreColor} variant="light">{overallScore}% match</Badge>
-                    <Button
-                      variant="gradient"
-                      gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-                      size="compact-xs"
-                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); downloadMutation.mutate(result); }}
-                      loading={downloadMutation.isPending}
-                    >
-                      Use
-                    </Button>
-                    <Tooltip label="Never auto-select this result for this track">
-                      <Button
-                        variant="subtle"
-                        color="red"
-                        size="compact-xs"
-                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); blacklistMutation.mutate(result); }}
-                        loading={blacklistMutation.isPending}
-                      >
-                        Blacklist
-                      </Button>
-                    </Tooltip>
-                  </Group>
-                </Group>
-
-                {/* Result metadata */}
-                {(result.track_name || result.artist_name) && (
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                    {result.artist_name ? `${result.artist_name} — ` : ''}{result.track_name || ''}
-                    {result.duration != null && (
-                      <span style={{ marginLeft: 8, opacity: 0.6 }}>
-                        ({Math.floor(result.duration / 60)}:{String(Math.round(result.duration % 60)).padStart(2, '0')})
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Always-visible Match Breakdown */}
-                {(md.title_score !== undefined || md.artist_score !== undefined || md.duration_score !== undefined) && (
-                  <div style={{
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(0,0,0,0.15)',
-                    marginBottom: 8,
-                  }}>
-                    {md.title_score !== undefined && (
-                      <MatchScoreBar
-                        label="Title"
-                        score={md.title_score}
-                        detail={`"${md.title_query || ''}" → "${md.title_result || ''}"`}
-                      />
-                    )}
-                    {md.artist_score !== undefined && (
-                      <MatchScoreBar
-                        label="Artist"
-                        score={md.artist_score}
-                        detail={`"${md.artist_query || ''}" → "${md.artist_result || ''}"`}
-                      />
-                    )}
-                    {md.duration_score !== undefined && (
-                      <MatchScoreBar
-                        label="Duration"
-                        score={md.duration_score}
-                        detail={md.duration_diff != null ? `${md.duration_diff.toFixed(1)}s difference` : 'No duration data'}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {/* Lyrics preview */}
-                <pre style={{
-                  margin: 0,
-                  padding: 10,
-                  borderRadius: 6,
-                  background: 'rgba(0,0,0,0.2)',
-                  fontSize: 11,
-                  color: 'var(--text-secondary)',
-                  whiteSpace: 'pre-wrap',
-                  maxHeight: 120,
-                  overflow: 'hidden',
-                  lineHeight: 1.4,
-                }}>
-                  {result.synced_preview || result.plain_preview || '(no preview)'}
-                  {(result.synced_lyrics?.length && result.synced_lyrics.length > 300) || (result.plain_lyrics?.length && result.plain_lyrics.length > 300) ? '\n...' : ''}
-                </pre>
-              </div>
-            );
-          })}
-        </div>
+      size={880}
+      fullScreen={fullScreen}
+      classNames={{ content: c.modalContent, body: c.body, title: c.modalTitle }}
+      onKeyDown={onKeyDown}
+      title={(
+        <span className={c.titleWrap}>
+          <span className={c.title}>Find lyrics — {trackTitle}</span>
+          {context && <span className={c.context}>{context}</span>}
+        </span>
       )}
+    >
+      <div className={c.layout} data-full-screen={fullScreen || undefined}>
+        <div className={c.toolbar}>
+          <span className={c.summary} aria-live="polite">
+            {isLoading
+              ? 'Searching…'
+              : isError
+                ? 'Search failed'
+                : results.length > 0
+                  ? <>{results.length} result{results.length !== 1 ? 's' : ''} · best {bestScore}%{submittedQuery ? <> · custom query “{submittedQuery}”</> : null}</>
+                  : submittedQuery ? <>No results for “{submittedQuery}”</> : 'No results'}
+          </span>
+          <Button
+            variant="subtle"
+            color="gray"
+            size="xs"
+            aria-expanded={refineOpen}
+            aria-controls="lyrics-refine"
+            leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} />}
+            rightSection={<FontAwesomeIcon icon={faChevronDown} className={c.chevron} data-open={refineOpen || undefined} />}
+            onClick={() => setRefineToggled(!refineOpen)}
+          >
+            Refine search
+          </Button>
+        </div>
+
+        <Collapse in={refineOpen} id="lyrics-refine">
+          <div className={c.refine}>
+            <TextInput
+              placeholder="e.g. Bohemian Rhapsody Queen"
+              value={customQuery}
+              onChange={(e) => setCustomQuery(e.currentTarget.value)}
+              className={c.refineInput}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitSearch();
+              }}
+              aria-label="Custom lyrics search query"
+              description="Overrides the automatic title and artist search"
+            />
+            <Group gap="xs" className={c.refineButtons}>
+              <Button
+                variant="default"
+                onClick={submitSearch}
+                loading={isFetching && !isLoading}
+              >
+                {customQuery.trim() || !submittedQuery ? 'Search' : 'Reset'}
+              </Button>
+              {(submittedQuery || customQuery) && (
+                <Button variant="subtle" color="gray" onClick={clearSearch}>
+                  Clear
+                </Button>
+              )}
+            </Group>
+          </div>
+        </Collapse>
+
+        {hasLowConfidence && (
+          <div className={c.banner}>
+            <Banner
+              tone="warning"
+              icon={faTriangleExclamation}
+              title={`Low confidence match (best: ${bestScore}%)`}
+              message="These lyrics may not match this track. Try a custom search query or check the preview before using one."
+            />
+          </div>
+        )}
+
+        <div className={c.content} ref={contentRef}>{body}</div>
+
+        <div className={c.footer} data-full-screen={fullScreen || undefined}>
+          {results.length > 0 && (
+            <span className={c.hints} aria-hidden="true">
+              <Kbd>1</Kbd>–<Kbd>{Math.min(9, results.length)}</Kbd> pick
+              <span className={c.hintGap} />
+              <Kbd>{MOD_KEY}</Kbd> <Kbd>Enter</Kbd> use
+            </span>
+          )}
+          <Group justify="flex-end" gap="xs" className={c.footerButtons}>
+            {/* No candidate (loading, error or no results): nothing to use, only a way out. */}
+            <Button variant={current ? 'subtle' : 'default'} color={current ? 'gray' : undefined} onClick={onClose}>
+              {current ? 'Cancel' : 'Close'}
+            </Button>
+            {current && (
+              <Button
+                variant="filled"
+                onClick={apply}
+                loading={downloadMutation.isPending}
+              >
+                Use {providerName(current.provider)}
+              </Button>
+            )}
+          </Group>
+        </div>
+      </div>
     </Modal>
   );
 }

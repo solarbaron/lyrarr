@@ -1,0 +1,21 @@
+.message {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ly-text-2);
+  overflow-wrap: anywhere;
+}
+
+.message strong,
+.message em {
+  color: var(--ly-text);
+  font-weight: 600;
+  font-style: normal;
+}
+
+.require {
+  margin-top: 16px;
+}
+
+.footer {
+  margin-top: 24px;
+}

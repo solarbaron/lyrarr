@@ -1,0 +1,630 @@
+/* Mass edit (DESIGN.md 8.8) */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(480px, 1fr) 360px;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Left pane: library tree ---------- */
+.libraryPanel {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+/* A narrow tree (1024–1279px, beside the actions pane) gives the year's room
+   to the titles. The "Year" header cell and the album rows' year cells share
+   the .year class, so header and rows always hide together. */
+@container (max-width: 640px) {
+  .year {
+    display: none;
+  }
+}
+
+.toolbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.genre {
+  width: 180px;
+}
+
+/* Keep search, genre and the selection buttons on one line at 1440. */
+.toolbar :global(.mantine-TextInput-root) {
+  flex-basis: 260px;
+}
+
+@media (max-width: 767px) {
+  .genre {
+    width: 100%;
+  }
+}
+
+.treeHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--ly-border);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ly-muted);
+}
+
+.treeHeadLabel {
+  flex: none;
+  white-space: nowrap;
+}
+
+.treeHeadKeys {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.treeHeadKeys kbd {
+  display: inline-block;
+  min-width: 18px;
+  margin: 0 1px 0 6px;
+  padding: 0 4px;
+  border: 1px solid var(--ly-border-strong);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--ly-text-2);
+  background: var(--ly-neutral-soft);
+}
+
+.treeHeadKeys kbd svg {
+  width: 9px;
+  height: 11px;
+  vertical-align: -1px;
+}
+
+.treeHeadKeys kbd svg + svg {
+  margin-left: 2px;
+}
+
+.treeHeadCols {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+@media (max-width: 1279px) {
+  .treeHeadKeys {
+    visibility: hidden;
+  }
+}
+
+.tree {
+  outline: none;
+}
+
+.artistItem {
+  border-bottom: 1px solid var(--ly-border);
+  /* Let the browser skip layout/paint for off-screen artists. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 41px;
+}
+
+.artistItem:last-child {
+  border-bottom: 0;
+}
+
+/* The focus ring sits on the row, not around the whole artist + albums block. */
+.artistItem:focus-visible {
+  outline: none;
+}
+
+.artistItem:focus-visible > .row,
+.albumRow:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: -2px;
+}
+
+html[data-contrast='high'] .artistItem:focus-visible > .row,
+html[data-contrast='high'] .albumRow:focus-visible {
+  outline-width: 3px;
+  outline-offset: -3px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px 0 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.row:hover {
+  background: var(--ly-hover);
+}
+
+.row[data-selected] {
+  background: var(--ly-active);
+  box-shadow: inset 3px 0 0 var(--ly-accent);
+}
+
+.albumRow {
+  padding-left: 48px;
+  font-size: 13px;
+}
+
+.albumRow + .albumRow {
+  border-top: 1px solid var(--ly-border);
+}
+
+.row[data-level='1'] + [role='group'] {
+  border-top: 1px solid var(--ly-border);
+}
+
+.check {
+  display: inline-flex;
+  flex: none;
+}
+
+.chevron {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--ly-muted);
+  transition: transform var(--ly-dur-fast) var(--ly-ease);
+}
+
+.chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+.name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ly-text);
+}
+
+.meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row[data-selected] .meta,
+.row[data-partial] .meta {
+  color: var(--ly-text-2);
+}
+
+.albumTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ly-text);
+}
+
+/* Artist rows: album totals under the Lyrics / Cover headers. */
+.artistCols {
+  display: contents;
+}
+
+.coverCount {
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.year {
+  flex: none;
+  width: 44px;
+  /* breathing room before the Lyrics column (header and rows) */
+  margin-inline-end: 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-text-2);
+}
+
+.treeHead .year {
+  color: inherit;
+}
+
+.meter {
+  flex: none;
+  width: 104px;
+  display: inline-flex;
+}
+
+.cover {
+  flex: none;
+  width: 84px;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.openSpacer {
+  flex: none;
+  width: 22px;
+}
+
+.openLink {
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--ly-dur-fast) var(--ly-ease);
+}
+
+.row:hover .openLink,
+.row:focus-within .openLink,
+.artistItem:focus-visible > .row .openLink,
+.albumRow:focus-visible .openLink,
+.openLink:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .openLink {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Phones: title on the first line, lyrics + cover on the second. */
+  .albumRow {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 52px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 40px;
+    row-gap: 2px;
+  }
+
+  .albumRow .albumTitle {
+    order: 1;
+    flex: 1 1 calc(100% - 16px - 22px - 24px);
+  }
+
+  .albumRow .openLink {
+    order: 2;
+  }
+
+  .albumRow .meter {
+    order: 3;
+    width: auto;
+    margin-left: 28px;
+  }
+
+  .albumRow .cover {
+    order: 4;
+  }
+
+  .year,
+  .treeHeadCols .year,
+  .artistCols {
+    display: none;
+  }
+
+  .cover {
+    width: auto;
+  }
+
+  .treeHead {
+    display: none;
+  }
+}
+
+/* ---------- Right pane ---------- */
+/* Sticky, but never taller than the viewport: when Running + Selection +
+   Recent events don't fit, the pane scrolls as one (wheel/touch over it, or
+   Tab into it). The 2px padding keeps panel borders from being clipped by the
+   scroll container. */
+.side {
+  position: sticky;
+  top: calc(var(--ly-sticky-top, 56px) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  max-height: calc(100vh - var(--ly-sticky-top, 56px) - 32px - var(--ly-bottom-reserved, 0px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  margin: -2px;
+  padding: 2px;
+}
+
+/* Below 1024px the pane sits above the library tree (job progress stays in
+   view); Recent events collapses to the latest item there. */
+@media (max-width: 1023px) {
+  .side {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.sideCard {
+  flex: none;
+  min-width: 0;
+}
+
+/* Running job */
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.jobHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.jobTile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--ly-accent-soft);
+  color: var(--ly-accent-text);
+  font-size: 14px;
+}
+
+.jobTile[data-tone='success'] {
+  background: var(--ly-success-soft);
+  color: var(--ly-success);
+}
+
+.jobTile[data-tone='danger'] {
+  background: var(--ly-danger-soft);
+  color: var(--ly-danger);
+}
+
+.jobText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.jobLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.jobCurrent {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.jobError {
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+  overflow-wrap: anywhere;
+}
+
+.jobCount {
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Selection */
+.facts {
+  margin: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--ly-border);
+  font-size: 13px;
+}
+
+.facts > div:last-child {
+  border-bottom: 0;
+}
+
+.facts dt {
+  color: var(--ly-text-2);
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 500;
+  color: var(--ly-text);
+}
+
+.btnLabel {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.actionStack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.disabledWrap {
+  display: block;
+  border-radius: 8px;
+}
+
+.disabledWrap > :global(.mantine-Button-root) {
+  pointer-events: none;
+}
+
+.danger {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--ly-danger-soft);
+  border-radius: 10px;
+}
+
+html[data-contrast='high'] .danger {
+  border-color: var(--ly-danger);
+}
+
+.dangerTitle {
+  color: var(--ly-danger);
+}
+
+.dangerNote {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ly-muted);
+}
+
+/* Recent events */
+.eventsEmpty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ly-muted);
+}
+
+.events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--ly-border);
+  font-size: 13px;
+}
+
+.event:last-child {
+  border-bottom: 0;
+}
+
+.event[data-replay] .eventTitle {
+  color: var(--ly-text-2);
+}
+
+.eventTile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: var(--ly-neutral-soft);
+  color: var(--ly-text-2);
+}
+
+.eventTile[data-tone='success'] { background: var(--ly-success-soft); color: var(--ly-success); }
+.eventTile[data-tone='warning'] { background: var(--ly-warning-soft); color: var(--ly-warning); }
+.eventTile[data-tone='danger'] { background: var(--ly-danger-soft); color: var(--ly-danger); }
+.eventTile[data-tone='info'] { background: var(--ly-info-soft); color: var(--ly-info); }
+
+.eventTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ly-text);
+}
+
+.eventTime {
+  flex: none;
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Modals ---------- */
+.modalStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modalLead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ly-text-2);
+}
+
+.modalLead strong {
+  color: var(--ly-text);
+  font-weight: 600;
+}
+
+.modalNote {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ly-muted);
+}
+
+.radioStack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.modalFooter {
+  margin-top: 8px;
+}

@@ -1,0 +1,569 @@
+/* Visual overrides for Mantine components (DESIGN.md 5.3).
+   Attached through theme.components in mantine.ts. Mantine's CSS is imported as
+   styles.layer.css (@layer mantine), so these unlayered rules win without !important.
+   Only var(--ly-*), color-mix() over them, transparent and currentColor are used here. */
+
+/* ---------- Buttons ---------- */
+.button {
+  --button-height-xs: 28px;
+  --button-height-sm: 34px;
+  --button-height-md: 40px;
+  --button-padding-x-xs: 10px;
+  --button-padding-x-sm: 14px;
+  --button-padding-x-md: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease), border-color var(--ly-dur-fast) var(--ly-ease), color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.button[data-variant='default'] {
+  border-color: var(--ly-border-strong);
+}
+
+.button:disabled:not([data-loading]),
+.button[data-disabled]:not([data-loading]) {
+  opacity: 0.45;
+  color: var(--button-color);
+  background: var(--button-bg);
+  border: var(--button-bd);
+}
+
+.button[data-variant='default']:disabled:not([data-loading]),
+.button[data-variant='default'][data-disabled]:not([data-loading]) {
+  color: var(--mantine-color-default-color);
+  background: var(--mantine-color-default);
+  border: 1px solid var(--ly-border-strong);
+}
+
+.actionIcon {
+  transition: background-color var(--ly-dur-fast) var(--ly-ease), color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.actionIcon:disabled:not([data-loading]),
+.actionIcon[data-disabled]:not([data-loading]) {
+  opacity: 0.45;
+  color: var(--ai-color);
+  background: var(--ai-bg);
+  border: var(--ai-bd);
+}
+
+.actionIcon[data-variant='default'] {
+  border-color: var(--ly-border-strong);
+}
+
+/* ---------- Badges ---------- */
+.badge {
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-contrast='high'] .badge {
+  border: 1px solid currentColor;
+}
+
+/* ---------- Inputs ---------- */
+.inputWrapper {
+  --input-height-xs: 28px;
+  --input-height-sm: 34px;
+  --input-height-md: 40px;
+  --input-color: var(--ly-text);
+  --input-placeholder-color: var(--ly-muted);
+  --input-section-color: var(--ly-text-2);
+}
+
+.inputWrapper[data-variant='default'],
+.inputWrapper[data-variant='filled'] {
+  --input-bd: var(--ly-control);
+  --input-bd-focus: var(--ly-focus);
+}
+
+.inputWrapper[data-variant='default'] {
+  --input-bg: var(--ly-surface);
+}
+
+.inputWrapper[data-variant='filled'] {
+  --input-bg: var(--ly-neutral-soft);
+}
+
+.inputWrapper[data-error]:not([data-variant='unstyled']) {
+  --input-bd: var(--ly-danger);
+  --input-bd-focus: var(--ly-danger);
+  --input-color: var(--ly-danger);
+  --input-section-color: var(--ly-danger);
+}
+
+.input {
+  transition: border-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.input:disabled,
+.input[data-disabled] {
+  opacity: 0.5;
+  background-color: var(--input-bg);
+  color: var(--input-color);
+  cursor: not-allowed;
+}
+
+.inputSection {
+  color: var(--input-section-color, var(--ly-text-2));
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ly-text-2);
+  margin-bottom: 4px;
+}
+
+.description {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ly-muted);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--ly-danger);
+}
+
+/* ---------- Floating layers: Combobox / Popover / Menu / HoverCard ---------- */
+.dropdown {
+  background: var(--ly-raised);
+  border: 1px solid var(--ly-border-strong);
+  box-shadow: var(--ly-shadow);
+  color: var(--ly-text);
+}
+
+.option {
+  color: var(--ly-text);
+  border-radius: 6px;
+}
+
+.option:hover:not([data-combobox-disabled]) {
+  background: var(--ly-hover);
+}
+
+.option[data-combobox-selected],
+.option[data-checked] {
+  background: var(--ly-active);
+  color: var(--ly-text);
+}
+
+.option[data-combobox-disabled] {
+  opacity: 0.5;
+}
+
+.comboEmpty {
+  color: var(--ly-muted);
+}
+
+.comboSearch {
+  background: transparent;
+  border-color: var(--ly-border);
+  color: var(--ly-text);
+}
+
+.menuItem {
+  color: var(--menu-item-color, var(--ly-text));
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.menuItem:where([data-hovered]):where(:not([data-disabled], :disabled)) {
+  background: var(--ly-hover);
+}
+
+.menuItem:where([data-disabled], :disabled) {
+  opacity: 0.5;
+  color: var(--menu-item-color, var(--ly-text));
+}
+
+.menuLabel {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ly-muted);
+}
+
+.menuDivider {
+  border-color: var(--ly-border);
+}
+
+.tooltip {
+  background: var(--ly-raised);
+  color: var(--ly-text);
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid var(--ly-border-strong);
+  box-shadow: var(--ly-shadow);
+}
+
+/* ---------- Surfaces ---------- */
+.paper {
+  --paper-border-color: var(--ly-border);
+  background: var(--ly-surface);
+  color: var(--ly-text);
+  box-shadow: var(--ly-shadow-card);
+}
+
+.card {
+  --paper-border-color: var(--ly-border);
+  background: var(--ly-surface);
+  box-shadow: var(--ly-shadow-card);
+}
+
+/* ---------- Tables ---------- */
+.table {
+  --table-border-color: var(--ly-border);
+  --table-hover-color: var(--ly-hover);
+  --table-striped-color: var(--ly-hover);
+  font-variant-numeric: tabular-nums;
+}
+
+.thead {
+  background: var(--ly-surface);
+}
+
+.thead[data-sticky] {
+  z-index: var(--ly-z-sticky, 10);
+}
+
+.th {
+  height: 40px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ly-muted);
+  background: var(--ly-surface);
+  border-bottom: 1px solid var(--ly-border-strong);
+  white-space: nowrap;
+}
+
+.thead[data-sticky] .th {
+  background: var(--ly-surface);
+}
+
+.td {
+  height: var(--ly-row-h, 52px);
+  padding: 0 12px;
+  font-size: var(--ly-body, 14px);
+  color: var(--ly-text);
+}
+
+.th:first-child,
+.td:first-child {
+  padding-inline-start: 16px;
+}
+
+.th:last-child,
+.td:last-child {
+  padding-inline-end: 16px;
+}
+
+.tr {
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+html[data-contrast='high'] .table[data-hover] .tr:hover {
+  outline: 1px solid var(--ly-border-strong);
+  outline-offset: -1px;
+}
+
+/* ---------- Modal / Drawer (after .paper: their content is a Paper) ---------- */
+.overlay {
+  background: var(--ly-overlay);
+}
+
+html[data-contrast='high'] .overlay {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.modalContent,
+.drawerContent {
+  --mb-padding: 20px;
+  background: var(--ly-raised);
+  color: var(--ly-text);
+  border: 1px solid var(--ly-border-strong);
+  box-shadow: var(--ly-shadow);
+}
+
+/* Full-screen modals (phones) fill the viewport: no edge lines or rounded corners. */
+.modalContent[data-full-screen] {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.drawerContent {
+  border-top: 0;
+  border-bottom: 0;
+  border-inline-end: 0;
+}
+
+.modalHeader {
+  background: var(--ly-raised);
+  min-height: 56px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.modalTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ly-text);
+}
+
+/* ---------- Tabs ---------- */
+.tabsList {
+  --tab-border-color: var(--ly-border);
+}
+
+.tab {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ly-text-2);
+  transition: color var(--ly-dur-fast) var(--ly-ease), background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.tab:hover {
+  background: var(--ly-hover);
+  color: var(--ly-text);
+}
+
+.tab[data-active] {
+  color: var(--ly-text);
+  border-color: var(--ly-accent);
+}
+
+/* ---------- SegmentedControl ---------- */
+.segmented {
+  background: var(--ly-neutral-soft);
+  box-shadow: inset 0 0 0 1px var(--ly-control);
+}
+
+.segmentedIndicator {
+  background: var(--ly-raised);
+  box-shadow: var(--ly-shadow-card);
+}
+
+:where([data-mantine-color-scheme='light']) .segmentedIndicator {
+  background: var(--ly-surface);
+}
+
+html[data-contrast='high'] .segmentedIndicator {
+  box-shadow: 0 0 0 1px var(--ly-border-strong);
+}
+
+.segmentedLabel {
+  color: var(--ly-text-2);
+  font-weight: 600;
+}
+
+.segmentedLabel:hover {
+  color: var(--ly-text);
+}
+
+.segmentedLabel[data-active],
+.segmentedLabel[data-active]:hover {
+  color: var(--ly-text);
+}
+
+.segmentedControl::before {
+  border-color: var(--ly-border);
+}
+
+/* ---------- Checkbox / Radio / Switch ---------- */
+.checkboxInput,
+.radioInput {
+  background-color: var(--ly-surface);
+  border-color: var(--ly-control);
+}
+
+.checkboxInput:checked,
+.checkboxInput[data-indeterminate] {
+  background-color: var(--checkbox-color, var(--ly-accent));
+  border-color: var(--checkbox-color, var(--ly-accent));
+}
+
+.radioInput:checked {
+  background-color: var(--radio-color, var(--ly-accent));
+  border-color: var(--radio-color, var(--ly-accent));
+}
+
+.checkboxInput:disabled,
+.radioInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkboxInput[data-error],
+.radioInput[data-error] {
+  border-color: var(--ly-danger);
+}
+
+.choiceLabel {
+  color: var(--ly-text);
+}
+
+.switchTrack {
+  --switch-bg: var(--ly-neutral-soft);
+  --switch-text-color: var(--ly-text-2);
+  border: 1px solid var(--ly-control);
+}
+
+input:checked + .switchTrack {
+  --switch-bg: var(--switch-color, var(--ly-accent));
+  --switch-text-color: var(--ly-on-accent);
+  border-color: var(--switch-color, var(--ly-accent));
+}
+
+input:disabled + .switchTrack,
+input[data-disabled] + .switchTrack {
+  --switch-bg: var(--ly-neutral-soft);
+  opacity: 0.5;
+}
+
+input:focus-visible + .switchTrack {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 2px;
+}
+
+html[data-contrast='high'] input:focus-visible + .switchTrack {
+  outline-width: 3px;
+}
+
+.switchThumb {
+  --switch-thumb-bg: var(--ly-surface);
+  box-shadow: 0 0 0 1px var(--ly-control);
+}
+
+input:checked + * > .switchThumb {
+  --switch-thumb-bg: var(--ly-on-accent);
+  box-shadow: none;
+}
+
+/* ---------- Progress / Skeleton ---------- */
+.progress {
+  background: var(--ly-track);
+}
+
+.skeleton::after {
+  background: var(--ly-hover);
+}
+
+.skeleton::before {
+  background: var(--ly-bg);
+}
+
+/* ---------- Pagination ---------- */
+.paginationControl {
+  background: transparent;
+  border: 1px solid var(--ly-border);
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.paginationControl:hover:not([data-active]):not(:disabled) {
+  background: var(--ly-hover);
+}
+
+.paginationControl[data-active],
+.paginationControl[data-active]:hover {
+  background: var(--ly-accent);
+  border-color: var(--ly-accent);
+  color: var(--ly-on-accent);
+}
+
+.paginationControl:disabled,
+.paginationControl[data-disabled] {
+  opacity: 0.45;
+  background: transparent;
+  color: var(--ly-text);
+}
+
+.paginationDots {
+  color: var(--ly-muted);
+}
+
+/* ---------- Notifications (toasts) ---------- */
+.notification {
+  background: var(--ly-raised);
+  border: 1px solid var(--ly-border-strong);
+  box-shadow: var(--ly-shadow);
+  color: var(--ly-text);
+}
+
+.notification::before,
+.notification[data-with-icon]::before {
+  display: block;
+  width: 3px;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: 0;
+  border-radius: 0;
+  background-color: var(--notification-color);
+}
+
+.notificationIcon {
+  background: transparent;
+  color: var(--notification-color);
+}
+
+.notificationTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.notificationDescription {
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.notificationClose {
+  color: var(--ly-text-2);
+}
+
+.notificationClose:hover {
+  background: var(--ly-hover);
+  color: var(--ly-text);
+}
+
+/* ---------- Misc ---------- */
+.alertTitle {
+  font-weight: 600;
+}
+
+.anchor {
+  color: var(--ly-accent-text);
+}
+
+html[data-contrast='high'] .anchor {
+  text-decoration: underline;
+}
+
+.scrollThumb {
+  background-color: var(--ly-scrollbar);
+}
+
+.scrollThumb:hover {
+  background-color: var(--ly-scrollbar-hover);
+}
+
+.kbd {
+  background: var(--ly-neutral-soft);
+  border: 1px solid var(--ly-border-strong);
+  color: var(--ly-text-2);
+  font-family: var(--ly-font-mono);
+  font-size: 11.5px;
+  border-radius: 4px;
+}

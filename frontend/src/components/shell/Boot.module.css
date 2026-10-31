@@ -1,0 +1,25 @@
+/* Auth-check and lazy-route loading states (DESIGN.md 8.12) */
+.screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--ly-bg);
+  text-align: center;
+}
+
+.message {
+  font-size: 14px;
+  color: var(--ly-text-2);
+}
+
+.route {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50vh;
+}

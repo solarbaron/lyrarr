@@ -86,3 +86,57 @@ class TestMergeProviderResults:
             assert "_synced_hash" not in r
             assert "_plain_hash" not in r
             assert "_content_hash" not in r
+
+
+class TestSharedPatterns:
+    def test_no_fraction_timestamp_strips(self):
+        assert strip_lrc_timestamps("[00:20]Hello") == "Hello"
+        assert _content_hash("[00:20]Hello") == _content_hash("Hello")
+
+    def test_enhanced_word_tags_strip(self):
+        enhanced = "[00:01.00]<00:01.00>first <00:01.50>line"
+        assert strip_lrc_timestamps(enhanced) == "first line"
+        assert _content_hash(enhanced) == _content_hash("first line")
+
+    def test_unknown_meta_tags_dropped(self):
+        assert strip_lrc_timestamps("[tool:Maker]\n[00:01.00]hello") == "hello"
+
+
+class TestLegacyHash:
+    def test_matches_old_definition_for_plain_and_fractional(self):
+        from lyrarr.metadata.merge import legacy_content_hash
+        assert legacy_content_hash(LYRICS_A) == _content_hash(LYRICS_A)
+        assert legacy_content_hash(SYNCED_A) == _content_hash(SYNCED_A)
+
+    def test_differs_where_old_patterns_were_narrower(self):
+        from lyrarr.metadata.merge import legacy_content_hash
+        # The old pattern didn't strip [mm:ss] without a fraction.
+        assert legacy_content_hash("[00:20]Hello") != _content_hash("[00:20]Hello")
+        assert legacy_content_hash("") is None
+
+
+class TestMembersAndSimilarity:
+    def test_members_recorded_without_lyrics(self):
+        import json
+        results = [
+            {"plain_lyrics": LYRICS_A, "_provider": "lrclib", "score": 0.7, "match_details": {"gate": None}},
+            {"plain_lyrics": LYRICS_A, "_provider": "genius", "score": 0.6, "match_details": {"gate": "x"}},
+        ]
+        merged = merge_provider_results(results)
+        members = merged[0]["merged_members"]
+        assert sorted(m["_provider"] for m in members) == ["genius", "lrclib"]
+        assert all("plain_lyrics" not in m for m in members)
+        # pre-boost scores: each member is judged on its own
+        assert sorted(m["score"] for m in members) == [0.6, 0.7]
+        json.dumps(merged)  # search results stay serialisable
+
+    def test_result_members_of_unmerged(self):
+        from lyrarr.metadata.merge import result_members
+        assert result_members({"_provider": "x", "score": 0.5})[0]["_provider"] == "x"
+
+    def test_similarity_ratio(self):
+        from lyrarr.metadata.merge import _lyrics_are_equivalent, lyrics_similarity
+        assert lyrics_similarity(LYRICS_A, SYNCED_A) == 1.0
+        assert _lyrics_are_equivalent(LYRICS_A, SYNCED_A) == 1.0
+        assert _lyrics_are_equivalent(LYRICS_A, "something else entirely", threshold=0.9) is False
+        assert lyrics_similarity("", LYRICS_A) == 0.0

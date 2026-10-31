@@ -5,7 +5,8 @@ Uses the 'langdetect' library (Google's language-detection, MIT license).
 """
 
 import logging
-import re
+
+from lyrarr.metadata.lrc_repair import LRC_ENHANCED_TIMESTAMP, LRC_META_TAG, LRC_TIMESTAMP
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +20,11 @@ try:
 except Exception:  # pragma: no cover - langdetect optional at import time
     pass
 
-# LRC timestamp pattern: [mm:ss.xx] or [mm:ss:xx]
-_LRC_TIMESTAMP = re.compile(r'\[\d{1,2}:\d{2}[.:]\d{2,3}\]\s*')
-# LRC metadata tags: [ar:Artist Name], [ti:Title], etc.
-_LRC_TAG = re.compile(r'^\[(?:ar|ti|al|au|length|by|offset|re|ve|id):.*\]$', re.MULTILINE)
+# LRC timestamp ([mm:ss], [mm:ss.xx], [mm:ss.xxx], ...) and metadata tags
+# ([ar:Artist], [tool:..], ...) — shared with lrc_repair so "is this synced?"
+# means the same thing everywhere.
+_LRC_TIMESTAMP = LRC_TIMESTAMP
+_LRC_TAG = LRC_META_TAG
 
 # Map of common language codes to display names
 LANGUAGE_NAMES = {
@@ -43,10 +45,14 @@ LANGUAGE_NAMES = {
 
 def strip_lrc_formatting(text: str) -> str:
     """Remove LRC timestamps and metadata tags to get raw lyrics text."""
-    text = _LRC_TAG.sub('', text)
-    text = _LRC_TIMESTAMP.sub('', text)
-    # Remove empty lines resulting from stripping
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or _LRC_TAG.match(stripped):
+            continue
+        stripped = LRC_ENHANCED_TIMESTAMP.sub('', _LRC_TIMESTAMP.sub('', stripped)).strip()
+        if stripped:
+            lines.append(stripped)
     return '\n'.join(lines)
 
 
@@ -93,7 +99,7 @@ def is_synced_lyrics(text: str) -> bool:
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         return False
-    timestamped = sum(1 for line in lines if _LRC_TIMESTAMP.search(line))
+    timestamped = sum(1 for line in lines if _LRC_TIMESTAMP.match(line.strip()))
     return timestamped / len(lines) > 0.3
 
 

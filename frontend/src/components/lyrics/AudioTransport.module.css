@@ -1,0 +1,49 @@
+/* Audio transport: play/pause, scrubber, mono time (DESIGN.md 8.6, 8.13) */
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 7px 14px 7px 8px;
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  background: var(--ly-surface);
+}
+
+.slider {
+  flex: 1 1 auto;
+  min-width: 60px;
+}
+
+.slider :global(.mantine-Slider-track)::before {
+  background: var(--ly-track);
+}
+
+.slider :global(.mantine-Slider-bar) {
+  background: var(--ly-accent);
+}
+
+.slider :global(.mantine-Slider-thumb) {
+  border-color: var(--ly-accent);
+  background: var(--ly-surface);
+}
+
+.time {
+  flex: none;
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-text-2);
+  white-space: nowrap;
+}
+
+.timeSep {
+  color: var(--ly-muted);
+}
+
+.unavailable {
+  padding-left: 14px;
+  font-size: 13px;
+  color: var(--ly-muted);
+}

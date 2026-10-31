@@ -1,638 +1,161 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Tabs, Pagination, Group, TextInput, Button, Progress, Checkbox, Select } from '@mantine/core';
+import { Button, Menu } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getWantedCovers, getWantedLyrics, getWantedUntimed, getWantedUndetected, getWantedStats, searchCovers, searchLyrics, batchSyncGenerate, batchRedetectLanguages, updateTrack, upgradeLyrics } from '../api';
-import PageHeader from '../components/PageHeader';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faClockRotateLeft, faDownload, faEllipsis, faLanguage } from '@fortawesome/free-solid-svg-icons';
+import { getWantedStats, runTask, resetLyricsRetry, batchRedetectLanguages } from '../api';
+import { notifyError } from '../notify';
+import { num, pct } from '../format';
+import { useUrlPatch, useUrlState } from '../hooks/useUrlState';
+import { IconButton, Meter, PageHeader, ViewTabs, useConfirm } from '../components/ui';
+import { LyricsTab } from './wanted/LyricsTab';
+import { CoversTab } from './wanted/CoversTab';
+import { UntimedTab } from './wanted/UntimedTab';
+import { LanguageTab } from './wanted/LanguageTab';
+import { InstrumentalTab } from './wanted/InstrumentalTab';
+import { refreshWanted, type WantedStats } from './wanted/shared';
+import c from './wanted/Wanted.module.css';
 
-const LANG_OPTIONS = [
-  { value: 'en', label: 'English' },
-  { value: 'es', label: 'Spanish' },
-  { value: 'fr', label: 'French' },
-  { value: 'de', label: 'German' },
-  { value: 'it', label: 'Italian' },
-  { value: 'pt', label: 'Portuguese' },
-  { value: 'ja', label: 'Japanese' },
-  { value: 'ko', label: 'Korean' },
-  { value: 'zh', label: 'Chinese' },
-  { value: 'ru', label: 'Russian' },
-  { value: 'ar', label: 'Arabic' },
-  { value: 'hi', label: 'Hindi' },
-  { value: 'nl', label: 'Dutch' },
-  { value: 'sv', label: 'Swedish' },
-  { value: 'pl', label: 'Polish' },
-  { value: 'tr', label: 'Turkish' },
-  { value: 'da', label: 'Danish' },
-  { value: 'fi', label: 'Finnish' },
-  { value: 'no', label: 'Norwegian' },
-  { value: 'el', label: 'Greek' },
-  { value: 'he', label: 'Hebrew' },
-  { value: 'th', label: 'Thai' },
-  { value: 'vi', label: 'Vietnamese' },
-  { value: 'id', label: 'Indonesian' },
-  { value: 'uk', label: 'Ukrainian' },
-  { value: 'cs', label: 'Czech' },
-  { value: 'ro', label: 'Romanian' },
-  { value: 'hu', label: 'Hungarian' },
-];
+type Tab = 'lyrics' | 'covers' | 'untimed' | 'language' | 'instrumental';
+const TABS: Tab[] = ['lyrics', 'covers', 'untimed', 'language', 'instrumental'];
 
-/** Human-readable "when will the auto-downloader try this track again". */
-function formatRetry(retryAfter: string | null, retryCount: number | null): string {
-  if (!retryAfter) return 'next run';
-  const ts = new Date(retryAfter);
-  if (isNaN(ts.getTime())) return 'next run';
-  const diffMs = ts.getTime() - Date.now();
-  const attempts = retryCount ? ` (${retryCount} tries)` : '';
-  if (diffMs <= 0) return `next run${attempts}`;
-  const hours = diffMs / 3600000;
-  if (hours < 1) return `in ${Math.max(1, Math.round(diffMs / 60000))}m${attempts}`;
-  if (hours < 48) return `in ${Math.round(hours)}h${attempts}`;
-  return `in ${Math.round(hours / 24)}d${attempts}`;
+function Coverage({ label, done, total, unit }: { label: string; done: number; total: number; unit: string }) {
+  const p = pct(done, total);
+  return (
+    <span className={c.coverage}>
+      <span className={c.coverageLabel}>{label}</span>
+      <Meter
+        segments={[{ value: done, tone: 'success', label: label === 'Covers' ? 'Saved' : 'With lyrics' }]}
+        total={total}
+        size="xs"
+        width={80}
+        remainderLabel="Missing"
+        aria-label={`${label} coverage: ${num(done)} of ${num(total)} ${unit}`}
+      />
+      <span className={c.coveragePct}>{p}%</span>
+    </span>
+  );
 }
 
+/** Wanted triage workspace (DESIGN.md 8.6). */
 export default function WantedPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [coversPage, setCoversPage] = useState(1);
-  const [lyricsPage, setLyricsPage] = useState(1);
-  const [untimedPage, setUntimedPage] = useState(1);
-  const [undetectedPage, setUndetectedPage] = useState(1);
-  const [coversSearch, setCoversSearch] = useState('');
-  const [lyricsSearch, setLyricsSearch] = useState('');
-  const [untimedSearch, setUntimedSearch] = useState('');
-  const [undetectedSearch, setUndetectedSearch] = useState('');
-  const [selectedTracks, setSelectedTracks] = useState<Set<number>>(new Set());
-  const [selectedLangTracks, setSelectedLangTracks] = useState<Set<number>>(new Set());
-  const [syncingTrackId, setSyncingTrackId] = useState<number | null>(null);
-  const [detectingTrackId, setDetectingTrackId] = useState<number | null>(null);
-  const pageSize = 25;
+  const confirm = useConfirm();
+  const patchUrl = useUrlPatch();
+  const [rawTab] = useUrlState('tab', 'lyrics');
+  const tab: Tab = (TABS as string[]).includes(rawTab) ? rawTab as Tab : 'lyrics';
 
-  const { data: stats } = useQuery({ queryKey: ['wanted-stats'], queryFn: getWantedStats });
+  const { data: stats } = useQuery<WantedStats>({ queryKey: ['wanted-stats'], queryFn: getWantedStats });
 
-  const { data: coversResult, isLoading: loadingCovers } = useQuery({
-    queryKey: ['wanted-covers', coversPage, coversSearch],
-    queryFn: () => getWantedCovers({ page: coversPage, pageSize, search: coversSearch || undefined }),
-  });
-  const { data: lyricsResult, isLoading: loadingLyrics } = useQuery({
-    queryKey: ['wanted-lyrics', lyricsPage, lyricsSearch],
-    queryFn: () => getWantedLyrics({ page: lyricsPage, pageSize, search: lyricsSearch || undefined }),
-  });
-  const { data: untimedResult, isLoading: loadingUntimed } = useQuery({
-    queryKey: ['wanted-untimed', untimedPage, untimedSearch],
-    queryFn: () => getWantedUntimed({ page: untimedPage, pageSize, search: untimedSearch || undefined }),
-  });
-  const { data: undetectedResult, isLoading: loadingUndetected } = useQuery({
-    queryKey: ['wanted-undetected', undetectedPage, undetectedSearch],
-    queryFn: () => getWantedUndetected({ page: undetectedPage, pageSize, search: undetectedSearch || undefined }),
-  });
-
-  const wantedCovers = coversResult?.data || [];
-  const coversTotal = coversResult?.total || 0;
-  const coversTotalPages = Math.ceil(coversTotal / pageSize);
-
-  const wantedLyrics = lyricsResult?.data || [];
-  const lyricsTotal = lyricsResult?.total || 0;
-  const lyricsTotalPages = Math.ceil(lyricsTotal / pageSize);
-
-  const untimedTracks = untimedResult?.data || [];
-  const untimedTotal = untimedResult?.total || 0;
-  const untimedTotalPages = Math.ceil(untimedTotal / pageSize);
-
-  const undetectedTracks = undetectedResult?.data || [];
-  const undetectedTotal = undetectedResult?.total || 0;
-  const undetectedTotalPages = Math.ceil(undetectedTotal / pageSize);
-
-  // Re-search mutations
-  const [searchingCoverId, setSearchingCoverId] = useState<number | null>(null);
-  const [searchingLyricsId, setSearchingLyricsId] = useState<number | null>(null);
-
-  const coverSearchMutation = useMutation({
-    mutationFn: (albumId: number) => {
-      setSearchingCoverId(albumId);
-      return searchCovers(albumId);
+  const downloadNow = useMutation({
+    mutationFn: () => runTask('download_metadata'),
+    onSuccess: (r: { message?: string }) => {
+      notifications.show({ title: 'Download started', message: r?.message || 'Downloading missing cover art and lyrics…' });
     },
-    onSuccess: (data: any, albumId) => {
-      const count = data?.results?.length || 0;
-      notifications.show({
-        title: 'Cover Search',
-        message: count > 0 ? `Found ${count} cover(s). Go to album page to select.` : 'No covers found.',
-        color: count > 0 ? 'green' : 'yellow',
-      });
-      setSearchingCoverId(null);
-    },
-    onError: () => { setSearchingCoverId(null); },
+    onError: (err) => notifyError('Download failed to start', err),
   });
 
-  const lyricsSearchMutation = useMutation({
-    mutationFn: (trackId: number) => {
-      setSearchingLyricsId(trackId);
-      return searchLyrics(trackId);
+  const resetRetries = useMutation({
+    mutationFn: () => resetLyricsRetry({ all: true }),
+    onSuccess: (r: { message?: string }) => {
+      notifications.show({ title: 'Retry timers reset', message: r?.message || 'Every missing track is eligible on the next run.', color: 'success' });
+      refreshWanted(queryClient);
     },
-    onSuccess: (data: any, trackId) => {
-      const count = data?.results?.length || 0;
-      notifications.show({
-        title: 'Lyrics Search',
-        message: count > 0 ? `Found ${count} result(s). Go to album page to select.` : 'No lyrics found.',
-        color: count > 0 ? 'green' : 'yellow',
-      });
-      setSearchingLyricsId(null);
-    },
-    onError: () => { setSearchingLyricsId(null); },
+    onError: (err) => notifyError('Failed to reset retry timers', err),
   });
 
-  const coversPct = stats ? Math.round(((stats.covers_complete || 0) / Math.max(stats.total_albums, 1)) * 100) : 0;
-  const lyricsPct = stats ? Math.round(((stats.lyrics_complete || 0) / Math.max(stats.total_tracks, 1)) * 100) : 0;
+  const redetect = useMutation({
+    mutationFn: () => batchRedetectLanguages(),
+    onSuccess: (r: { message?: string }) => {
+      notifications.show({ title: 'Started', message: r?.message || 'Detecting languages for every track with lyrics…' });
+      refreshWanted(queryClient);
+    },
+    onError: (err) => notifyError('Error', err, 'Failed to start language detection'),
+  });
+
+  const onResetRetries = async () => {
+    const ok = await confirm({
+      title: 'Reset all retry timers?',
+      message: 'Tracks waiting for their next automatic lyrics search become eligible again on the next run. Use this after adding or fixing a provider.',
+      confirmLabel: 'Reset timers',
+    });
+    if (ok) resetRetries.mutate();
+  };
+
+  const onRedetect = async () => {
+    const ok = await confirm({
+      title: 'Re-detect languages?',
+      message: 'Detects the language of every track that has lyrics. This runs in the background and can take a while on a large library.',
+      confirmLabel: 'Re-detect languages',
+    });
+    if (ok) redetect.mutate();
+  };
+
+  const total = stats ? (stats.missing_covers || 0) + (stats.missing_lyrics || 0) : undefined;
+
+  const tabs = [
+    { value: 'lyrics', label: 'Lyrics', count: stats?.missing_lyrics },
+    { value: 'covers', label: 'Covers', count: stats?.missing_covers },
+    { value: 'untimed', label: 'Untimed', count: stats?.untimed_lyrics },
+    { value: 'language', label: 'Undetected language', count: stats?.undetected_language },
+    { value: 'instrumental', label: 'Instrumental review', count: stats?.instrumental_review },
+  ];
 
   return (
-    <div className="fade-in">
-      <PageHeader title="Wanted" subtitle="Missing metadata that needs to be downloaded" />
-
-      {/* Summary Stats */}
-      {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 24 }}>
-          <div className="settings-section" style={{ margin: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontWeight: 600 }}>🎨 Cover Art</span>
-              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {stats.covers_complete}/{stats.total_albums} complete
-              </span>
-            </div>
-            <Progress value={coversPct} color={coversPct > 80 ? 'green' : coversPct > 50 ? 'yellow' : 'red'} size="lg" />
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-              {stats.missing_covers} missing
-            </div>
+    <div className="ly-page">
+      <PageHeader
+        title="Wanted"
+        count={total}
+        subtitle={stats ? (
+          <span className={c.coverageRow}>
+            <Coverage label="Covers" done={stats.covers_complete || 0} total={stats.total_albums || 0} unit="albums" />
+            <span className={c.dot} aria-hidden="true">·</span>
+            <Coverage label="Lyrics" done={stats.lyrics_complete || 0} total={stats.total_tracks || 0} unit="tracks" />
+          </span>
+        ) : undefined}
+        actions={(
+          <div className={c.headerActions}>
+            <Menu position="bottom-end">
+              <Menu.Target>
+                <IconButton icon={faEllipsis} label="More actions" variant="default" />
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<FontAwesomeIcon icon={faClockRotateLeft} />} onClick={() => void onResetRetries()}>
+                  Reset all retry timers
+                </Menu.Item>
+                <Menu.Item leftSection={<FontAwesomeIcon icon={faLanguage} />} onClick={() => void onRedetect()}>
+                  Re-detect languages
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+            <Button
+              variant="filled"
+              leftSection={<FontAwesomeIcon icon={faDownload} />}
+              loading={downloadNow.isPending}
+              onClick={() => downloadNow.mutate()}
+            >
+              Download missing now
+            </Button>
           </div>
-          <div className="settings-section" style={{ margin: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontWeight: 600 }}>📝 Lyrics</span>
-              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {stats.lyrics_complete}/{stats.total_tracks} complete
-              </span>
-            </div>
-            <Progress value={lyricsPct} color={lyricsPct > 80 ? 'green' : lyricsPct > 50 ? 'yellow' : 'red'} size="lg" />
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-              {stats.missing_lyrics} missing
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      />
 
-      <Tabs defaultValue="covers" styles={{
-        tab: { color: 'var(--text-secondary)', '&[data-active]': { color: 'var(--text-primary)' } }
-      }}>
-        <Tabs.List mb="lg">
-        <Tabs.Tab value="covers">Missing Covers ({coversTotal})</Tabs.Tab>
-          <Tabs.Tab value="lyrics">Missing Lyrics ({lyricsTotal})</Tabs.Tab>
-          <Tabs.Tab value="untimed">Untimed Lyrics ({untimedTotal})</Tabs.Tab>
-          <Tabs.Tab value="undetected">Undetected Language ({undetectedTotal})</Tabs.Tab>
-        </Tabs.List>
+      <ViewTabs
+        aria-label="Wanted views"
+        tabs={tabs}
+        value={tab}
+        controls="wanted-panel"
+        onChange={v => patchUrl({ tab: [v, 'lyrics'], q: ['', ''], page: [1, 1], iview: ['', ''], reason: ['', ''], why: ['', ''] })}
+        className={c.tabs}
+      />
 
-        <Tabs.Panel value="covers">
-          <Group mb="md">
-            <TextInput
-              placeholder="Search albums..."
-              value={coversSearch}
-              onChange={(e) => { setCoversSearch(e.currentTarget.value); setCoversPage(1); }}
-              style={{ flex: 1 }}
-              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-            />
-          </Group>
-
-          {loadingCovers ? (
-            <div className="empty-state"><Loader color="violet" /></div>
-          ) : wantedCovers.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">🎨</div>
-              <div className="empty-state-title">No Missing Covers</div>
-              <div className="empty-state-message">
-                {coversSearch ? 'No albums match your search.' : 'All albums have cover art.'}
-              </div>
-            </div>
-          ) : (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr><th>Album</th><th>Artist</th><th>Year</th><th>Type</th><th>Action</th></tr>
-                </thead>
-                <tbody>
-                  {wantedCovers.map((album: any) => (
-                    <tr key={album.lidarrAlbumId} style={{ cursor: 'pointer' }}>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{
-                            width: 36, height: 36, borderRadius: 6, background: 'var(--card-border)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, opacity: 0.5
-                          }}>💿</div>
-                          <span style={{ fontWeight: 600 }}>{album.title}</span>
-                        </div>
-                      </td>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)} style={{ color: 'var(--text-secondary)' }}>
-                        {album.artistName || '—'}
-                      </td>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>{album.year || '—'}</td>
-                      <td onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}>{album.albumType || '—'}</td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          size="xs" variant="light" color="violet"
-                          loading={searchingCoverId === album.lidarrAlbumId}
-                          onClick={() => coverSearchMutation.mutate(album.lidarrAlbumId)}
-                        >
-                          🔍 Search
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {coversTotalPages > 1 && (
-                <Group justify="center" mt="xl">
-                  <Pagination total={coversTotalPages} value={coversPage} onChange={setCoversPage} color="violet" />
-                </Group>
-              )}
-            </>
-          )}
-        </Tabs.Panel>
-
-        <Tabs.Panel value="lyrics">
-          <Group mb="md">
-            <TextInput
-              placeholder="Search tracks..."
-              value={lyricsSearch}
-              onChange={(e) => { setLyricsSearch(e.currentTarget.value); setLyricsPage(1); }}
-              style={{ flex: 1 }}
-              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-            />
-          </Group>
-
-          {loadingLyrics ? (
-            <div className="empty-state"><Loader color="violet" /></div>
-          ) : wantedLyrics.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">📝</div>
-              <div className="empty-state-title">No Missing Lyrics</div>
-              <div className="empty-state-message">
-                {lyricsSearch ? 'No tracks match your search.' : 'All tracks have lyrics.'}
-              </div>
-            </div>
-          ) : (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr><th>Track</th><th>Artist</th><th>File</th><th>Next Auto-Retry</th><th>Action</th></tr>
-                </thead>
-                <tbody>
-                  {wantedLyrics.map((track: any) => (
-                    <tr key={track.lidarrTrackId}>
-                      <td style={{ fontWeight: 600 }}>{track.title}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{track.artistName || '—'}</td>
-                      <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {track.path ? track.path.split('/').pop() : '—'}
-                      </td>
-                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                        {formatRetry(track.lyrics_retry_after, track.lyrics_retry_count)}
-                      </td>
-                      <td>
-                        <Button
-                          size="xs" variant="light" color="violet"
-                          loading={searchingLyricsId === track.lidarrTrackId}
-                          onClick={() => lyricsSearchMutation.mutate(track.lidarrTrackId)}
-                        >
-                          🔍 Search
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {lyricsTotalPages > 1 && (
-                <Group justify="center" mt="xl">
-                  <Pagination total={lyricsTotalPages} value={lyricsPage} onChange={setLyricsPage} color="violet" />
-                </Group>
-              )}
-            </>
-          )}
-        </Tabs.Panel>
-
-        <Tabs.Panel value="untimed">
-          <Group mb="md" justify="space-between">
-            <TextInput
-              placeholder="Search tracks..."
-              value={untimedSearch}
-              onChange={(e) => { setUntimedSearch(e.currentTarget.value); setUntimedPage(1); setSelectedTracks(new Set()); }}
-              style={{ flex: 1 }}
-              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-            />
-            <Group gap="xs">
-              <Button
-                size="xs" variant="light" color="violet"
-                disabled={selectedTracks.size === 0}
-                onClick={() => {
-                  upgradeLyrics({ trackIds: Array.from(selectedTracks) }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || `Searching synced lyrics for ${selectedTracks.size} track(s)...`, color: 'violet' });
-                    setSelectedTracks(new Set());
-                    queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch((err: any) => {
-                    notifications.show({ title: 'Not Started', message: err?.response?.data?.message || 'Failed to start upgrade', color: 'orange' });
-                  });
-                }}
-              >
-                ⤴ Upgrade Selected ({selectedTracks.size})
-              </Button>
-              <Button
-                size="xs" variant="light" color="teal"
-                disabled={selectedTracks.size === 0}
-                onClick={() => {
-                  batchSyncGenerate({ trackIds: Array.from(selectedTracks) }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || `Syncing ${selectedTracks.size} track(s)...`, color: 'teal' });
-                    setSelectedTracks(new Set());
-                    queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start sync generation', color: 'red' });
-                  });
-                }}
-              >
-                ⏱ Sync Selected ({selectedTracks.size})
-              </Button>
-              <Button
-                size="xs" variant="filled" color="teal"
-                disabled={untimedTracks.length === 0}
-                onClick={() => {
-                  const allIds = untimedTracks.map((t: any) => t.lidarrTrackId);
-                  batchSyncGenerate({ trackIds: allIds }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || `Syncing all ${allIds.length} track(s)...`, color: 'teal' });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-untimed'] });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start sync generation', color: 'red' });
-                  });
-                }}
-              >
-                ⏱ Sync All on Page
-              </Button>
-            </Group>
-          </Group>
-
-          {loadingUntimed ? (
-            <div className="empty-state"><Loader color="violet" /></div>
-          ) : untimedTracks.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">⏱</div>
-              <div className="empty-state-title">No Untimed Lyrics</div>
-              <div className="empty-state-message">
-                {untimedSearch ? 'No tracks match your search.' : 'All available lyrics are synced.'}
-              </div>
-            </div>
-          ) : (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 40 }}>
-                      <Checkbox
-                        checked={selectedTracks.size === untimedTracks.length && untimedTracks.length > 0}
-                        indeterminate={selectedTracks.size > 0 && selectedTracks.size < untimedTracks.length}
-                        onChange={(e) => {
-                          if (e.currentTarget.checked) {
-                            setSelectedTracks(new Set(untimedTracks.map((t: any) => t.lidarrTrackId)));
-                          } else {
-                            setSelectedTracks(new Set());
-                          }
-                        }}
-                        color="teal"
-                      />
-                    </th>
-                    <th>Track</th>
-                    <th>Artist</th>
-                    <th>Album</th>
-                    <th>Language</th>
-                    <th style={{ width: 100 }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {untimedTracks.map((track: any) => (
-                    <tr key={track.lidarrTrackId}>
-                      <td>
-                        <Checkbox
-                          checked={selectedTracks.has(track.lidarrTrackId)}
-                          onChange={(e) => {
-                            const next = new Set(selectedTracks);
-                            if (e.currentTarget.checked) {
-                              next.add(track.lidarrTrackId);
-                            } else {
-                              next.delete(track.lidarrTrackId);
-                            }
-                            setSelectedTracks(next);
-                          }}
-                          color="teal"
-                        />
-                      </td>
-                      <td style={{ fontWeight: 600 }}>{track.title}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{track.artistName || '—'}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{track.albumTitle || '—'}</td>
-                      <td>
-                        {track.detected_language ? (
-                          <span style={{
-                            fontSize: 10, padding: '1px 5px', borderRadius: 4,
-                            background: 'rgba(139,61,255,0.15)', color: 'var(--accent-primary)',
-                            fontWeight: 600, textTransform: 'uppercase',
-                          }}>
-                            {track.detected_language}
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>—</span>
-                        )}
-                      </td>
-                      <td>
-                        <Button
-                          size="xs" variant="light" color="teal"
-                          loading={syncingTrackId === track.lidarrTrackId}
-                          onClick={() => {
-                            setSyncingTrackId(track.lidarrTrackId);
-                            batchSyncGenerate({ trackIds: [track.lidarrTrackId] }).then((r: any) => {
-                              notifications.show({ title: 'Started', message: r.message || 'Generating timing...', color: 'teal' });
-                              setSyncingTrackId(null);
-                            }).catch(() => setSyncingTrackId(null));
-                          }}
-                        >
-                          ⏱ Sync
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {untimedTotalPages > 1 && (
-                <Group justify="center" mt="xl">
-                  <Pagination total={untimedTotalPages} value={untimedPage} onChange={(p) => { setUntimedPage(p); setSelectedTracks(new Set()); }} color="violet" />
-                </Group>
-              )}
-            </>
-          )}
-        </Tabs.Panel>
-
-        <Tabs.Panel value="undetected">
-          <Group mb="md" justify="space-between">
-            <TextInput
-              placeholder="Search tracks..."
-              value={undetectedSearch}
-              onChange={(e) => { setUndetectedSearch(e.currentTarget.value); setUndetectedPage(1); setSelectedLangTracks(new Set()); }}
-              style={{ flex: 1 }}
-              styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-            />
-            <Group gap="xs">
-              <Button
-                size="xs" variant="light" color="cyan"
-                disabled={selectedLangTracks.size === 0}
-                onClick={() => {
-                  batchRedetectLanguages({ trackIds: Array.from(selectedLangTracks) }).then(() => {
-                    notifications.show({ title: 'Started', message: `Detecting language for ${selectedLangTracks.size} track(s)...`, color: 'cyan' });
-                    setSelectedLangTracks(new Set());
-                    queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start language detection', color: 'red' });
-                  });
-                }}
-              >
-                🌐 Detect Selected ({selectedLangTracks.size})
-              </Button>
-              <Button
-                size="xs" variant="filled" color="cyan"
-                disabled={undetectedTracks.length === 0}
-                onClick={() => {
-                  const allIds = undetectedTracks.map((t: any) => t.lidarrTrackId);
-                  batchRedetectLanguages({ trackIds: allIds }).then(() => {
-                    notifications.show({ title: 'Started', message: `Detecting language for all ${allIds.length} track(s)...`, color: 'cyan' });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
-                    queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start language detection', color: 'red' });
-                  });
-                }}
-              >
-                🌐 Detect All on Page
-              </Button>
-            </Group>
-          </Group>
-
-          {loadingUndetected ? (
-            <div className="empty-state"><Loader color="violet" /></div>
-          ) : undetectedTracks.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">🌐</div>
-              <div className="empty-state-title">No Undetected Languages</div>
-              <div className="empty-state-message">
-                {undetectedSearch ? 'No tracks match your search.' : 'All available lyrics have a detected language.'}
-              </div>
-            </div>
-          ) : (
-            <>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 40 }}>
-                      <Checkbox
-                        checked={selectedLangTracks.size === undetectedTracks.length && undetectedTracks.length > 0}
-                        indeterminate={selectedLangTracks.size > 0 && selectedLangTracks.size < undetectedTracks.length}
-                        onChange={(e) => {
-                          if (e.currentTarget.checked) {
-                            setSelectedLangTracks(new Set(undetectedTracks.map((t: any) => t.lidarrTrackId)));
-                          } else {
-                            setSelectedLangTracks(new Set());
-                          }
-                        }}
-                        color="cyan"
-                      />
-                    </th>
-                    <th>Track</th>
-                    <th>Artist</th>
-                    <th>Album</th>
-                    <th>Synced</th>
-                    <th style={{ width: 160 }}>Set Language</th>
-                    <th style={{ width: 100 }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {undetectedTracks.map((track: any) => (
-                    <tr key={track.lidarrTrackId}>
-                      <td>
-                        <Checkbox
-                          checked={selectedLangTracks.has(track.lidarrTrackId)}
-                          onChange={(e) => {
-                            const next = new Set(selectedLangTracks);
-                            if (e.currentTarget.checked) {
-                              next.add(track.lidarrTrackId);
-                            } else {
-                              next.delete(track.lidarrTrackId);
-                            }
-                            setSelectedLangTracks(next);
-                          }}
-                          color="cyan"
-                        />
-                      </td>
-                      <td style={{ fontWeight: 600 }}>{track.title}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{track.artistName || '—'}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{track.albumTitle || '—'}</td>
-                      <td>
-                        {track.is_synced ? (
-                          <span className="status-badge available" style={{ fontSize: 10, padding: '1px 5px' }}>LRC</span>
-                        ) : (
-                          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Plain</span>
-                        )}
-                      </td>
-                      <td>
-                        <Select
-                          placeholder="Set..."
-                          data={LANG_OPTIONS}
-                          size="xs"
-                          w={130}
-                          searchable
-                          clearable
-                          onChange={(val) => {
-                            if (val) {
-                              updateTrack(track.lidarrTrackId, { detected_language: val }).then(() => {
-                                notifications.show({ title: 'Updated', message: `Set language to ${val.toUpperCase()}`, color: 'green' });
-                                queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
-                                queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                              });
-                            }
-                          }}
-                          styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', minHeight: 28, height: 28 } }}
-                        />
-                      </td>
-                      <td>
-                        <Button
-                          size="xs" variant="light" color="cyan"
-                          loading={detectingTrackId === track.lidarrTrackId}
-                          onClick={() => {
-                            setDetectingTrackId(track.lidarrTrackId);
-                            batchRedetectLanguages({ trackIds: [track.lidarrTrackId] }).then(() => {
-                              notifications.show({ title: 'Started', message: 'Detecting language...', color: 'cyan' });
-                              setDetectingTrackId(null);
-                              queryClient.invalidateQueries({ queryKey: ['wanted-undetected'] });
-                              queryClient.invalidateQueries({ queryKey: ['wanted-stats'] });
-                            }).catch(() => setDetectingTrackId(null));
-                          }}
-                        >
-                          🌐 Detect
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {undetectedTotalPages > 1 && (
-                <Group justify="center" mt="xl">
-                  <Pagination total={undetectedTotalPages} value={undetectedPage} onChange={(p) => { setUndetectedPage(p); setSelectedLangTracks(new Set()); }} color="violet" />
-                </Group>
-              )}
-            </>
-          )}
-        </Tabs.Panel>
-      </Tabs>
+      <div id="wanted-panel" role="tabpanel" aria-label={tabs.find(t => t.value === tab)?.label} className={c.panel}>
+        {tab === 'lyrics' && <LyricsTab stats={stats} />}
+        {tab === 'covers' && <CoversTab stats={stats} />}
+        {tab === 'untimed' && <UntimedTab stats={stats} />}
+        {tab === 'language' && <LanguageTab stats={stats} />}
+        {tab === 'instrumental' && <InstrumentalTab stats={stats} />}
+      </div>
     </div>
   );
 }

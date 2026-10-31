@@ -1,0 +1,613 @@
+/* Home (DESIGN.md 8.1). Tokens only. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* The page header carries its own 20px bottom margin; the column gap replaces it. */
+.page > header {
+  margin-bottom: -8px;
+}
+
+/* Lays the header buttons out as direct items of the PageHeader action row. */
+.headerActions {
+  display: contents;
+}
+
+/* < 768px both buttons share the row (or each fills its own line when they wrap). */
+@media (max-width: 767px) {
+  .headerActions > * {
+    flex: 1 1 auto;
+  }
+
+  .headerActions > span > :global(.mantine-Button-root) {
+    width: 100%;
+  }
+}
+
+
+/* ---------- Grids: 3 columns ≥ 1200px, 2 columns 768–1199, 1 column < 768 ---------- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* Downloads fills the height of Biggest gaps next to it (no empty band under
+   it): the chart grows up to a readable cap, the empty state centres. */
+.split > .downloads {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.downloads > :last-child {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.downloads .chart {
+  flex: 1 1 220px;
+  max-height: 400px;
+}
+
+.downloads > :last-child:has(.chart) {
+  justify-content: flex-start;
+}
+
+@media (max-width: 1199px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The Library card spans the row under the two coverage cards. */
+  .cards > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .split {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .cards,
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cardError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+}
+
+/* ---------- Attention banners ---------- */
+.bannerLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bannerLink svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* ---------- Library card ---------- */
+.libraryPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.libraryPanel > :last-child {
+  flex: 1 1 auto;
+}
+
+.library {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.libraryStats {
+  container: ly-library-stats / inline-size;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.libraryStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--ly-border);
+}
+
+.libraryStat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.libraryValue {
+  order: 1;
+  margin: 0;
+  font-size: clamp(18px, 7.5cqi, 28px);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.libraryLabel {
+  order: 2;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.libraryLinks {
+  display: flex;
+  flex-direction: column;
+  margin: auto 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--ly-border);
+}
+
+.libraryLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  text-decoration: none;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.libraryLink:hover {
+  background: var(--ly-hover);
+  color: var(--ly-text);
+}
+
+.libraryLinks li + li .libraryLink {
+  border-top: 1px solid var(--ly-border);
+  border-radius: 0;
+}
+
+.libraryLinkIcon {
+  width: 13px;
+  color: var(--ly-muted);
+}
+
+.libraryLinkLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.libraryLinkCount {
+  font-weight: 600;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.libraryLinkCount[data-zero] {
+  font-weight: 500;
+  color: var(--ly-muted);
+}
+
+.libraryLinkArrow {
+  width: 10px;
+  color: var(--ly-muted);
+}
+
+/* ---------- Biggest gaps ---------- */
+.gaps {
+  container: ly-gaps / inline-size;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gapRow {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto 64px 36px;
+  align-items: center;
+  gap: 14px;
+  min-height: var(--ly-row-h, 52px);
+  padding: 8px 12px 8px 16px;
+  border-top: 1px solid var(--ly-border);
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.gaps > li:first-child .gapRow {
+  border-top: 0;
+}
+
+.gapRow:hover {
+  background: var(--ly-hover);
+}
+
+:global(html[data-contrast='high']) .gapRow:hover {
+  outline: 1px solid var(--ly-border-strong);
+  outline-offset: -1px;
+}
+
+.gapName {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gapLink {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ly-text);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gapLink:hover {
+  text-decoration: underline;
+}
+
+:global(html[data-contrast='high']) .gapLink {
+  text-decoration: underline;
+}
+
+.gapMeta {
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:global(html[data-density='compact']) .gapMeta {
+  display: none;
+}
+
+.gapMeters {
+  display: grid;
+  grid-template-columns: auto 80px 34px;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  font-size: 12px;
+  color: var(--ly-text-2);
+}
+
+.gapMeterLabel {
+  color: var(--ly-muted);
+}
+
+.gapPct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gapMissing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.gapMissingValue {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.gapMissingLabel {
+  font-size: 12px;
+  color: var(--ly-muted);
+}
+
+/* Row action: revealed on hover / focus; always visible on touch. */
+.gapAction {
+  display: flex;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity var(--ly-dur-fast) var(--ly-ease);
+}
+
+.gapRow:hover .gapAction,
+.gapRow:focus-within .gapAction,
+.gapAction[data-busy] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .gapAction {
+    opacity: 1;
+  }
+}
+
+.gapsFoot {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+  border-top: 1px solid var(--ly-border);
+}
+
+/* Narrow list (phones, or the 2-column split at 768–1199px): meters move under the name. */
+@container ly-gaps (max-width: 560px) {
+  .gapRow {
+    grid-template-columns: 32px minmax(0, 1fr) auto 36px;
+    gap: 10px;
+    padding-left: 12px;
+  }
+
+  .gapMeters {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    grid-template-columns: auto minmax(0, 1fr) 34px auto minmax(0, 1fr) 34px;
+  }
+
+  .gapMissing {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
+/* ---------- Downloads chart ---------- */
+.chartLegend {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.legendSwatch {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.legendSwatch[data-series='1'] {
+  background: var(--ly-chart-1);
+}
+
+.legendSwatch[data-series='2'] {
+  background: var(--ly-chart-2);
+}
+
+.legendTotal {
+  font-weight: 600;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart {
+  height: 220px;
+  margin: 0 -4px -6px -8px;
+}
+
+.tooltip {
+  padding: 8px 10px;
+  background: var(--ly-raised);
+  border: 1px solid var(--ly-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--ly-shadow);
+  font-size: 12.5px;
+  color: var(--ly-text);
+}
+
+.tooltipDate {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.tooltipRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltipRow strong {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--ly-text);
+}
+
+/* ---------- Lyrics breakdown ---------- */
+.breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 40px;
+}
+
+@media (max-width: 767px) {
+  .breakdown {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.barList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.barListTitle {
+  margin: 0 0 12px;
+}
+
+.barItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.barLabel {
+  min-width: 0;
+  font-weight: 500;
+  color: var(--ly-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barLabel[data-code] {
+  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.barValue {
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.barValue span {
+  margin-left: 6px;
+  color: var(--ly-muted);
+}
+
+.barTrack {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ly-track);
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ly-chart-1);
+  transition: width var(--ly-dur-slow) var(--ly-ease);
+}
+
+/* ---------- Jump back in ---------- */
+.recentHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.recentTitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ly-text);
+}
+
+.recentSub {
+  font-size: 13px;
+  color: var(--ly-muted);
+}
+
+.recentAll {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recentAll svg {
+  width: 11px;
+  height: 11px;
+}
+
+.recentGrid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1199px) {
+  .recentGrid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .recentGrid > :nth-child(n + 7) {
+    display: none;
+  }
+}
+
+@media (max-width: 959px) {
+  .recentGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .recentGrid > :nth-child(n + 5) {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .recentGrid {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 6px;
+  }
+
+  .recentGrid > * {
+    flex: 0 0 132px;
+    scroll-snap-align: start;
+  }
+
+  .recentGrid > :nth-child(n + 5),
+  .recentGrid > :nth-child(n + 7) {
+    display: block;
+  }
+}

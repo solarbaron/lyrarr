@@ -1,14 +1,31 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Loader, Button, Select, Group, Badge, Pagination } from '@mantine/core';
+import { useMemo, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { useQueries, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { Button, Menu, Select } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faDownload, faLanguage, faClock } from '@fortawesome/free-solid-svg-icons';
-import { getArtist, getAlbums, getProfiles, massAssignProfile, updateArtist, batchDownload, batchTranslate, batchSyncGenerate } from '../api';
+import {
+  faAlignLeft, faArrowLeft, faCircleExclamation, faCompactDisc, faDownload, faEllipsis, faLanguage,
+  faRotateRight, faUser, faWandMagicSparkles,
+} from '@fortawesome/free-solid-svg-icons';
+import { notifyError } from '../notify';
+import { getArtist, getAlbums, getProfiles, updateArtist } from '../api';
+import {
+  EmptyState, Hero, HeroSkeleton, IconButton, Pager, Panel, TableSkeleton, ViewTabs, useConfirm,
+} from '../components/ui';
+import { AlbumTable, type AlbumRow } from '../components/library/AlbumTable';
+import { AlbumGrid } from '../components/library/AlbumGrid';
+import { ViewToggle } from '../components/library/LibraryControls';
+import { AboutPanel } from '../components/library/AboutPanel';
+import { startTiming, startTranslate, useAssignProfileMutation, useDownloadMutation } from '../components/library/actions';
+import { useBreadcrumbs } from '../hooks/useBreadcrumbs';
+import { useUrlPatch, useUrlState } from '../hooks/useUrlState';
+import { usePreferences } from '../theme/ThemeProvider';
+import { plural } from '../format';
+import c from './LibraryDetail.module.css';
 
 const LANGUAGES = [
-  { value: '', label: 'Use profile default' },
   { value: 'en', label: 'English' }, { value: 'es', label: 'Spanish' },
   { value: 'fr', label: 'French' }, { value: 'de', label: 'German' },
   { value: 'it', label: 'Italian' }, { value: 'pt', label: 'Portuguese' },
@@ -18,279 +35,318 @@ const LANGUAGES = [
   { value: 'tr', label: 'Turkish' }, { value: 'nl', label: 'Dutch' },
 ];
 
+const languageName = (code: string | null | undefined) =>
+  code ? (LANGUAGES.find(l => l.value === code)?.label ?? code.toUpperCase()) : null;
+
+/** Album views on the artist page (DESIGN.md 8.3). */
+const VIEWS = [
+  { value: 'all', label: 'All', filter: {} },
+  { value: 'missing-cover', label: 'Missing cover', filter: { coverStatus: 'missing' } },
+  { value: 'missing-lyrics', label: 'Missing lyrics', filter: { lyricsStatus: 'missing' } },
+  { value: 'complete', label: 'Complete', filter: { lyricsStatus: 'complete' } },
+] as const satisfies readonly { value: string; label: string; filter: { coverStatus?: string; lyricsStatus?: string } }[];
+
+type ViewId = (typeof VIEWS)[number]['value'];
+
+/** Same page sizes and default as Albums / Artists. */
+const PAGE_SIZES = [25, 50, 100];
+const DEFAULT_PAGE_SIZE = 50;
+
 export default function ArtistDetailPage() {
   const { artistId } = useParams();
-  const navigate = useNavigate();
+  const id = Number(artistId);
   const queryClient = useQueryClient();
-  const [profileId, setProfileId] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const pageSize = 25;
+  const { albumView, setAlbumView } = usePreferences();
+  const patchUrl = useUrlPatch();
+  const [viewParam] = useUrlState<string>('view', 'all');
+  const [page, setPage] = useUrlState<number>('page', 1);
+  const [pageSize] = useUrlState<number>('size', DEFAULT_PAGE_SIZE);
+  const [savingLang, setSavingLang] = useState(false);
+  // Phones: the panel tools move out of the header into their own row.
+  const narrow = useMediaQuery('(max-width: 767px)') ?? false;
 
-  const { data: artist, isLoading } = useQuery({
+  const view: ViewId = VIEWS.some(v => v.value === viewParam) ? (viewParam as ViewId) : 'all';
+  const viewFilter: { coverStatus?: string; lyricsStatus?: string } = VIEWS.find(v => v.value === view)!.filter;
+
+  const { data: artist, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['artist', artistId],
-    queryFn: () => getArtist(Number(artistId)),
+    queryFn: () => getArtist(id),
     enabled: !!artistId,
   });
 
-  const { data: albumsResult } = useQuery({
-    queryKey: ['artist-albums', artistId, page],
-    queryFn: () => getAlbums({ page, pageSize, artistId: Number(artistId) }),
+  const albumParams = useMemo(() => ({ artistId: id, ...viewFilter }), [id, viewFilter]);
+  const albumsQuery = useQuery({
+    queryKey: ['artist-albums', artistId, page, pageSize, view],
+    queryFn: () => getAlbums({ page, pageSize, ...albumParams }),
     enabled: !!artistId,
+    placeholderData: keepPreviousData,
+  });
+
+  const counts = useQueries({
+    queries: VIEWS.map(v => ({
+      queryKey: ['artist-albums', artistId, 'count', v.value],
+      queryFn: () => getAlbums({ artistId: id, ...v.filter, page: 1, pageSize: 1 }),
+      enabled: !!artistId,
+      staleTime: 30_000,
+    })),
   });
 
   const { data: profiles = [] } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
 
-  const assignMutation = useMutation({
-    mutationFn: () => massAssignProfile({ profileId: Number(profileId), artistIds: [Number(artistId)] }),
-    onSuccess: () => {
-      notifications.show({ title: 'Done', message: 'Profile updated', color: 'green' });
-      queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
-    },
-  });
+  const download = useDownloadMutation();
+  const assign = useAssignProfileMutation();
+  const confirm = useConfirm();
+
+  useBreadcrumbs([{ label: 'Artists', to: '/artists' }, { label: artist?.name ?? 'Artist' }]);
 
   if (isLoading) {
-    return <div className="empty-state"><Loader color="violet" size="lg" /></div>;
-  }
-
-  if (!artist) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-title">Artist Not Found</div>
+      <div className="ly-page">
+        <HeroSkeleton kind="artist" />
+        <TableSkeleton rows={8} columns={5} />
       </div>
     );
   }
 
-  const albums = albumsResult?.data || [];
-  const totalAlbums = albumsResult?.total || 0;
-  const totalPages = Math.ceil(totalAlbums / pageSize);
+  const notFound = (error as { response?: { status?: number } } | null)?.response?.status === 404;
+  if (isError && !notFound) {
+    return (
+      <div className="ly-page">
+        <EmptyState
+          tone="danger"
+          icon={faCircleExclamation}
+          title="Couldn't load this artist"
+          message={(error as Error)?.message}
+          action={<Button variant="default" leftSection={<FontAwesomeIcon icon={faRotateRight} />} onClick={() => refetch()}>Retry</Button>}
+        />
+      </div>
+    );
+  }
+
+  if (!artist) {
+    return (
+      <div className="ly-page">
+        <EmptyState
+          icon={faUser}
+          title="Artist not found"
+          message="It may have been removed from Lidarr."
+          action={<Button component={Link} to="/artists" variant="default" leftSection={<FontAwesomeIcon icon={faArrowLeft} />}>Back to artists</Button>}
+        />
+      </div>
+    );
+  }
+
+  const albums: AlbumRow[] = albumsQuery.data?.data || [];
+  const totalInView = albumsQuery.data?.total || 0;
+  // Tab counts fall back to the list's own total for the active view.
+  const tabCounts = VIEWS.map((v, i) => counts[i].data?.total
+    ?? (v.value === view && albumsQuery.data && !albumsQuery.isPlaceholderData ? totalInView : undefined));
+  const totalAlbums = tabCounts[0];
+  const albumsError = albumsQuery.isError
+    ? { title: "Couldn't load albums", message: (albumsQuery.error as Error)?.message, onRetry: () => albumsQuery.refetch() }
+    : null;
+  const target = { artistIds: [id] };
+
+  const ownProfile = profiles.find(p => p.id === artist.profileId);
+  const defaultProfile = profiles.find(p => p.is_default);
+  const effectiveProfile = ownProfile ?? defaultProfile;
+  const profileTarget = effectiveProfile ? languageName(effectiveProfile.translate_target_lang) : null;
+
+  const saveLanguage = (v: string | null) => {
+    setSavingLang(true);
+    updateArtist(id, { translate_target_override: v || null }).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
+      notifications.show({
+        title: 'Translation target saved',
+        message: v ? `Lyrics by ${artist.name} translate to ${languageName(v)}.` : `${artist.name} uses the profile's target language.`,
+        color: 'success',
+      });
+    }).catch((err) => notifyError('Failed to save language override', err))
+      .finally(() => setSavingLang(false));
+  };
+
+  const albumEmpty = view === 'all' ? (
+    <EmptyState size="sm" icon={faCompactDisc} title="No albums" message="No downloaded albums for this artist." />
+  ) : (
+    <EmptyState
+      size="sm"
+      icon={faCompactDisc}
+      tone="success"
+      title={view === 'complete' ? 'No complete albums yet' : 'Nothing missing here'}
+      action={<Button variant="default" onClick={() => patchUrl({ view: ['all', 'all'], page: [1, 1] })}>Show all albums</Button>}
+    />
+  );
+
+  const pager = totalInView > 0 ? (
+    <Pager
+      page={page}
+      pageSize={pageSize}
+      total={totalInView}
+      onPage={p => setPage(p, { replace: false })}
+      pageSizeOptions={PAGE_SIZES}
+      // The size picker only matters when there's more than one small page.
+      onPageSize={totalInView > PAGE_SIZES[0] || pageSize !== DEFAULT_PAGE_SIZE
+        ? n => patchUrl({ size: [n, DEFAULT_PAGE_SIZE], page: [1, 1] })
+        : undefined}
+      noun="albums"
+    />
+  ) : undefined;
+
+  const panelTools = (
+    <div className={c.panelTools}>
+      <ViewTabs
+        aria-label="Album views"
+        tabs={VIEWS.map((v, i) => ({ value: v.value, label: v.label, count: tabCounts[i] }))}
+        value={view}
+        onChange={v => patchUrl({ view: [v, 'all'], page: [1, 1] })}
+      />
+      <ViewToggle value={albumView} onChange={setAlbumView} noun="albums" />
+    </div>
+  );
 
   return (
-    <div className="fade-in">
-      <Button
-        variant="subtle"
-        color="gray"
-        leftSection={<FontAwesomeIcon icon={faArrowLeft} />}
-        onClick={() => navigate('/artists')}
-        mb="md"
-      >
-        Back to Artists
-      </Button>
-
-      {/* Artist Header */}
-      <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 24 }}>
-          {artist.poster ? (
-            <img
-              src={artist.poster}
-              alt={artist.name}
-              style={{ width: 160, height: 160, borderRadius: 12, objectFit: 'cover', flexShrink: 0 }}
-            />
-          ) : (
-            <div style={{
-              width: 160, height: 160, borderRadius: 12, background: 'var(--card-border)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, opacity: 0.3, flexShrink: 0
-            }}>🎤</div>
-          )}
-          <div style={{ flex: 1 }}>
-            <h2 style={{ margin: '0 0 4px', fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>
-              {artist.name}
-            </h2>
-            <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--text-secondary)' }}>
-              {artist.path}
-            </p>
-
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-              <Badge color={artist.monitored ? 'green' : 'gray'}>
-                {artist.monitored ? 'Monitored' : 'Unmonitored'}
-              </Badge>
-              <Badge variant="outline" color="violet">{totalAlbums} albums</Badge>
-            </div>
-
-            <Group gap="sm">
-              <Select
-                placeholder="Select profile..."
-                data={profiles.map((p: any) => ({ value: String(p.id), label: p.name }))}
-                value={profileId || (artist.profileId ? String(artist.profileId) : null)}
-                onChange={setProfileId}
-                size="sm"
-                styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-              />
-              <Button
-                variant="gradient"
-                gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-                size="sm"
-                disabled={!profileId}
-                onClick={() => assignMutation.mutate()}
-                loading={assignMutation.isPending}
-              >
-                Set Profile
-              </Button>
-              <Button
-                variant="light"
-                color="violet"
-                size="sm"
-                leftSection={<FontAwesomeIcon icon={faDownload} />}
-                onClick={() => {
-                  batchDownload({ artistIds: [Number(artistId)], type: 'lyrics' }).then(() => {
-                    notifications.show({ title: 'Started', message: 'Downloading missing lyrics for all albums by this artist...', color: 'violet' });
-                  }).catch((err: any) => {
-                    notifications.show({ title: 'Not Started', message: err?.response?.data?.message || 'Failed to start download', color: 'orange' });
-                  });
-                }}
-              >
-                Download Missing Lyrics
-              </Button>
-              <Button
-                variant="subtle"
-                color="gray"
-                size="sm"
-                leftSection={<FontAwesomeIcon icon={faDownload} />}
-                onClick={() => {
-                  batchDownload({ artistIds: [Number(artistId)], type: 'all' }).then(() => {
-                    notifications.show({ title: 'Started', message: 'Downloading missing covers + lyrics for this artist...', color: 'violet' });
-                  }).catch((err: any) => {
-                    notifications.show({ title: 'Not Started', message: err?.response?.data?.message || 'Failed to start download', color: 'orange' });
-                  });
-                }}
-              >
-                Download All Missing
-              </Button>
-              <Button
-                variant="light"
-                color="cyan"
-                size="sm"
-                leftSection={<FontAwesomeIcon icon={faLanguage} />}
-                onClick={() => {
-                  batchTranslate({ artistIds: [Number(artistId)] }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || 'Translating lyrics...', color: 'cyan' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start translation', color: 'red' });
-                  });
-                }}
-              >
-                Translate Lyrics
-              </Button>
-              <Button
-                variant="light"
-                color="teal"
-                size="sm"
-                leftSection={<FontAwesomeIcon icon={faClock} />}
-                onClick={() => {
-                  batchSyncGenerate({ artistIds: [Number(artistId)] }).then((r: any) => {
-                    notifications.show({ title: 'Started', message: r.message || 'Generating synced lyrics...', color: 'teal' });
-                  }).catch(() => {
-                    notifications.show({ title: 'Error', message: 'Failed to start timing generation', color: 'red' });
-                  });
-                }}
-              >
-                Generate Timing
-              </Button>
-            </Group>
-
-            {/* Per-artist language override */}
-            <div style={{
-              marginTop: 16, padding: 12, borderRadius: 10,
-              background: 'rgba(139,61,255,0.06)', border: '1px solid rgba(139,61,255,0.15)',
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--accent-primary)' }}>
-                🌐 Language Override
-              </div>
-              <Group gap="sm">
-                <Select
-                  placeholder="Translation target..."
-                  description="Override profile's target language for this artist"
-                  data={LANGUAGES}
-                  value={artist.translate_target_override || ''}
-                  onChange={(v) => {
-                    updateArtist(Number(artistId), { translate_target_override: v || null });
-                    queryClient.invalidateQueries({ queryKey: ['artist', artistId] });
-                    notifications.show({ title: 'Updated', message: 'Language override saved', color: 'green' });
-                  }}
-                  size="xs"
-                  w={200}
-                  clearable
-                  styles={{ input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } }}
-                />
-              </Group>
-            </div>
-
-            {artist.overview && (
-              <p style={{ marginTop: 12, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                {artist.overview}
-              </p>
+    <div className="ly-page">
+      <Hero
+        art={{ src: artist.poster, alt: artist.name, kind: 'artist', name: artist.name }}
+        eyebrow={`Artist · ${artist.monitored ? 'Monitored' : 'Unmonitored'}`}
+        title={artist.name}
+        byline={(
+          <>
+            {totalAlbums !== undefined && <span>{plural(totalAlbums, 'album')}</span>}
+            {artist.path && (
+              <>
+                {totalAlbums !== undefined && <span className={c.sep} aria-hidden="true">·</span>}
+                <span className={c.path} title={artist.path}>{artist.path}</span>
+              </>
             )}
-          </div>
+          </>
+        )}
+        actions={(
+          <>
+            <Button
+              variant="filled"
+              leftSection={<FontAwesomeIcon icon={faDownload} />}
+              loading={download.isPending && download.variables?.type === 'all'}
+              onClick={() => download.mutate({ target, type: 'all', message: 'Downloading missing covers + lyrics for this artist...' })}
+            >
+              Download all missing
+            </Button>
+            <Button
+              variant="default"
+              leftSection={<FontAwesomeIcon icon={faAlignLeft} />}
+              loading={download.isPending && download.variables?.type === 'lyrics'}
+              onClick={() => download.mutate({ target, type: 'lyrics', message: 'Downloading missing lyrics for all albums by this artist...' })}
+            >
+              Download missing lyrics
+            </Button>
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <IconButton icon={faEllipsis} label="More actions" variant="default" size="lg" />
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<FontAwesomeIcon icon={faLanguage} />} onClick={() => startTranslate(target)}>
+                  Translate lyrics
+                </Menu.Item>
+                <Menu.Item leftSection={<FontAwesomeIcon icon={faWandMagicSparkles} />} onClick={() => startTiming(target)}>
+                  Generate timing
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </>
+        )}
+      />
+
+      <div className={c.layout}>
+        <div className={c.main}>
+          <Panel
+            padding="none"
+            title="Albums"
+            subtitle={totalAlbums !== undefined ? plural(totalAlbums, 'album') : undefined}
+            actions={narrow ? undefined : panelTools}
+          >
+            {narrow && <div className={c.panelTabsRow}>{panelTools}</div>}
+            {albumView === 'grid' ? (
+              <div className={c.gridWrap}>
+                <AlbumGrid
+                  aria-label={`Albums by ${artist.name}`}
+                  rows={albums}
+                  loading={albumsQuery.isLoading}
+                  refetching={albumsQuery.isPlaceholderData}
+                  error={albumsError}
+                  empty={albumEmpty}
+                  footer={pager}
+                  hideArtist
+                />
+              </div>
+            ) : (
+              <AlbumTable
+                aria-label={`Albums by ${artist.name}`}
+                rows={albums}
+                profiles={profiles}
+                loading={albumsQuery.isLoading}
+                refetching={albumsQuery.isPlaceholderData}
+                error={albumsError}
+                empty={albumEmpty}
+                footer={pager}
+                hideArtist
+                framed={false}
+                // Type (priority 3) moves under the title while the side panel shares the row.
+                breakpoints={{ 2: 600, 3: 860 }}
+              />
+            )}
+          </Panel>
         </div>
+
+        <aside className={c.side} aria-label="Artist settings and details">
+          <Panel title="Settings" headingLevel={3}>
+            <div className={c.field}>
+              <Select
+                label="Profile"
+                placeholder={defaultProfile ? `None (uses ${defaultProfile.name})` : 'Select profile...'}
+                data={profiles.map(p => ({ value: String(p.id), label: p.name }))}
+                value={artist.profileId ? String(artist.profileId) : null}
+                allowDeselect={false}
+                disabled={assign.isPending}
+                onChange={async v => {
+                  const p = profiles.find(x => String(x.id) === v);
+                  if (!p) return;
+                  // Reassigns every album by the artist, so ask first (the old page had a separate Set Profile button).
+                  const ok = await confirm({
+                    title: 'Change profile?',
+                    message: `Assign ${p.name} to ${totalAlbums !== undefined ? plural(totalAlbums, 'album') : 'every album'} by ${artist.name}? Albums with their own profile are reassigned too.`,
+                    confirmLabel: 'Assign profile',
+                  });
+                  if (ok) assign.mutate({ target, profileId: p.id, profileName: p.name });
+                }}
+              />
+              <p className={c.source}>
+                {totalAlbums !== undefined ? `Applies to ${plural(totalAlbums, 'album')}` : 'Applies to every album by this artist'}
+              </p>
+            </div>
+            <div className={c.field}>
+              <Select
+                label="Translation target"
+                placeholder="Profile default"
+                data={LANGUAGES}
+                value={artist.translate_target_override || null}
+                clearable
+                searchable
+                disabled={savingLang}
+                onChange={saveLanguage}
+              />
+              <p className={c.source}>
+                {artist.translate_target_override
+                  ? 'Override for this artist'
+                  : effectiveProfile
+                    ? `From profile ${effectiveProfile.name}${profileTarget ? `: ${profileTarget}` : ''}`
+                    : "Uses the profile's target language"}
+              </p>
+            </div>
+          </Panel>
+
+          {artist.overview && <AboutPanel text={artist.overview} />}
+        </aside>
       </div>
-
-      {/* Albums */}
-      <h3 style={{ marginBottom: 12, color: 'var(--text-primary)' }}>
-        Albums ({totalAlbums})
-      </h3>
-
-      {albums.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon">💿</div>
-          <div className="empty-state-title">No Albums</div>
-          <div className="empty-state-message">No downloaded albums for this artist.</div>
-        </div>
-      ) : (
-        <>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Album</th>
-                <th>Year</th>
-                <th>Type</th>
-                <th>Cover Art</th>
-                <th>Lyrics</th>
-              </tr>
-            </thead>
-            <tbody>
-              {albums.map((album: any) => (
-                <tr
-                  key={album.lidarrAlbumId}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/albums/${album.lidarrAlbumId}`)}
-                >
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {album.cover ? (
-                        <img src={album.cover} alt={album.title}
-                          style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
-                      ) : (
-                        <div style={{
-                          width: 40, height: 40, borderRadius: 8, background: 'var(--card-border)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, opacity: 0.5
-                        }}>💿</div>
-                      )}
-                      <div style={{ fontWeight: 600 }}>{album.title}</div>
-                    </div>
-                  </td>
-                  <td>{album.year || '—'}</td>
-                  <td><span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{album.albumType || '—'}</span></td>
-                  <td>
-                    <span className={`status-badge ${album.cover_status || 'missing'}`}>
-                      {album.cover_status || 'Missing'}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`status-badge ${album.lyrics_status || 'unknown'}`}>
-                      {album.lyrics_status || 'Unknown'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {totalPages > 1 && (
-            <Group justify="center" mt="xl">
-              <Pagination total={totalPages} value={page} onChange={setPage} color="violet" />
-            </Group>
-          )}
-        </>
-      )}
     </div>
   );
 }

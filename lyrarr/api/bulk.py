@@ -8,6 +8,7 @@ without paging, and batch-delete strips lyrics files for a selected scope.
 import ast
 import logging
 import os
+import threading
 from datetime import datetime
 
 from flask import request
@@ -27,6 +28,10 @@ from lyrarr.app.database import (
 logger = logging.getLogger(__name__)
 
 api_ns_bulk = Namespace('Bulk', description='Bulk library operations')
+
+# Only one batch delete at a time: two overlapping runs over the same scope
+# would race on archiving/removing the same files.
+_batch_delete_lock = threading.Lock()
 
 
 def _parse_genres(raw):
@@ -105,7 +110,9 @@ class BatchDeleteLyrics(Resource):
         Body: { albumIds?: int[], artistIds?: int[], mode?: 'all'|'plain'|'instrumental' }
           - all: every lyrics file in scope
           - plain: only unsynced (plain-text) lyrics
-          - instrumental: only files on tracks classified as instrumental
+          - instrumental: per track on instrumental rows — empty/marker/placeholder/
+            credits-only files (or STRONG instrumental titles) are deleted; real
+            lyrics are adopted instead (the flag was wrong); override 'never' skipped
 
         Each file is archived into the track's version history before removal,
         so a mistaken mass delete is recoverable per track.
@@ -117,8 +124,23 @@ class BatchDeleteLyrics(Resource):
 
         if mode not in ('all', 'plain', 'instrumental'):
             return {'message': f"Unknown mode '{mode}'"}, 400
+        if not isinstance(album_ids, list) or not isinstance(artist_ids, list):
+            return {'message': 'albumIds and artistIds must be lists'}, 400
         if not album_ids and not artist_ids:
             return {'message': 'albumIds or artistIds required'}, 400
+
+        if not _batch_delete_lock.acquire(blocking=False):
+            return {'message': 'A batch delete is already running'}, 409
+        try:
+            return self._run(album_ids, artist_ids, mode)
+        finally:
+            _batch_delete_lock.release()
+
+    @staticmethod
+    def _run(album_ids, artist_ids, mode):
+        from lyrarr.lidarr.sync import _TERMINAL_LYRICS_STATES
+        from lyrarr.metadata import lyrics_store as ls
+        from lyrarr.metadata.lyrics_text import instrumental_title_tier
 
         if artist_ids:
             albums = database.execute(
@@ -130,43 +152,60 @@ class BatchDeleteLyrics(Resource):
         if mode == 'plain':
             query = query.where(
                 TableTracks.lyrics_status == 'available',
-                TableTracks.is_synced == False,
+                TableTracks.is_synced == False,  # noqa: E712
             )
         elif mode == 'instrumental':
             query = query.where(TableTracks.lyrics_status == 'instrumental')
         tracks = database.execute(query).scalars().all()
 
-        from lyrarr.metadata.lyrics_store import _archive_existing
-
-        deleted = 0
-        failed = 0
+        deleted = failed = unflagged = kept = txt = 0
         for track in tracks:
             if not track.path:
                 continue
-            filepath = os.path.splitext(track.path)[0] + '.lrc'
+            if os.path.isfile(os.path.splitext(track.path)[0] + '.txt'):
+                txt += 1
+                logger.warning(f"Batch delete: '{track.title}' also has an old .txt lyrics file; it is left alone")
+            filepath = ls.sidecar_path(track)
             if not os.path.isfile(filepath):
                 continue
-            try:
-                _archive_existing(track.lidarrTrackId, filepath, 'batch-delete')
-                os.remove(filepath)
-            except OSError as e:
+            if mode == 'instrumental':
+                if track.instrumental_override == 'never':
+                    kept += 1
+                    continue
+                kind, _ = ls.read_sidecar_kind(filepath)
+                deletable = kind in ('empty', 'marker', 'placeholder', 'credits_only') or \
+                    instrumental_title_tier(track.title) == 'strong'
+                if not deletable:
+                    # Real lyrics on a track flagged instrumental: the flag was
+                    # wrong, not the file. Adopt it instead of deleting it.
+                    if kind == 'lyrics' and ls.adopt_sidecar(track, keep_source=True):
+                        unflagged += 1
+                    else:
+                        kept += 1
+                    continue
+            # Never delete a file whose archive copy couldn't be written — it
+            # would be unrecoverable.
+            if not ls.archive_and_remove(track, 'batch-delete'):
                 failed += 1
-                logger.warning(f"Batch delete: could not remove lyrics for '{track.title}': {e}")
+                logger.warning(f"Batch delete: could not archive lyrics for '{track.title}'; left in place")
                 continue
 
-            values = {
-                'hasLyrics': False,
-                'is_synced': False,
-                'detected_language': None,
-                'updated_at_timestamp': datetime.now(),
-            }
-            # Instrumental tracks keep their classification (there are simply no
-            # lyrics for them); everything else goes back to wanted.
-            if track.lyrics_status != 'instrumental':
+            now = datetime.now()
+            values = {'hasLyrics': False, 'is_synced': False, 'updated_at_timestamp': now,
+                      'lyrics_source': None, 'lyrics_replace_requested': None}
+            values.update(ls.cleared_provenance())
+            if track.language_source != 'manual':
+                values['detected_language'] = None
+            # Skipped and instrumental tracks keep their state (there are simply
+            # no lyrics for them); everything else goes back to wanted.
+            if track.lyrics_status not in _TERMINAL_LYRICS_STATES:
                 values.update(
                     lyrics_status='missing',
                     lyrics_retry_count=0,
                     lyrics_retry_after=None,
+                    lyrics_transient_count=0,
+                    lyrics_cooldown_count=0,
+                    lyrics_retry_set_at=now,
                 )
             database.execute(
                 update(TableTracks)
@@ -189,18 +228,29 @@ class BatchDeleteLyrics(Resource):
                 )
             )
 
+        parts = [f'removed {deleted} lyrics file(s)']
+        if unflagged:
+            parts.append(f'{unflagged} un-flagged: real lyrics found')
+        if kept:
+            parts.append(f'{kept} kept')
+        if failed:
+            parts.append(f'{failed} failed')
+        if txt:
+            parts.append(f'{txt} old .txt file(s) left in place')
         from lyrarr.app.event_handler import event_stream
         event_stream(type='batch_delete_complete', payload={
             'deleted': deleted,
             'failed': failed,
+            'unflagged': unflagged,
             'mode': mode,
-            'message': f'Batch delete: removed {deleted} lyrics file(s)'
-                       + (f', {failed} failed' if failed else ''),
+            'message': 'Batch delete: ' + ', '.join(parts),
         })
 
         return {
-            'message': f'Deleted {deleted} lyrics file(s)'
-                       + (f', {failed} failed' if failed else ''),
+            'message': ', '.join(parts)[0].upper() + ', '.join(parts)[1:],
             'deleted': deleted,
             'failed': failed,
+            'unflagged': unflagged,
+            'kept': kept,
+            'txt_sidecars': txt,
         }

@@ -1,0 +1,96 @@
+/* Meter (DESIGN.md 7.3) */
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  vertical-align: middle;
+  width: 100%;
+  --h: 6px;
+}
+
+.root[data-size='xs'] { --h: 4px; }
+.root[data-size='md'] { --h: 8px; }
+
+.root:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.track {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: var(--h);
+  border-radius: 999px;
+  overflow: hidden;
+  background-color: var(--ly-track);
+}
+
+/* .ly-hatch draws the stripes; keep the faint track under them */
+.track:global(.ly-hatch) {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--ly-track);
+}
+
+.seg {
+  display: block;
+  height: 100%;
+  flex: none;
+  transition: width var(--ly-dur-slow) var(--ly-ease);
+}
+
+.seg + .seg {
+  box-shadow: inset 1px 0 0 var(--ly-surface);
+}
+
+.count {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Tooltip legend */
+.tip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 150px;
+}
+
+.tipTitle {
+  font-weight: 600;
+  color: var(--ly-text);
+  margin-bottom: 2px;
+}
+
+.tipRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ly-text-2);
+}
+
+.tipNum {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tipSwatch,
+.tipRing {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.tipRing {
+  border: 1.5px solid var(--ly-text-2);
+}

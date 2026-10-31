@@ -1,0 +1,274 @@
+/* ViewTabs, FilterBar, FilterPill, SortMenu (DESIGN.md 7.5) */
+
+/* ---------- ViewTabs ---------- */
+.viewTabsScroll {
+  /* containing block for the dot's visually-hidden label, so it is clipped
+     by the scroller instead of widening the document */
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* room for the focus ring */
+  padding: 3px;
+  margin: -3px;
+}
+
+.viewTabsScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.viewTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--ly-neutral-soft);
+  white-space: nowrap;
+  /* The scroller's end padding isn't part of its scrollable area, but this
+     margin is: it keeps the last tab's focus ring visible when scrolled. */
+  margin-inline-end: 3px;
+}
+
+.viewTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ly-text-2);
+  cursor: pointer;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease), color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.viewTab:hover {
+  color: var(--ly-text);
+}
+
+.viewTab[data-active] {
+  color: var(--ly-text);
+  background: var(--ly-raised);
+  box-shadow: var(--ly-shadow-card), 0 0 0 1px var(--ly-border);
+}
+
+:global(html[data-mantine-color-scheme='light']) .viewTab[data-active] {
+  background: var(--ly-surface);
+}
+
+:global(html[data-contrast='high']) .viewTab[data-active] {
+  box-shadow: 0 0 0 1px var(--ly-border-strong);
+}
+
+.viewTabCount {
+  font-weight: 500;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewTab[data-active] .viewTabCount {
+  color: var(--ly-text-2);
+}
+
+.viewTabDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ly-warning);
+}
+
+.viewTabDot[data-tone='danger'] {
+  background: var(--ly-danger);
+}
+
+/* Phones: wrap instead of scrolling, so no tab hides past the edge with no hint. */
+@media (max-width: 767px) {
+  .viewTabsScroll {
+    overflow-x: visible;
+  }
+
+  .viewTabs {
+    flex-wrap: wrap;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .viewTab {
+    white-space: nowrap;
+  }
+
+  /* wrap={false}: one horizontally scrolling row (sticky sub-navs). */
+  .viewTabsScroll[data-nowrap] {
+    overflow-x: auto;
+  }
+
+  .viewTabsScroll[data-nowrap] .viewTabs {
+    flex-wrap: nowrap;
+    max-width: none;
+  }
+}
+
+/* ---------- FilterBar ---------- */
+.filterBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.filterSearch {
+  flex: 0 1 300px;
+  min-width: 200px;
+}
+
+.filterSearch input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.filterSearchIcon {
+  width: 13px;
+  height: 13px;
+  color: var(--ly-muted);
+}
+
+.filterKbd {
+  pointer-events: none;
+}
+
+.filterPills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filterSpacer {
+  flex: 1 1 0;
+}
+
+.filterRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 767px) {
+  .filterSearch {
+    flex: 1 1 100%;
+  }
+
+  .filterSpacer {
+    display: none;
+  }
+}
+
+/* ---------- FilterPill ---------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px dashed var(--ly-control);
+  background: transparent;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.pill:hover {
+  background: var(--ly-hover);
+}
+
+.pill[data-set] {
+  border: 1px solid transparent;
+  background: var(--ly-accent-soft);
+}
+
+:global(html[data-contrast='high']) .pill[data-set] {
+  border-color: var(--ly-accent-text);
+}
+
+.pillButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pill[data-set] .pillButton {
+  padding-right: 4px;
+}
+
+.pillLabel {
+  font-weight: 500;
+  color: var(--ly-text-2);
+}
+
+.pillValue {
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.pill[data-set] .pillLabel,
+.pill[data-set] .pillValue {
+  color: var(--ly-accent-text);
+}
+
+.pillChevron {
+  width: 9px;
+  height: 9px;
+  color: var(--ly-muted);
+}
+
+.pillClear {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ly-accent-text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.pillClear:hover {
+  background: color-mix(in srgb, var(--ly-accent) 20%, transparent);
+}
+
+.pillMenu {
+  min-width: 200px;
+}
+
+.pillOptionRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pillCount {
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pillCheck {
+  width: 11px;
+  height: 11px;
+  color: var(--ly-accent-text);
+}

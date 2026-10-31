@@ -4,12 +4,32 @@ Notification system: Discord webhooks and Telegram bot messages.
 """
 
 import logging
+import re
 
 import requests
 
 from lyrarr.app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Secrets that can appear in request URLs and therefore in exception text:
+# Telegram bot tokens (/bot<id>:<secret>/) and Discord webhook tokens
+# (/api/webhooks/<id>/<token>).
+_SECRET_PATTERNS = (
+    re.compile(r'(bot)\d+:[A-Za-z0-9_-]+'),
+    re.compile(r'(/webhooks/\d+/)[A-Za-z0-9_.-]+'),
+)
+
+
+def _redact(text, *secrets):
+    """Strip tokens/keys from text before it is logged."""
+    text = str(text)
+    for secret in secrets:
+        if secret:
+            text = text.replace(str(secret), '***')
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(lambda m: m.group(1) + '***', text)
+    return text
 
 
 def send_notification(title, message, metadata_type='info'):
@@ -69,7 +89,7 @@ def _send_discord(webhook_url, title, message, metadata_type='info'):
         else:
             logger.warning(f"Discord webhook returned {resp.status_code}")
     except Exception as e:
-        logger.error(f"Discord notification error: {e}")
+        logger.error(f"Discord notification error: {_redact(e, webhook_url)}")
 
 
 def _send_telegram(bot_token, chat_id, title, message):
@@ -88,7 +108,7 @@ def _send_telegram(bot_token, chat_id, title, message):
         else:
             logger.warning(f"Telegram API returned {resp.status_code}")
     except Exception as e:
-        logger.error(f"Telegram notification error: {e}")
+        logger.error(f"Telegram notification error: {_redact(e, bot_token)}")
 
 
 def test_notification():

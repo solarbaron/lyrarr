@@ -31,16 +31,13 @@ database.execute(
 from lyrarr.app.scheduler import scheduler  # noqa
 logging.info("Scheduler started")
 
-# Start SignalR client if enabled
+# Start SignalR client if enabled. start() is non-blocking: a supervisor
+# thread connects in the background and keeps reconnecting (with backoff)
+# while Lidarr is unreachable.
 if not args.no_signalr and settings.general.use_lidarr:
-    from threading import Thread
-
     from lyrarr.lidarr.signalr_client import lidarr_signalr_client
 
-    signalr_thread = Thread(target=lidarr_signalr_client.start)
-    signalr_thread.daemon = True
-    signalr_thread.start()
-    logging.info("Lidarr SignalR client started")
+    lidarr_signalr_client.start()
 
 if __name__ == "__main__":
     webserver.start()

@@ -1,0 +1,26 @@
+.about {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ly-text-2);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.about[data-clamped] {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.readMore {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}

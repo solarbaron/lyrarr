@@ -226,6 +226,28 @@ def is_transient_status(status_code):
     return status_code == 429 or 500 <= status_code < 600
 
 
+def retry_after_seconds(response, default=1.0, cap=2.0):
+    """Seconds to wait before retrying, from a response's Retry-After header.
+
+    Accepts the delta-seconds form only (an HTTP-date falls back to
+    `default`). Always within [0, cap], so a hostile or confused server can't
+    park a worker thread.
+    """
+    headers = getattr(response, 'headers', None) or {}
+    value = None
+    try:
+        value = headers.get('Retry-After')
+    except AttributeError:
+        value = None
+    try:
+        delay = float(value) if value not in (None, '') else float(default)
+    except (TypeError, ValueError):
+        delay = float(default)
+    if delay != delay:  # NaN
+        delay = float(default)
+    return max(0.0, min(float(cap), delay))
+
+
 # Singleton instances
 rate_limiter = ProviderRateLimiter()
 health_tracker = ProviderHealthTracker()

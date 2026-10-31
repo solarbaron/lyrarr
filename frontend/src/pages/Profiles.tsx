@@ -1,88 +1,133 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader, Button, TextInput, NumberInput, Modal, Checkbox, Group, Menu, MultiSelect, Select } from '@mantine/core';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Button, Drawer, Menu, UnstyledButton } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
-import { getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignProfile } from '../api';
-import PageHeader from '../components/PageHeader';
+import { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faCircleExclamation, faEllipsis, faPlus, faSliders, faStar, faTrashCan, faUserGroup, faUserPlus,
+} from '@fortawesome/free-solid-svg-icons';
+import {
+  getProfiles, createProfile, updateProfile, deleteProfile, bulkAssignProfile, getAlbums, getArtists,
+} from '../api';
+import type { Profile } from '../types';
+import { errorMessage } from '../notify';
+import { plural } from '../format';
+import {
+  EmptyState, IconButton, ListSkeleton, PageHeader, Panel, SaveBar, Tag, useConfirm,
+} from '../components/ui';
+import { ProfileEditor } from './manage/ProfileEditor';
+import {
+  DEFAULT_FORM, formFromProfile, sameForm, SELECTION_MODE_SHORT, type ProfileForm,
+} from './manage/profileForm';
+import c from './manage/Profiles.module.css';
 
-interface ProfileForm {
-  name: string;
-  download_covers: boolean;
-  download_lyrics: boolean;
-  cover_providers: string[];
-  lyrics_providers: string[];
-  prefer_synced_lyrics: boolean;
-  lyrics_selection_mode: string;
-  auto_detect_language: boolean;
-  auto_translate: string;
-  translate_target_lang: string;
-  translate_only_foreign: boolean;
-  score_threshold: number;
-  cover_format: string;
-  overwrite_existing: boolean;
-  embed_cover_art: boolean;
+type Selection = number | 'new' | null;
+
+// Query keys start with 'albums'/'artists' so bulk assignment and library
+// refreshes (which invalidate those families) update the counts too.
+const albumCountKey = (id: number | 'all') => ['albums', 'profile-count', id] as const;
+const artistCountKey = (id: number | 'all') => ['artists', 'profile-count', id] as const;
+
+/** A default profile literally named "Default" needs no "Default" tag next to it. */
+const namedDefault = (name: string) => name.trim().toLowerCase() === 'default';
+
+function summary(p: Profile): string[] {
+  const parts: string[] = [];
+  if (p.download_covers) parts.push((p.cover_format || 'jpg').toUpperCase());
+  else parts.push('No covers');
+  if (!p.download_lyrics) parts.push('No lyrics');
+  else {
+    parts.push(SELECTION_MODE_SHORT[p.lyrics_selection_mode] ?? 'Best score');
+    // The old table's "Synced lyrics: Preferred" column (redundant with the Prefer synced mode).
+    if (p.prefer_synced_lyrics && p.lyrics_selection_mode !== 'prefer_synced') parts.push('Synced preferred');
+  }
+  if (p.auto_translate && p.auto_translate !== 'off') parts.push(`Translate to ${(p.translate_target_lang || 'en').toUpperCase()}`);
+  return parts;
 }
-
-const ALL_COVER_PROVIDERS = [
-  { value: 'musicbrainz', label: 'MusicBrainz (Cover Art Archive)', description: 'Free — no API key' },
-  { value: 'deezer', label: 'Deezer', description: 'Free — no API key' },
-  { value: 'itunes', label: 'iTunes / Apple Music', description: 'Free — no API key' },
-  { value: 'fanart', label: 'fanart.tv', description: 'Requires API key' },
-  { value: 'theaudiodb', label: 'TheAudioDB', description: 'Free test key included' },
-];
-
-const ALL_LYRICS_PROVIDERS = [
-  { value: 'lrclib', label: 'LRCLIB', description: 'Free — synced + plain' },
-  { value: 'musixmatch', label: 'Musixmatch', description: 'API key — synced + plain' },
-  { value: 'netease', label: 'NetEase Cloud Music', description: 'Free — synced + plain' },
-  { value: 'genius', label: 'Genius', description: 'API key — plain only' },
-];
-
-const DEFAULT_COVERS = ['musicbrainz', 'deezer', 'itunes', 'fanart', 'theaudiodb'];
-const DEFAULT_LYRICS = ['lrclib', 'musixmatch', 'netease', 'genius'];
-
-function parseProviders(json: string | string[] | null, fallback: string[]): string[] {
-  if (Array.isArray(json)) return json;
-  if (!json) return fallback;
-  try { return JSON.parse(json); } catch { return fallback; }
-}
-
-const LANGUAGES = [
-  { value: 'en', label: 'English' }, { value: 'es', label: 'Spanish' },
-  { value: 'fr', label: 'French' }, { value: 'de', label: 'German' },
-  { value: 'it', label: 'Italian' }, { value: 'pt', label: 'Portuguese' },
-  { value: 'ja', label: 'Japanese' }, { value: 'ko', label: 'Korean' },
-  { value: 'zh-cn', label: 'Chinese (Simplified)' }, { value: 'ru', label: 'Russian' },
-  { value: 'ar', label: 'Arabic' }, { value: 'hi', label: 'Hindi' },
-  { value: 'tr', label: 'Turkish' }, { value: 'nl', label: 'Dutch' },
-  { value: 'pl', label: 'Polish' }, { value: 'sv', label: 'Swedish' },
-];
-
-const DEFAULT_FORM: ProfileForm = {
-  name: '',
-  download_covers: true,
-  download_lyrics: true,
-  cover_providers: DEFAULT_COVERS,
-  lyrics_providers: DEFAULT_LYRICS,
-  prefer_synced_lyrics: true,
-  lyrics_selection_mode: 'best_score',
-  auto_detect_language: true,
-  auto_translate: 'off',
-  translate_target_lang: 'en',
-  translate_only_foreign: true,
-  score_threshold: 0,
-  cover_format: 'jpg',
-  overwrite_existing: false,
-  embed_cover_art: false,
-};
 
 export default function ProfilesPage() {
   const queryClient = useQueryClient();
-  const { data: profiles = [], isLoading } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
+  const confirm = useConfirm();
+  const narrow = useMediaQuery('(max-width: 1023px)');
+  const phone = useMediaQuery('(max-width: 479px)');
+  const { data: profiles = [], isLoading, isError, error, refetch } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editId, setEditId] = useState<number | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
   const [form, setForm] = useState<ProfileForm>(DEFAULT_FORM);
+  const [baseline, setBaseline] = useState<ProfileForm>(DEFAULT_FORM);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const current = typeof selection === 'number' ? profiles.find(p => p.id === selection) ?? null : null;
+  const dirty = selection === 'new' || !sameForm(form, baseline);
+
+  const albumCounts = useQueries({
+    queries: profiles.map(p => ({
+      queryKey: albumCountKey(p.id),
+      queryFn: () => getAlbums({ profileId: p.id, pageSize: 1 }).then(r => r.total),
+      staleTime: 60_000,
+    })),
+  });
+
+  const load = (p: Profile) => {
+    const f = formFromProfile(p);
+    setSelection(p.id);
+    setForm(f);
+    setBaseline(f);
+    setNameError(null);
+  };
+
+  // Pick the default profile once the list arrives; follow deletions.
+  useEffect(() => {
+    if (!profiles.length) return;
+    if (selection === null || (typeof selection === 'number' && !profiles.some(p => p.id === selection))) {
+      load(profiles.find(p => p.is_default) ?? profiles[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles, selection]);
+
+  const confirmDiscard = async () => !dirty || confirm({
+    title: 'Discard unsaved changes?',
+    message: selection === 'new'
+      ? 'The new profile hasn’t been created yet. Discard it?'
+      : <>Your changes to <strong>{current?.name ?? 'this profile'}</strong> haven’t been saved.</>,
+    confirmLabel: 'Discard changes',
+    tone: 'danger',
+  });
+
+  const select = async (p: Profile) => {
+    if (selection === p.id) { if (narrow) setDrawerOpen(true); return; }
+    if (!(await confirmDiscard())) return;
+    load(p);
+    if (narrow) setDrawerOpen(true);
+  };
+
+  const openCreate = async () => {
+    if (!(await confirmDiscard())) return;
+    setSelection('new');
+    setForm(DEFAULT_FORM);
+    setBaseline(DEFAULT_FORM);
+    setNameError(null);
+    if (narrow) setDrawerOpen(true);
+  };
+
+  const discard = () => {
+    if (selection === 'new' || !current) {
+      const fallback = profiles.find(p => p.is_default) ?? profiles[0];
+      if (fallback) load(fallback); else { setForm(DEFAULT_FORM); setBaseline(DEFAULT_FORM); setSelection(null); }
+      if (narrow) setDrawerOpen(false);
+    } else {
+      setForm(baseline);
+      setNameError(null);
+    }
+  };
+
+  const closeDrawer = async () => {
+    if (!(await confirmDiscard())) return;
+    if (dirty) discard();
+    setDrawerOpen(false);
+  };
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -91,324 +136,299 @@ export default function ProfilesPage() {
         cover_providers: JSON.stringify(form.cover_providers),
         lyrics_providers: JSON.stringify(form.lyrics_providers),
       };
-      if (editId) return updateProfile(editId, payload);
+      if (typeof selection === 'number') return updateProfile(selection, payload);
       return createProfile(payload);
     },
-    onSuccess: () => {
-      notifications.show({ title: 'Saved', message: 'Profile saved', color: 'green' });
+    onSuccess: (saved: Profile | undefined) => {
+      notifications.show({ title: 'Saved', message: 'Profile saved', color: 'success' });
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
-      setModalOpen(false);
-      setEditId(null);
-      setForm(DEFAULT_FORM);
+      setBaseline(form);
+      if (saved && typeof saved.id === 'number') {
+        // Put a created profile in the list right away, so the selection
+        // doesn't fall back to the default before the refetch lands.
+        queryClient.setQueryData<Profile[]>(['profiles'], old =>
+          old && !old.some(p => p.id === saved.id) ? [...old, saved] : old);
+        setSelection(saved.id);
+      }
     },
-    onError: (err: any) => {
-      notifications.show({ title: 'Error', message: err?.response?.data?.message || 'Failed', color: 'red' });
+    onError: (err: unknown) => {
+      notifications.show({ title: 'Error', message: errorMessage(err, 'Failed'), color: 'danger' });
     },
   });
+
+  const save = () => {
+    if (!form.name.trim()) {
+      setNameError('Profile name is required');
+      return;
+    }
+    setNameError(null);
+    saveMutation.mutate();
+  };
 
   const deleteMutation = useMutation({
     mutationFn: deleteProfile,
     onSuccess: () => {
-      notifications.show({ title: 'Deleted', message: 'Profile deleted', color: 'green' });
+      notifications.show({ title: 'Deleted', message: 'Profile deleted', color: 'success' });
+      setSelection(null);
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      queryClient.invalidateQueries({ queryKey: ['albums'] });
+      if (narrow) setDrawerOpen(false);
     },
-    onError: (err: any) => {
-      notifications.show({ title: 'Error', message: err?.response?.data?.message || 'Failed', color: 'red' });
+    onError: (err: unknown) => {
+      notifications.show({ title: 'Error', message: errorMessage(err, 'Failed'), color: 'danger' });
     },
   });
 
   const setDefaultMutation = useMutation({
     mutationFn: (id: number) => updateProfile(id, { is_default: true }),
     onSuccess: () => {
-      notifications.show({ title: 'Done', message: 'Default profile updated', color: 'green' });
+      notifications.show({ title: 'Done', message: 'Default profile updated', color: 'success' });
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
+    },
+    onError: (err: unknown) => {
+      notifications.show({ title: 'Error', message: errorMessage(err, 'Failed to set default profile'), color: 'danger' });
     },
   });
 
   const bulkAssignMutation = useMutation({
     mutationFn: (data: { profileId: number; mode: 'all' | 'unassigned' }) => bulkAssignProfile(data),
     onSuccess: (data: any) => {
-      notifications.show({ title: 'Done', message: data.message, color: 'green' });
+      notifications.show({ title: 'Done', message: data.message, color: 'success' });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
       queryClient.invalidateQueries({ queryKey: ['albums'] });
     },
-    onError: (err: any) => {
-      notifications.show({ title: 'Error', message: err?.response?.data?.message || 'Failed', color: 'red' });
+    onError: (err: unknown) => {
+      notifications.show({ title: 'Error', message: errorMessage(err, 'Failed'), color: 'danger' });
     },
   });
 
-  const openCreate = () => {
-    setEditId(null);
-    setForm(DEFAULT_FORM);
-    setModalOpen(true);
+  /** Counts for the assign confirmation; null when they can't be fetched. */
+  const assignCounts = async (mode: 'all' | 'unassigned'): Promise<{ artists: number; albums: number } | null> => {
+    try {
+      const fetchTotal = (key: readonly unknown[], fn: () => Promise<number>) =>
+        queryClient.fetchQuery({ queryKey: key, queryFn: fn, staleTime: 30_000 });
+      const [artists, albums] = await Promise.all([
+        fetchTotal(artistCountKey('all'), () => getArtists({ pageSize: 1 }).then(r => r.total)),
+        fetchTotal(albumCountKey('all'), () => getAlbums({ pageSize: 1 }).then(r => r.total)),
+      ]);
+      if (mode === 'all') return { artists, albums };
+      const [artistsAssigned, albumsAssigned] = await Promise.all([
+        Promise.all(profiles.map(p => fetchTotal(artistCountKey(p.id), () => getArtists({ profileId: p.id, pageSize: 1 }).then(r => r.total)))),
+        Promise.all(profiles.map(p => fetchTotal(albumCountKey(p.id), () => getAlbums({ profileId: p.id, pageSize: 1 }).then(r => r.total)))),
+      ]);
+      const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+      return { artists: Math.max(0, artists - sum(artistsAssigned)), albums: Math.max(0, albums - sum(albumsAssigned)) };
+    } catch {
+      return null;
+    }
   };
 
-  const openEdit = (profile: any) => {
-    setEditId(profile.id);
-    setForm({
-      name: profile.name,
-      download_covers: profile.download_covers ?? true,
-      download_lyrics: profile.download_lyrics ?? true,
-      cover_providers: parseProviders(profile.cover_providers, DEFAULT_COVERS),
-      lyrics_providers: parseProviders(profile.lyrics_providers, DEFAULT_LYRICS),
-      prefer_synced_lyrics: profile.prefer_synced_lyrics ?? true,
-      lyrics_selection_mode: profile.lyrics_selection_mode || 'best_score',
-      auto_detect_language: profile.auto_detect_language ?? true,
-      auto_translate: profile.auto_translate || 'off',
-      translate_target_lang: profile.translate_target_lang || 'en',
-      translate_only_foreign: profile.translate_only_foreign ?? true,
-      score_threshold: profile.score_threshold ?? 0,
-      cover_format: profile.cover_format || 'jpg',
-      overwrite_existing: profile.overwrite_existing ?? false,
-      embed_cover_art: profile.embed_cover_art ?? false,
+  const assign = async (p: Profile, mode: 'all' | 'unassigned') => {
+    const counts = await assignCounts(mode);
+    const what = counts ? `${plural(counts.artists, 'artist')} and ${plural(counts.albums, 'album')}` : null;
+    const message = mode === 'all' ? (
+      <>
+        Assign <strong>{p.name}</strong> to {what ? <>all <strong>{what}</strong></> : 'every artist and album'}?
+        {' '}This replaces the profile they use now.
+      </>
+    ) : counts && counts.artists === 0 && counts.albums === 0 ? (
+      <>Every artist and album already has a profile, so nothing will change.</>
+    ) : (
+      <>
+        Assign <strong>{p.name}</strong> to {what ? <>the <strong>{what}</strong></> : 'every artist and album'} without
+        a profile? Ones that already have a profile keep it.
+      </>
+    );
+    const ok = await confirm({
+      title: mode === 'all' ? 'Assign to all artists and albums?' : 'Assign to unassigned only?',
+      message,
+      confirmLabel: 'Assign profile',
     });
-    setModalOpen(true);
+    if (ok) bulkAssignMutation.mutate({ profileId: p.id, mode });
   };
 
-  const inputStyle = { input: { background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' } };
+  const remove = async (p: Profile) => {
+    const ok = await confirm({
+      title: 'Delete profile?',
+      message: <>Delete <strong>{p.name}</strong>? Artists and albums that use it are left without a profile.</>,
+      confirmLabel: 'Delete profile',
+      tone: 'danger',
+    });
+    if (ok) deleteMutation.mutate(p.id);
+  };
 
+  // Follows the name field as you type, like the list item does.
+  const editorTitle = form.name.trim() || (selection === 'new' ? 'New profile' : (current?.name || 'Profile'));
+  const editorActions = current ? (
+    <Menu position="bottom-end" withinPortal>
+      <Menu.Target>
+        <IconButton icon={faEllipsis} label={`More actions for ${current.name}`} />
+      </Menu.Target>
+      <Menu.Dropdown>
+        {!current.is_default && (
+          <Menu.Item leftSection={<FontAwesomeIcon icon={faStar} />} onClick={() => setDefaultMutation.mutate(current.id)}>
+            Set as default
+          </Menu.Item>
+        )}
+        <Menu.Label>Assign</Menu.Label>
+        <Menu.Item leftSection={<FontAwesomeIcon icon={faUserGroup} />} onClick={() => assign(current, 'all')}>
+          Assign to all artists/albums
+        </Menu.Item>
+        <Menu.Item leftSection={<FontAwesomeIcon icon={faUserPlus} />} onClick={() => assign(current, 'unassigned')}>
+          Assign to unassigned only
+        </Menu.Item>
+        {!current.is_default && (
+          <>
+            <Menu.Divider />
+            <Menu.Item color="danger" leftSection={<FontAwesomeIcon icon={faTrashCan} />} onClick={() => remove(current)}>
+              Delete
+            </Menu.Item>
+          </>
+        )}
+      </Menu.Dropdown>
+    </Menu>
+  ) : undefined;
+
+  const editor = (
+    <>
+      <ProfileEditor
+        form={form}
+        onChange={f => { setForm(f); if (nameError && f.name.trim()) setNameError(null); }}
+        nameError={nameError}
+        idPrefix={narrow ? 'profile-drawer' : 'profile'}
+      />
+      <SaveBar
+        dirty={dirty}
+        saving={saveMutation.isPending}
+        onSave={save}
+        onDiscard={discard}
+        message={phone ? 'Unsaved' : selection === 'new' ? 'New profile, not created yet' : 'Unsaved changes'}
+        saveLabel={selection === 'new' ? (phone ? 'Create' : 'Create profile') : (phone ? 'Save' : 'Save changes')}
+      />
+    </>
+  );
+
+  const editorTitleNode = (
+    <span className={c.editorTitle}>
+      <span className={c.editorName}>{editorTitle}</span>
+      {current?.is_default && !namedDefault(editorTitle) && <Tag>Default</Tag>}
+      {selection === 'new' && <Tag>Draft</Tag>}
+    </span>
+  );
+
+  let content;
   if (isLoading) {
-    return <div className="empty-state"><Loader color="violet" size="lg" /></div>;
+    content = <Panel padding="none"><ListSkeleton rows={4} avatar={false} /></Panel>;
+  } else if (isError) {
+    content = (
+      <Panel>
+        <EmptyState
+          size="sm"
+          tone="danger"
+          icon={faCircleExclamation}
+          title="Couldn't load profiles"
+          message={errorMessage(error)}
+          action={<Button variant="default" onClick={() => refetch()}>Retry</Button>}
+        />
+      </Panel>
+    );
+  } else {
+    const list = (
+      <Panel title="Profiles" padding="none" className={c.listPanel}>
+        {profiles.length === 0 && selection !== 'new' ? (
+          <EmptyState size="sm" icon={faSliders} title="No profiles yet" message="Create one to control what gets downloaded." />
+        ) : (
+          <ul className={c.list} aria-label="Profiles">
+            {selection === 'new' && (
+              <li>
+                <UnstyledButton className={c.item} data-active aria-current="true" onClick={() => narrow && setDrawerOpen(true)}>
+                  <span className={c.itemHead}>
+                    <span className={c.itemName}>{form.name.trim() || 'New profile'}</span>
+                    <Tag>Draft</Tag>
+                  </span>
+                  <span className={c.itemMeta}>Not created yet</span>
+                </UnstyledButton>
+              </li>
+            )}
+            {profiles.map((p, i) => {
+              const count = albumCounts[i]?.data;
+              const active = selection === p.id;
+              return (
+                <li key={p.id}>
+                  <UnstyledButton
+                    className={c.item}
+                    data-active={active || undefined}
+                    aria-current={active ? 'true' : undefined}
+                    onClick={() => select(p)}
+                  >
+                    <span className={c.itemHead}>
+                      <span className={c.itemName}>{active ? (form.name.trim() || p.name) : p.name}</span>
+                      {p.is_default && !namedDefault(active ? (form.name.trim() || p.name) : p.name) && <Tag>Default</Tag>}
+                      {active && dirty && (
+                        <span className={c.itemDirty} title="Unsaved changes">
+                          <span className="visually-hidden">Unsaved changes</span>
+                        </span>
+                      )}
+                    </span>
+                    <span className={c.itemMeta}>
+                      {count === undefined ? 'Counting albums…' : `Applies to ${plural(count, 'album')}`}
+                    </span>
+                    <span className={c.itemTags}>
+                      {summary(p).map(s => <span key={s} className={c.itemTag}>{s}</span>)}
+                    </span>
+                  </UnstyledButton>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Panel>
+    );
+
+    content = narrow ? (
+      <>
+        {list}
+        {/* Compound form so the ⋯ menu sits in the header next to the close button. */}
+        <Drawer.Root opened={drawerOpen} onClose={closeDrawer} position="right" size="100%">
+          <Drawer.Overlay blur={2} />
+          <Drawer.Content>
+            <Drawer.Header>
+              <Drawer.Title className={c.drawerTitle}>{editorTitleNode}</Drawer.Title>
+              <span className={c.drawerActions}>
+                {editorActions}
+                <Drawer.CloseButton aria-label="Close editor" />
+              </span>
+            </Drawer.Header>
+            <Drawer.Body className={c.drawerBody}>{editor}</Drawer.Body>
+          </Drawer.Content>
+        </Drawer.Root>
+      </>
+    ) : (
+      <div className={c.layout}>
+        {list}
+        <Panel title={editorTitleNode} actions={editorActions} className={c.editorPanel} aria-label="Profile editor">
+          {selection === null ? (
+            <EmptyState size="sm" icon={faSliders} title="Select a profile" message="Pick a profile on the left to edit it." />
+          ) : editor}
+        </Panel>
+      </div>
+    );
   }
 
   return (
-    <div className="fade-in">
+    <div className="ly-page">
       <PageHeader
-        title="Metadata Profiles"
+        title="Profiles"
+        count={isLoading || isError ? undefined : profiles.length}
         subtitle="Control what metadata gets downloaded per artist or album"
-        actions={
-          <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }} onClick={openCreate}>
-            New Profile
+        actions={(
+          <Button variant="filled" leftSection={<FontAwesomeIcon icon={faPlus} />} onClick={openCreate}>
+            New profile
           </Button>
-        }
+        )}
       />
-
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Covers</th>
-            <th>Lyrics</th>
-            <th>Synced Lyrics</th>
-            <th>Default</th>
-            <th style={{ width: 280 }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {profiles.map((p: any) => (
-            <tr key={p.id}>
-              <td><span style={{ fontWeight: 600 }}>{p.name}</span></td>
-              <td>
-                <span className={`status-badge ${p.download_covers ? 'available' : 'missing'}`}>
-                  {p.download_covers ? 'Yes' : 'No'}
-                </span>
-              </td>
-              <td>
-                <span className={`status-badge ${p.download_lyrics ? 'available' : 'missing'}`}>
-                  {p.download_lyrics ? 'Yes' : 'No'}
-                </span>
-              </td>
-              <td>{p.prefer_synced_lyrics ? 'Preferred' : 'No'}</td>
-              <td>
-                {p.is_default ? (
-                  <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>✓ Default</span>
-                ) : (
-                  <Button variant="subtle" color="gray" size="xs" onClick={() => setDefaultMutation.mutate(p.id)}>
-                    Set Default
-                  </Button>
-                )}
-              </td>
-              <td>
-                <Group gap="xs">
-                  <Button variant="subtle" color="violet" size="xs" onClick={() => openEdit(p)}>Edit</Button>
-                  <Menu shadow="md" width={200}>
-                    <Menu.Target>
-                      <Button variant="subtle" color="violet" size="xs">Assign ▾</Button>
-                    </Menu.Target>
-                    <Menu.Dropdown styles={{ dropdown: { background: 'var(--surface-bg)', border: '1px solid var(--card-border)' } }}>
-                      <Menu.Item onClick={() => bulkAssignMutation.mutate({ profileId: p.id, mode: 'all' })}>
-                        Set to All Artists/Albums
-                      </Menu.Item>
-                      <Menu.Item onClick={() => bulkAssignMutation.mutate({ profileId: p.id, mode: 'unassigned' })}>
-                        Set to Unassigned Only
-                      </Menu.Item>
-                    </Menu.Dropdown>
-                  </Menu>
-                  {!p.is_default && (
-                    <Button variant="subtle" color="red" size="xs" onClick={() => deleteMutation.mutate(p.id)}>
-                      Delete
-                    </Button>
-                  )}
-                </Group>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Create/Edit Modal */}
-      <Modal
-        opened={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editId ? 'Edit Profile' : 'Create Profile'}
-        styles={{ content: { background: 'var(--surface-bg)' }, header: { background: 'var(--surface-bg)' } }}
-      >
-        <TextInput
-          label="Profile Name"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.currentTarget.value })}
-          mb="md"
-          styles={inputStyle}
-        />
-        <Checkbox
-          label="Download Cover Art"
-          checked={form.download_covers}
-          onChange={(e) => setForm({ ...form, download_covers: e.currentTarget.checked })}
-          mb="sm"
-          color="violet"
-        />
-        <Checkbox
-          label="Download Lyrics"
-          checked={form.download_lyrics}
-          onChange={(e) => setForm({ ...form, download_lyrics: e.currentTarget.checked })}
-          mb="sm"
-          color="violet"
-        />
-        <Checkbox
-          label="Overwrite Existing Files"
-          checked={form.overwrite_existing}
-          onChange={(e) => setForm({ ...form, overwrite_existing: e.currentTarget.checked })}
-          mb="sm"
-          color="violet"
-        />
-        <Checkbox
-          label="Embed Cover Art in Audio Files"
-          checked={form.embed_cover_art}
-          onChange={(e) => setForm({ ...form, embed_cover_art: e.currentTarget.checked })}
-          mb="md"
-          color="violet"
-        />
-        <Select
-          label="Cover Format"
-          data={[
-            { value: 'jpg', label: 'JPEG (.jpg)' },
-            { value: 'png', label: 'PNG (.png)' },
-            { value: 'webp', label: 'WebP (.webp)' },
-          ]}
-          value={form.cover_format}
-          onChange={(v) => setForm({ ...form, cover_format: v || 'jpg' })}
-          mb="md"
-          styles={inputStyle}
-        />
-
-        {/* Lyrics Intelligence Section */}
-        <div style={{
-          padding: 16, borderRadius: 12, marginBottom: 16,
-          background: 'rgba(139, 61, 255, 0.06)', border: '1px solid rgba(139, 61, 255, 0.2)',
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: 'var(--accent-primary)' }}>
-            🧠 Lyrics Intelligence
-          </div>
-          <Select
-            label="Selection Mode"
-            description="How to pick the best lyrics result from all providers"
-            data={[
-              { value: 'best_score', label: 'Best Score (highest match %, synced tiebreaker)' },
-              { value: 'prefer_synced', label: 'Prefer Synced (synced always wins, then score)' },
-              { value: 'prefer_plain', label: 'Prefer Plain Text (for incompatible players)' },
-            ]}
-            value={form.lyrics_selection_mode}
-            onChange={(v) => setForm({ ...form, lyrics_selection_mode: v || 'best_score' })}
-            mb="md"
-            styles={inputStyle}
-          />
-          <NumberInput
-            label="Minimum Score Threshold"
-            description="Reject lyrics below this match % (0 = accept all)"
-            value={form.score_threshold}
-            onChange={(v) => setForm({ ...form, score_threshold: Number(v) || 0 })}
-            min={0}
-            max={100}
-            step={5}
-            mb="md"
-            styles={inputStyle}
-          />
-          <Checkbox
-            label="Auto-detect Language"
-            description="Identify the language of downloaded lyrics"
-            checked={form.auto_detect_language}
-            onChange={(e) => setForm({ ...form, auto_detect_language: e.currentTarget.checked })}
-            mb="sm"
-            color="violet"
-          />
-          <Select
-            label="Auto-translate"
-            description="Automatically translate lyrics after download"
-            data={[
-              { value: 'off', label: 'Off' },
-              { value: 'dual', label: 'Dual (Original + Translation)' },
-              { value: 'replace', label: 'Replace (Translation only)' },
-            ]}
-            value={form.auto_translate}
-            onChange={(v) => setForm({ ...form, auto_translate: v || 'off' })}
-            mb="md"
-            styles={inputStyle}
-          />
-          {form.auto_translate !== 'off' && (
-            <>
-              <Select
-                label="Target Language"
-                data={LANGUAGES}
-                value={form.translate_target_lang}
-                onChange={(v) => setForm({ ...form, translate_target_lang: v || 'en' })}
-                mb="sm"
-                styles={inputStyle}
-                searchable
-              />
-              <Checkbox
-                label="Only translate foreign languages"
-                description="Skip translation when lyrics are already in the target language"
-                checked={form.translate_only_foreign}
-                onChange={(e) => setForm({ ...form, translate_only_foreign: e.currentTarget.checked })}
-                mb="sm"
-                color="violet"
-              />
-            </>
-          )}
-        </div>
-
-        <MultiSelect
-          label="Cover Art Providers"
-          description="Order matters — first provider is tried first"
-          data={ALL_COVER_PROVIDERS}
-          value={form.cover_providers}
-          onChange={(v) => setForm({ ...form, cover_providers: v })}
-          mb="md"
-          styles={inputStyle}
-          searchable
-          clearable
-        />
-        <MultiSelect
-          label="Lyrics Providers"
-          description="All providers are queried — results are ranked by selection mode"
-          data={ALL_LYRICS_PROVIDERS}
-          value={form.lyrics_providers}
-          onChange={(v) => setForm({ ...form, lyrics_providers: v })}
-          mb="md"
-          styles={inputStyle}
-          searchable
-          clearable
-        />
-        <Button
-          fullWidth
-          variant="gradient"
-          gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-          onClick={() => saveMutation.mutate()}
-          loading={saveMutation.isPending}
-        >
-          {editId ? 'Save Changes' : 'Create Profile'}
-        </Button>
-      </Modal>
+      {content}
     </div>
   );
 }

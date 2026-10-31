@@ -1,0 +1,368 @@
+/* Top bar (DESIGN.md 6.3, 6.5) */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--ly-z-topbar);
+  height: var(--ly-topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 var(--ly-page-pad-x, 32px);
+  background: color-mix(in srgb, var(--ly-nav) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--ly-border);
+}
+
+html[data-contrast="high"] .bar {
+  background: var(--ly-nav);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.bar[data-mobile] {
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.left {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.center {
+  container: ly-search / inline-size;
+  flex: 0 1 440px;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.center:empty {
+  display: none;
+}
+
+.right {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bar[data-mobile] .right {
+  flex: none;
+  gap: 2px;
+}
+
+/* ---- Breadcrumbs ---- */
+.crumbs {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.crumbs ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.crumb,
+.crumbCurrent {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb {
+  flex: 0 1 auto;
+  /* A fixed cap: a percentage would resolve against the shrink-wrapped <ol>
+     and cut short trails ("Arti… › 2814"). */
+  max-width: 220px;
+}
+
+.crumb a {
+  color: var(--ly-text-2);
+  text-decoration: none;
+}
+
+.crumb a:hover {
+  color: var(--ly-text);
+  text-decoration: underline;
+}
+
+.crumbCurrent {
+  flex: 0 1 auto;
+  color: var(--ly-text);
+  font-weight: 600;
+}
+
+.sep {
+  flex: none;
+  color: var(--ly-muted);
+  font-size: 9px;
+  display: inline-flex;
+}
+
+/* ---- Mobile title / back ---- */
+.mobileTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mobileBrand {
+  display: inline-flex;
+  border-radius: var(--ly-radius-md);
+}
+
+.pageTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ly-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--ly-radius-md);
+  color: var(--ly-text);
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.back:hover {
+  background: var(--ly-hover);
+}
+
+.backLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Command palette trigger ---- */
+.searchTrigger {
+  width: 100%;
+  min-width: 0;
+  max-width: 440px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--ly-radius-md);
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-control);
+  color: var(--ly-muted);
+  font-size: 13px;
+  transition: border-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.searchTrigger:hover {
+  border-color: var(--ly-text-2);
+}
+
+.searchIcon {
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.searchText {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A squeezed trigger never spills into the right-hand group: the shortcut tag goes first. */
+@container ly-search (max-width: 180px) {
+  .searchTrigger :global(.mantine-Kbd-root) {
+    display: none;
+  }
+}
+
+/* ---- Activity pip ---- */
+.pipWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.pip {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ly-accent);
+  box-shadow: 0 0 0 2px var(--ly-nav);
+  pointer-events: none;
+}
+
+.pip[data-tone="danger"] {
+  background: var(--ly-danger);
+}
+
+/* ---- User menu ---- */
+.avatarButton {
+  border-radius: 50%;
+  display: inline-flex;
+}
+
+.avatar {
+  --avatar-bg: var(--ly-neutral-soft);
+  --avatar-color: var(--ly-text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* ---- Job progress line ---- */
+.jobLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.jobLineFill {
+  display: block;
+  height: 100%;
+  background: var(--ly-accent);
+  transition: width var(--ly-dur-slow) var(--ly-ease);
+}
+
+.jobLineIndeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: var(--ly-accent);
+  left: 0;
+  animation: ly-slide 1.2s var(--ly-ease) infinite;
+}
+
+/* Always partly on-track (10% at each end), so it never reads as an empty, stalled bar. */
+@keyframes ly-slide {
+  from { transform: translateX(-66.667%); }
+  to { transform: translateX(300%); }
+}
+
+/* ---- Health pill ---- */
+.healthPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--ly-text-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--ly-dur-fast) var(--ly-ease);
+}
+
+.healthPill:hover {
+  background: var(--ly-hover);
+  color: var(--ly-text);
+}
+
+.healthPill[data-compact] {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.healthPill[data-level="ok"] .healthLabel {
+  color: var(--ly-muted);
+}
+
+.healthDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.healthHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 16px 8px;
+  font-size: 13px;
+}
+
+.healthHeadTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.healthList {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 6px;
+}
+
+.healthItem {
+  display: flex;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--ly-border);
+}
+
+.healthItem .healthDot {
+  margin-top: 6px;
+}
+
+.healthText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.healthTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.healthReason {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ly-text-2);
+}
+
+.healthFix {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

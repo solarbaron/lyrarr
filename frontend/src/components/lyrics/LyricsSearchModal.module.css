@@ -1,0 +1,332 @@
+/* LyricsSearchModal (DESIGN.md 8.14) */
+
+.body {
+  padding-top: 4px;
+}
+
+/* The title shrinks (and ellipsizes) so the close button never leaves the header */
+.modalTitle {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.titleWrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.context {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ly-text-2);
+}
+
+/* ---------- Toolbar + refine ---------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--ly-dur-fast) var(--ly-ease);
+}
+
+.chevron[data-open] {
+  transform: rotate(180deg);
+}
+
+.refine {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  background: var(--ly-surface);
+}
+
+.refineInput {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.refineButtons {
+  flex: none;
+}
+
+.banner {
+  margin-top: 12px;
+}
+
+/* ---------- Content ---------- */
+/* Room for the highlighted outline / focus ring when the content scrolls */
+.content {
+  margin: 8px -4px -4px;
+  padding: 4px;
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  font-size: 13.5px;
+  color: var(--ly-text-2);
+}
+
+/* Capped here (not only on the panes) so the grid never reserves the list's full height */
+.panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  max-height: min(56vh, 560px);
+}
+
+.listPane {
+  max-height: 100%;
+  overflow-y: auto;
+  /* room for the highlighted outline and focus ring */
+  padding: 4px;
+  margin: -4px;
+}
+
+/* "3 more below": pinned to the bottom edge of the list pane while cards sit below it */
+.moreBelow {
+  position: sticky;
+  bottom: 0;
+  height: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.moreBelowPill {
+  position: relative;
+  top: -36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--ly-border-strong);
+  border-radius: var(--ly-radius-pill);
+  background: var(--ly-raised);
+  box-shadow: var(--ly-shadow);
+  color: var(--ly-text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.moreBelowPill:hover {
+  color: var(--ly-text);
+  background: var(--ly-hover);
+}
+
+.moreBelowPill svg {
+  width: 10px;
+  height: 10px;
+}
+
+.previewPane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  max-height: 100%;
+  padding: 14px;
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  background: var(--ly-surface);
+}
+
+.previewHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.previewProvider {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.previewScore {
+  min-width: 36px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.previewMeta {
+  flex: none;
+  margin-top: -4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* Only the lyrics shrink and scroll when the pane hits its max height */
+.previewPane > :not(.fullPreview) {
+  flex-shrink: 0;
+}
+
+.fullPreview {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ly-neutral-soft);
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ly-text);
+  white-space: pre-wrap;
+}
+
+.fullLine {
+  min-height: 1.6em;
+}
+
+.fullTs {
+  margin-right: 10px;
+  color: var(--ly-muted);
+}
+
+.previewEmpty {
+  font-size: 13px;
+  color: var(--ly-muted);
+}
+
+/*
+ * Windowed (>= 768px): the modal is a flex column capped at the viewport
+ * height. Header, toolbar, refine row and footer keep their size; only the
+ * results area shrinks (and the panes inside it scroll), so the footer and its
+ * primary button always stay on screen.
+ */
+.modalContent:not([data-full-screen]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.modalContent:not([data-full-screen]) > header {
+  flex: none;
+}
+
+.modalContent:not([data-full-screen]) .body,
+.layout:not([data-full-screen]) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.layout:not([data-full-screen]) > * {
+  flex: none;
+}
+
+.layout:not([data-full-screen]) > .content {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.layout:not([data-full-screen]) .panes {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ly-border);
+}
+
+.hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ly-muted);
+  white-space: nowrap;
+}
+
+.hintGap {
+  width: 12px;
+}
+
+.footerButtons {
+  margin-left: auto;
+}
+
+/* Full screen (< 768px): the footer stays at the bottom while the list scrolls */
+.footer[data-full-screen] {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-top: 12px;
+  background: var(--ly-raised);
+}
+
+@media (max-width: 767px) {
+  .hints {
+    display: none;
+  }
+
+  .refine {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
