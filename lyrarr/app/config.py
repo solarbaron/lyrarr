@@ -277,6 +277,19 @@ validators = [
 
     # analytics section
     Validator('analytics.enabled', must_exist=True, default=True, is_type_of=bool),
+
+    # audit section (Audit & Repair, PLAN §1.7 / §4.5)
+    Validator('audit.schedule', must_exist=True, default='off', is_type_of=str,
+              is_in=['off', 'daily', 'weekly']),
+    Validator('audit.schedule_day', must_exist=True, default=6, is_type_of=int, gte=0, lte=6),
+    Validator('audit.schedule_hour', must_exist=True, default=3, is_type_of=int, gte=0, lte=23),
+    Validator('audit.scheduled_mode', must_exist=True, default='dry_run', is_type_of=str,
+              is_in=['dry_run', 'apply_safe']),
+    # One-shot repair of state left by older versions, after an upgrade.
+    Validator('audit.auto_fix_on_upgrade', must_exist=True, default=True, is_type_of=bool),
+    Validator('audit.scheduled_include_file_scan', must_exist=True, default=True, is_type_of=bool),
+    Validator('audit.network_max_tracks', must_exist=True, default=200, is_type_of=int, gte=1, lte=5000),
+    Validator('audit.report_retention', must_exist=True, default=10, is_type_of=int, gte=1, lte=100),
 ]
 
 
@@ -431,7 +444,9 @@ _lidarr_connection_paths = {
     'lidarr.verify_ssl', 'lidarr.apikey'}
 _schedule_paths = {
     'general.use_lidarr', 'lidarr.sync_interval', 'lidarr.full_update', 'lidarr.full_update_day',
-    'lidarr.full_update_hour', 'backup.frequency', 'backup.day', 'backup.hour'}
+    'lidarr.full_update_hour', 'backup.frequency', 'backup.day', 'backup.hour',
+    'audit.schedule', 'audit.schedule_day', 'audit.schedule_hour', 'audit.scheduled_mode',
+    'audit.scheduled_include_file_scan'}
 
 
 class SettingsError(ValueError):

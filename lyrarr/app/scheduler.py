@@ -29,6 +29,36 @@ from .get_args import args
 
 ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365
 
+# Jobs whose first run time is set on purpose and must not be randomised.
+_FIXED_START_JOBS = frozenset({'audit_bootstrap'})
+
+
+def _audit_module():
+    """lyrarr.utilities.audit, imported lazily (it imports the worker and sync
+    modules); None when it isn't installed."""
+    import importlib
+    try:
+        return importlib.import_module('lyrarr.utilities.audit')
+    except ModuleNotFoundError as e:
+        if e.name and e.name.startswith('lyrarr.utilities.audit'):
+            logging.debug("Audit package not available")
+            return None
+        raise
+
+
+def run_audit_bootstrap():
+    """Scheduler wrapper: one-shot repair after an upgrade (no-op once done)."""
+    audit = _audit_module()
+    if audit is not None:
+        audit.run_bootstrap()
+
+
+def run_scheduled_audit():
+    """Scheduler wrapper for the configured periodic audit."""
+    audit = _audit_module()
+    if audit is not None:
+        audit.run_scheduled()
+
 
 def in_a_century():
     century = datetime.now() + relativedelta(years=100)
@@ -68,6 +98,7 @@ class Scheduler:
 
         self.__check_health_task()
         self.__maintenance_task()
+        self.__audit_bootstrap_task()
         self.update_configurable_tasks()
 
         self.aps_scheduler.start()
@@ -78,6 +109,7 @@ class Scheduler:
         self.__metadata_download_task()
         self.__lyrics_upgrade_task()
         self.__backup_task()
+        self.__scheduled_audit_task()
         self.__randomize_interval_task()
         if args.no_tasks:
             self.__no_task()
@@ -209,8 +241,38 @@ class Scheduler:
                 max_instances=1, coalesce=True, misfire_grace_time=15,
                 id='scheduled_backup', name='Scheduled Backup', replace_existing=True)
 
+    def __audit_bootstrap_task(self):
+        # Every 6 h, first run 2 min after start: the bootstrap returns at once
+        # when it already completed, and retries roots that were unreachable.
+        self.aps_scheduler.add_job(
+            run_audit_bootstrap, 'interval', hours=6,
+            next_run_time=datetime.now(tz=self.timezone) + timedelta(minutes=2),
+            max_instances=1, coalesce=True, misfire_grace_time=15,
+            id='audit_bootstrap', name='Library Check After Upgrade', replace_existing=True)
+
+    def __scheduled_audit_task(self):
+        schedule = getattr(settings.audit, 'schedule', 'off')
+        hour = settings.audit.schedule_hour
+        if schedule == 'daily':
+            self.aps_scheduler.add_job(
+                run_scheduled_audit, 'cron', hour=hour,
+                max_instances=1, coalesce=True, misfire_grace_time=15,
+                id='scheduled_audit', name='Scheduled Library Audit', replace_existing=True)
+        elif schedule == 'weekly':
+            self.aps_scheduler.add_job(
+                run_scheduled_audit, 'cron', day_of_week=settings.audit.schedule_day, hour=hour,
+                max_instances=1, coalesce=True, misfire_grace_time=15,
+                id='scheduled_audit', name='Scheduled Library Audit', replace_existing=True)
+        else:  # off
+            self.aps_scheduler.add_job(
+                run_scheduled_audit, 'cron', year=in_a_century(),
+                max_instances=1, coalesce=True, misfire_grace_time=15,
+                id='scheduled_audit', name='Scheduled Library Audit', replace_existing=True)
+
     def __randomize_interval_task(self):
         for job in self.aps_scheduler.get_jobs():
+            if job.id in _FIXED_START_JOBS:
+                continue
             if isinstance(job.trigger, IntervalTrigger):
                 if job.trigger.interval.total_seconds() > ONE_YEAR_IN_SECONDS:
                     continue

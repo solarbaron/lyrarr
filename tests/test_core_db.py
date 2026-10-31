@@ -4,6 +4,10 @@ Covers: legacy TEXT-boolean rebuild recovering from a leftover `__boolfix`
 column, model indexes created on existing databases, the in-process Alembic
 stamp leaving the app's logging configuration intact, configure_logging not
 duplicating handlers, and the Lidarr health URL / auth-disabled warning.
+Also the 1.7 additions: legacy_non_download_filter, JSON columns in to_dict,
+data-migration bookkeeping, the FRONTEND_EVENTS_V2 gate and emit_throttled,
+audit settings, single default profile after a restore, the dashboard lyrics
+series and per-root library health.
 """
 
 import logging
@@ -163,3 +167,181 @@ def test_health_warns_when_auth_disabled(monkeypatch):
     assert health._check_auth_health()['healthy'] is False
     monkeypatch.setattr(settings.auth, 'type', 'form')
     assert health._check_auth_health()['healthy'] is True
+
+
+# ---------------------------------------------------------------------------
+# 1.7 schema helpers, events, settings, backup restore, dashboard series
+# ---------------------------------------------------------------------------
+
+def _clean_history():
+    dbmod.database.execute(dbmod.delete(dbmod.TableHistory))
+
+
+def test_legacy_non_download_filter():
+    from sqlalchemy import insert
+    _clean_history()
+    rows = [
+        (1, 'Downloaded lyrics for A', 'lrclib'),
+        (1, 'Published lyrics for B', 'lrclib'),         # pre-1.7 publish
+        (1, 'Downloaded lyrics for C', 'editor'),        # pre-1.7 manual save
+        (1, 'Downloaded lyrics for D', 'batch-translate-de'),
+        (2, 'Upgraded lyrics for E', 'netease'),
+        (1, 'Downloaded lyrics for F', None),
+        (1, 'Downloaded lyrics for G', 'upload'),
+    ]
+    for action, desc, provider in rows:
+        dbmod.database.execute(insert(dbmod.TableHistory).values(
+            action=action, description=desc, provider=provider, metadata_type='lyrics'))
+    kept = dbmod.database.execute(
+        dbmod.select(dbmod.TableHistory.description)
+        .where(dbmod.TableHistory.action.in_((1, 2)), dbmod.legacy_non_download_filter())
+        .order_by(dbmod.TableHistory.id)
+    ).scalars().all()
+    assert kept == ['Downloaded lyrics for A', 'Upgraded lyrics for E', 'Downloaded lyrics for F']
+    _clean_history()
+
+
+def test_history_constants():
+    assert (dbmod.HISTORY_ACTION_DOWNLOAD, dbmod.HISTORY_ACTION_UPGRADE, dbmod.HISTORY_ACTION_DELETE,
+            dbmod.HISTORY_ACTION_MANUAL, dbmod.HISTORY_ACTION_PUBLISH, dbmod.HISTORY_ACTION_CLASSIFY,
+            dbmod.HISTORY_ACTION_AUDIT_REPAIR) == (1, 2, 3, 4, 5, 6, 7)
+    assert 'instrumental' in dbmod.LYRICS_STATUSES and 'generated' in dbmod.LYRICS_SOURCES
+
+
+def test_to_dict_parses_json_and_tolerates_garbage():
+    t = dbmod.TableTracks(lidarrTrackId=1, title='x', instrumental_evidence='[{"source": "title"}]',
+                          instrumental_prev='{not json', lyrics_match_json=None)
+    d = t.to_dict()
+    assert d['instrumental_evidence'] == [{'source': 'title'}]
+    assert d['instrumental_prev'] is None and d['lyrics_match_json'] is None
+    run = dbmod.TableAuditRuns(id=1, totals='{"issues": 3}', checks='oops')
+    assert run.to_dict()['totals'] == {'issues': 3} and run.to_dict()['checks'] is None
+
+
+def test_record_data_migration_idempotent():
+    dbmod.record_data_migration('test-only-marker', {'n': 1})
+    dbmod.record_data_migration('test-only-marker', {'n': 2})
+    assert dbmod.data_migration_applied('test-only-marker') is not None
+    row = dbmod.database.execute(dbmod.select(dbmod.TableDataMigrations)
+                                 .where(dbmod.TableDataMigrations.id == 'test-only-marker')).scalars().one()
+    assert row.to_dict()['result'] == {'n': 1}
+    dbmod.database.execute(dbmod.delete(dbmod.TableDataMigrations)
+                           .where(dbmod.TableDataMigrations.id == 'test-only-marker'))
+
+
+def test_events_gate_and_throttle(monkeypatch):
+    from lyrarr.app import event_handler as eh
+    sent = []
+    q = eh.subscribe(last_event_id=eh._next_id)  # no replay of earlier tests' events
+    try:
+        monkeypatch.setattr(eh, 'FRONTEND_EVENTS_V2', False)
+        for t in ('lyrics_audit_progress', 'instrumental_classified', 'download_scope', 'download_item'):
+            assert t in eh._NO_REPLAY_TYPES
+        eh.event_stream('download_item', {'title': 'x'})
+        assert eh.emit_throttled('lyrics_audit_progress', {'current': 1}, key='k', force=True) is False
+        assert q.empty()
+        monkeypatch.setattr(eh, 'FRONTEND_EVENTS_V2', True)
+        monkeypatch.setattr(eh, '_throttle_last', {})
+        assert eh.emit_throttled('lyrics_audit_progress', {'current': 1}, key='k', force=True)
+        assert not eh.emit_throttled('lyrics_audit_progress', {'current': 2}, key='k')
+        assert eh.emit_throttled('lyrics_audit_progress', {'current': 3}, key='k', force=True)
+        assert eh.emit_throttled('lyrics_audit_progress', {'current': 1}, key='other')
+        while not q.empty():
+            sent.append(q.get_nowait())
+        assert len(sent) == 3
+    finally:
+        eh.unsubscribe(q)
+
+
+def test_audit_settings_defaults_and_schedule_paths():
+    from lyrarr.app import config
+    assert settings.audit.schedule == 'off'
+    assert settings.audit.schedule_day == 6 and settings.audit.schedule_hour == 3
+    assert settings.audit.scheduled_mode == 'dry_run'
+    assert settings.audit.auto_fix_on_upgrade is True
+    assert settings.audit.scheduled_include_file_scan is True
+    assert settings.audit.network_max_tracks == 200 and settings.audit.report_retention == 10
+    assert {'audit.schedule', 'audit.schedule_day', 'audit.schedule_hour'} <= config._schedule_paths
+    with pytest.raises(config.SettingsError):
+        config._validate_value('audit.network_max_tracks', 9999)
+    with pytest.raises(config.SettingsError):
+        config._validate_value('audit.schedule', 'hourly')
+
+
+def _api_client(*namespaces):
+    from flask import Flask
+    from flask_restx import Api
+    app = Flask(__name__)
+    api = Api(app)
+    for ns in namespaces:
+        api.add_namespace(ns, '/')
+    return app.test_client()
+
+
+def test_restore_leaves_exactly_one_default():
+    from sqlalchemy import insert
+
+    from lyrarr.api import backup
+    P = dbmod.TableProfiles
+    dbmod.database.execute(dbmod.update(dbmod.TableArtists).values(profileId=None))
+    dbmod.database.execute(dbmod.update(dbmod.TableAlbums).values(profileId=None))
+    dbmod.database.execute(dbmod.delete(P))
+    dbmod.database.execute(insert(P).values(name='Default', is_default=True))
+    dbmod.database.execute(insert(P).values(name='Other', is_default=False))
+    client = _api_client(backup.api_ns_backup)
+    r = client.post('/system/restore', json={'version': 1, 'profiles': [
+        {'name': 'Other', 'is_default': True}, {'name': 'Imported', 'is_default': True}]})
+    assert r.status_code == 200, r.get_json()
+    dbmod.database.remove()
+    defaults = dbmod.database.execute(dbmod.select(P.name).where(P.is_default == True)).scalars().all()  # noqa: E712
+    assert defaults == ['Imported']
+    # A restore without any default keeps the existing one.
+    r = client.post('/system/restore', json={'version': 1, 'profiles': [{'name': 'Third'}]})
+    dbmod.database.remove()
+    defaults = dbmod.database.execute(dbmod.select(P.name).where(P.is_default == True)).scalars().all()  # noqa: E712
+    assert defaults == ['Imported']
+
+
+def test_dashboard_lyrics_series_counts_acquired_only():
+    from datetime import datetime
+
+    from sqlalchemy import insert
+
+    from lyrarr.api import dashboard
+    _clean_history()
+    now = datetime.now()
+    for action, desc in ((1, 'Downloaded lyrics for A'), (2, 'Upgraded lyrics for B'), (4, 'Saved lyrics for C'),
+                         (1, 'Published lyrics for D'), (5, 'Published lyrics for E'),
+                         (6, 'Classified instrumental (title): F'), (7, 'Audit: x'), (3, 'Deleted lyrics')):
+        dbmod.database.execute(insert(dbmod.TableHistory).values(
+            action=action, description=desc, metadata_type='lyrics', timestamp=now))
+    dbmod.database.execute(insert(dbmod.TableHistory).values(
+        action=4, description='Uploaded custom cover art', metadata_type='cover', timestamp=now))
+    client = _api_client(dashboard.api_ns_dashboard)
+    today = client.get('/dashboard/stats').get_json()['downloadHistory'][-1]
+    assert today['lyrics'] == 3 and today['covers'] == 1
+    _clean_history()
+
+
+def test_health_reports_each_unreachable_root(monkeypatch, tmp_path):
+    from lyrarr.metadata import lyrics_store
+    from lyrarr.utilities import health
+    events = []
+    import lyrarr.app.event_handler as eh
+    monkeypatch.setattr(eh, 'event_stream', lambda type, payload=None: events.append((type, payload)))
+    monkeypatch.setattr(health, '_last_state', {})
+    up = lyrics_store.RootStatus(str(tmp_path / 'm1'), True, True, 3, 0, 0.0, None)
+    down = lyrics_store.RootStatus(str(tmp_path / 'm2'), False, False, 3, 3, 1.0, None)
+    reach = lyrics_store.Reachability({up.root: up, down.root: down})
+    out = health._check_library_roots(reach)
+    assert list(out) == [f'library:{down.root}'] and out[f'library:{down.root}']['healthy'] is False
+    assert len(events) == 1 and down.root in events[0][1]['message']
+    health._check_library_roots(reach)  # unchanged: no second alert
+    assert len(events) == 1
+    up2 = down._replace(ok=True, exists=True)
+    assert health._check_library_roots(lyrics_store.Reachability({down.root: up2})) == {}
+    assert len(events) == 2 and events[-1][1]['healthy'] is True
+    # A root that isn't mounted but has no tracks under it raises nothing.
+    unused = lyrics_store.RootStatus(str(tmp_path / 'm3'), False, False, 0, 0, 0.0, None)
+    assert health._check_library_roots(lyrics_store.Reachability({unused.root: unused})) == {}
+    assert len(events) == 2

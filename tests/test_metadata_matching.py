@@ -221,7 +221,7 @@ def _res(provider, score, synced=False, gate=None, mb=False, text="words of the 
         "plain_lyrics": None if synced else body,
         "_provider": provider,
         "score": score,
-        "match_details": {"gate": gate, "mb_matched": mb},
+        "match_details": {"gate": gate, "mb_matched": mb, "title_score": 100},
     }
 
 
@@ -257,13 +257,22 @@ class TestRankCandidates:
         result, content, outcome = self.w.choose_lyrics([cand, good], "best_score", track_title="T")
         assert outcome == "ok" and result is good
 
-    def test_single_provider_instrumental_content_not_terminal(self):
+    def test_instrumental_content_is_never_a_verdict(self):
         inst = {"plain_lyrics": "[Instrumental]", "_provider": "genius", "score": 0.9}
-        _, _, outcome = self.w.choose_lyrics([inst], "best_score")
-        assert outcome == "none"
+        info = {}
+        _, _, outcome = self.w.choose_lyrics([inst], "best_score", info=info)
+        assert outcome == "none" and info["instrumental_seen"] is True
         inst2 = {"plain_lyrics": "Instrumental", "_provider": "netease", "score": 0.9}
         _, _, outcome = self.w.choose_lyrics([inst, inst2], "best_score")
-        assert outcome == "instrumental"
+        assert outcome == "none"  # votes are counted by the pipeline, not here
+
+    def test_after_instrumental_content_vocal_needs_confident_title(self):
+        inst = {"plain_lyrics": "[Instrumental]", "_provider": "lrclib", "score": 1.0}
+        weak = _res("genius", 0.7)
+        weak["match_details"]["title_score"] = 70
+        assert self.w.choose_lyrics([inst, weak], "best_score")[2] == "none"
+        weak["match_details"]["title_score"] = 95
+        assert self.w.choose_lyrics([inst, weak], "best_score")[2] == "ok"
 
     def test_clean_candidate_beats_truncated_looking_one(self):
         short = {"plain_lyrics": "First line here\nSecond line here also", "_provider": "a", "score": 0.95}
@@ -272,7 +281,43 @@ class TestRankCandidates:
         result, _, _ = self.w.choose_lyrics([short, full], "best_score", duration_s=240)
         assert result is full
         result, _, outcome = self.w.choose_lyrics([short], "best_score", duration_s=240)
-        assert outcome == "ok" and result is short  # last resort
+        assert outcome == "truncated" and result is short  # last resort (never an upgrade)
+
+    def test_prefer_plain_counts_dual_results(self):
+        dual = _res("lrclib", 0.9, synced=True)
+        dual["plain_lyrics"] = "words of the song here\nmore words of the song here"
+        plain = _res("genius", 0.8)
+        ranked = self.w.rank_candidates([plain, dual], "prefer_plain", 0.5)
+        assert [r["_provider"] for r in ranked] == ["lrclib", "genius"]
+
+    def test_best_score_with_prefer_synced(self):
+        synced = _res("lrclib", 0.92, synced=True)
+        plain = _res("genius", 0.94)
+        ranked = self.w.rank_candidates([plain, synced], "best_score", 0.5, prefer_synced=True)
+        assert ranked[0]["_provider"] == "lrclib"
+        ranked = self.w.rank_candidates([plain, synced], "best_score", 0.5, prefer_synced=False)
+        assert ranked[0]["_provider"] == "genius"
+
+    def test_placeholder_lrc_with_credits_rejected(self):
+        lrc = "[00:00.00]作词 : Someone\n[00:01.00]作曲 : Someone\n[00:02.00]纯音乐，请欣赏"
+        cand = {"synced_lyrics": lrc, "_provider": "netease", "score": 0.9}
+        assert self.w.choose_lyrics([cand], "best_score")[2] == "none"
+
+    def test_credit_blocks_stripped_before_saving(self):
+        body = "\n".join(f"[00:{10 + i:02d}.00]placeholder line {i} of the song" for i in range(6))
+        lrc = "[00:00.00]作词 : Someone\n[00:01.00]作曲 : Someone\n" + body
+        _, content, outcome = self.w.choose_lyrics([{"synced_lyrics": lrc, "_provider": "netease", "score": 0.9}],
+                                                   "best_score")
+        assert outcome == "ok" and "作词" not in content and content.strip() == body
+
+    def test_overrunning_synced_falls_back_to_its_plain(self):
+        synced = "\n".join(f"[0{i}:00.00]placeholder line {i}" for i in range(6))  # last at 5:00
+        cand = {"synced_lyrics": synced, "plain_lyrics": "plain placeholder one\nplain placeholder two\n"
+                "plain placeholder three\nplain placeholder four", "_provider": "lrclib", "score": 0.9}
+        _, content, outcome = self.w.choose_lyrics([cand], "best_score", duration_s=200)
+        assert outcome == "ok" and content.startswith("plain placeholder one")
+        _, content, _ = self.w.choose_lyrics([cand], "best_score", duration_s=320)
+        assert content == synced
 
 
 def test_publish_rejects_ms_divided_duration():

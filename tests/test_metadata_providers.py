@@ -2,8 +2,10 @@
 
 Covers: the shared safe cover downloader (host allow-lists re-checked per
 redirect, byte cap, magic-number check), fanart.tv v3 album-cover parsing,
-Deezer/iTunes result parsing + album verification, and Musixmatch/NetEase
-transient-error and malformed-body handling.
+Deezer/iTunes result parsing + album verification, Musixmatch/NetEase
+transient-error and malformed-body handling, NetEase credit stripping and
+pure-music hints, Musixmatch search parameters/fallback/hints, and Genius
+search_all scoring. All lyric text is synthetic.
 """
 
 import sys
@@ -256,7 +258,7 @@ class TestMusixmatch:
     def test_free_tier_excerpt_flagged_and_footer_stripped(self, mxm, monkeypatch):
         track = {'track_list': [{'track': {'track_id': 1, 'track_name': 'Hello', 'artist_name': 'Adele',
                                            'track_length': 295}}]}
-        lyrics = {'lyrics': {'lyrics_body': "Hello, it's me\nI was wondering\n...\n\n"
+        lyrics = {'lyrics': {'lyrics_body': "first line of the verse\nsecond line of the verse\n...\n\n"
                                             "******* This Lyrics is NOT for Commercial use *******\n(1409)"}}
         _route(monkeypatch, mxm, {
             'https://api.musixmatch.com/ws/1.1/track.search': self._env(200, track),
@@ -289,3 +291,353 @@ class TestNetEase:
         from lyrarr.metadata.lyrics import netease
         _route(monkeypatch, netease, {'https://music.163.com/': FakeResponse(json_data={'code': 200, 'result': None})})
         assert netease.NetEaseProvider().search(track_name='Hello', artist_name='Adele') == []
+
+
+# ---------------------------------------------------------------------------
+# NetEase: credit blocks, pure-music hints, strategy continuation
+# ---------------------------------------------------------------------------
+
+def _ne_lrc(head, body, tail=()):
+    lines = [f"[00:{i:02d}.000] {role} : Person {chr(65 + i)}" for i, role in enumerate(head)]
+    lines += [f"[{10 + i // 6:02d}:{(i * 7) % 60:02d}.{i:02d}0]{text}" for i, text in enumerate(body)]
+    lines += [f"[04:{30 + i:02d}.000] {role} : Person {chr(80 + i % 10)}" for i, role in enumerate(tail)]
+    return "\n".join(lines) + "\n"
+
+
+# Shapes of live NetEase answers (scratchpad ne_1426503 / ne_17177324 /
+# ne_186016): same flags, same credit roles, synthetic names and lyrics.
+NE_PURE_MUSIC = {
+    'pureMusic': True, 'code': 200,
+    'lrc': {'version': 1, 'lyric': _ne_lrc(
+        ['作曲', '制作人', '指挥家'], ['纯音乐，请欣赏'],
+        ['音频助理', '混音师', '贝斯', '中提琴', '附加编程', '吉他', '合成器', '长号', '监制', '大提琴',
+         '录音', '混音助理', '大号', '母带工程师'])},
+}
+NE_EN_CREDITS = {
+    'code': 200,
+    'lrc': {'version': 80, 'lyric': _ne_lrc(
+        ['作词', '作曲', '制作人'],
+        [f"placeholder english line {i}" for i in range(12)])},
+}
+NE_ZH_CREDITS = {
+    'code': 200,
+    'lrc': {'version': 70, 'lyric': _ne_lrc(
+        ['作词', '作曲', '编曲', '制作人', '和声编写', '吉他', '贝斯', '鼓', '录音工程', '混音', '录音助理'],
+        [f"占位歌词第{i}行" for i in range(12)])},
+}
+
+
+def _ne_song(sid, name='Song', artist='Band', duration_ms=200000, album='Album'):
+    return {'id': sid, 'name': name, 'artists': [{'name': artist}], 'duration': duration_ms,
+            'album': {'name': album}}
+
+
+class NetEaseFake:
+    def __init__(self, searches, lyrics):
+        self.searches = list(searches)   # one songs-list per search request, in order
+        self.lyrics = lyrics             # id -> lyric JSON
+        self.queries = []
+        self.lyric_ids = []
+
+    def post(self, url, data=None, **kw):
+        self.queries.append(data['s'])
+        songs = self.searches.pop(0) if self.searches else []
+        return FakeResponse(json_data={'code': 200, 'result': {'songs': songs}})
+
+    def get(self, url, params=None, **kw):
+        self.lyric_ids.append(params['id'])
+        return FakeResponse(json_data=self.lyrics.get(params['id'], {'code': 200}))
+
+
+@pytest.fixture
+def netease_fake(monkeypatch):
+    from lyrarr.metadata.lyrics import netease
+
+    def install(searches, lyrics):
+        fake = NetEaseFake(searches, lyrics)
+        monkeypatch.setattr(netease.requests, 'post', fake.post)
+        monkeypatch.setattr(netease.requests, 'get', fake.get)
+        return fake
+    return netease, install
+
+
+class TestNetEaseContent:
+    def test_pure_music_gives_hint_not_lyrics(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(1426503, duration_ms=201000)]], {1426503: NE_PURE_MUSIC})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['synced_lyrics'] is None and r['plain_lyrics'] is None
+        assert 'instrumental' not in r
+        hint = r['instrumental_hint']
+        assert hint['provider'] == 'netease' and hint['kind'] == 'pure_music'
+        assert hint['duration_diff'] == 1 and hint['score'] >= 0.5
+        assert hint['matched_title'] == 'Song' and hint['matched_album'] == 'Album'
+        assert r['strategy'] == 'search' and r['source_id'] == 1426503
+
+    def test_credits_stripped_english(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(17177324)]], {17177324: NE_EN_CREDITS})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert ' : ' not in r['synced_lyrics'] and ' : ' not in r['plain_lyrics']
+        assert r['plain_lyrics'].splitlines()[0] == 'placeholder english line 0'
+        assert r['synced_lyrics'].splitlines()[0].startswith('[10:00.000]')
+        assert 'instrumental_hint' not in r
+
+    def test_credits_stripped_chinese_extended_roles(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(186016)]], {186016: NE_ZH_CREDITS})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert ' : ' not in r['synced_lyrics']
+        assert len(r['plain_lyrics'].splitlines()) == 12
+        assert r['plain_lyrics'].splitlines()[0] == '占位歌词第0行'
+
+    def test_credit_strip_keeps_middle_lines(self):
+        from lyrarr.metadata.lyrics.netease import strip_netease_credits
+        text = "[00:00.00] 作词 : A\n[00:10.00]first line\n[00:20.00]Producer: middle line\n[00:30.00]end"
+        assert "[00:20.00]Producer: middle line" in strip_netease_credits(text)
+
+    def test_nolyric_flag_hints(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(5)]], {5: {'code': 200, 'nolyric': True}})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['instrumental_hint']['kind'] == 'pure_music'
+
+    def test_uncollected_is_not_a_hint(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(6)]], {6: {'code': 200, 'uncollected': True}})
+        assert netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200) == []
+
+    def test_no_hint_for_instrumental_titled_match(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(7, name='Song (伴奏)')]] * 4, {7: NE_PURE_MUSIC})
+        assert netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200) == []
+
+    def test_no_hint_for_gated_match(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(8, artist='Somebody Else')]] * 4, {8: NE_PURE_MUSIC})
+        provider = netease.NetEaseProvider()
+        assert provider.search(track_name='Song', artist_name='Band', duration=200) == []
+        # Manual search (strict=False) shows the gated candidate, still without a hint.
+        install([[_ne_song(8, artist='Somebody Else')]] * 4, {8: NE_EN_CREDITS})
+        [r] = provider.search(track_name='Song', artist_name='Band', duration=200, strict=False)
+        assert r['match_details']['gate'] == 'artist_mismatch'
+
+    def test_hint_conflicting_with_lyric_lines_is_dropped(self, netease_fake):
+        netease, install = netease_fake
+        data = dict(NE_EN_CREDITS, pureMusic=True)
+        install([[_ne_song(9)]], {9: data})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert 'instrumental_hint' not in r and r['plain_lyrics']
+
+
+class TestNetEaseStrategies:
+    def test_unacceptable_first_strategy_tries_next(self, netease_fake):
+        netease, install = netease_fake
+        fake = install([[_ne_song(1, artist='Other Act')], [_ne_song(2)]], {2: NE_EN_CREDITS})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['source_id'] == 2
+        assert len(fake.queries) == 2 and fake.lyric_ids == [2]
+
+    def test_stops_at_first_acceptable(self, netease_fake):
+        netease, install = netease_fake
+        fake = install([[_ne_song(3)], [_ne_song(4)]], {3: NE_EN_CREDITS})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['source_id'] == 3 and len(fake.queries) == 1
+
+    def test_alt_artist_names(self, netease_fake):
+        netease, install = netease_fake
+        install([[_ne_song(10, artist='Guest Singer')]], {10: NE_EN_CREDITS})
+        [r] = netease.NetEaseProvider().search(track_name='Song', artist_name='Album Artist', duration=200,
+                                               alt_artist_names=('Guest Singer',))
+        assert r['match_details']['gate'] is None
+
+
+# ---------------------------------------------------------------------------
+# Musixmatch: params, fallback, strict, hints
+# ---------------------------------------------------------------------------
+
+class MxmFake:
+    def __init__(self, searches, lyrics=None, subtitles=None):
+        self.searches = list(searches)
+        self.lyrics = lyrics or {}
+        self.subtitles = subtitles or {}
+        self.calls = []
+
+    @staticmethod
+    def env(status, body):
+        return FakeResponse(json_data={'message': {'header': {'status_code': status}, 'body': body}})
+
+    def __call__(self, url, params=None, **kw):
+        endpoint = url.rsplit('/', 1)[-1]
+        self.calls.append((endpoint, dict(params or {})))
+        if endpoint == 'track.search':
+            tracks = self.searches.pop(0) if self.searches else []
+            return self.env(200, {'track_list': [{'track': t} for t in tracks]})
+        if endpoint == 'track.lyrics.get':
+            body = self.lyrics.get(params['track_id'])
+            return self.env(200, {'lyrics': {'lyrics_body': body}}) if body else self.env(404, '')
+        body = self.subtitles.get(params['track_id'])
+        return self.env(200, {'subtitle': {'subtitle_body': body}}) if body else self.env(404, '')
+
+    def endpoints(self):
+        return [e for e, _ in self.calls]
+
+
+def _mxm_track(tid, name='Song', artist='Band', length=200, album='Album', instrumental=0):
+    return {'track_id': tid, 'track_name': name, 'artist_name': artist, 'track_length': length,
+            'album_name': album, 'instrumental': instrumental, 'has_lyrics': 1}
+
+
+@pytest.fixture
+def mxm_fake(monkeypatch):
+    from lyrarr.metadata.lyrics import musixmatch
+    monkeypatch.setattr(musixmatch.MusixmatchProvider, '_api_key', property(lambda self: 'k'))
+
+    def install(*args, **kwargs):
+        fake = MxmFake(*args, **kwargs)
+        monkeypatch.setattr(musixmatch.requests, 'get', fake)
+        return fake
+    return musixmatch, install
+
+
+class TestMusixmatchSearch:
+    def test_search_params(self, mxm_fake):
+        mxm, install = mxm_fake
+        fake = install([[_mxm_track(1)]], lyrics={1: 'first line of the verse\nsecond line'})
+        mxm.MusixmatchProvider().search(track_name='Song (Remastered 2011)', artist_name='Band',
+                                        album_name='Album', duration=200)
+        params = fake.calls[0][1]
+        assert params['f_has_lyrics'] == 1
+        assert 'q_album' not in params and 'f_track_length' not in params
+        assert params['q_track'] == 'Song' and params['q_artist'] == 'Band'
+
+    def test_result_shape(self, mxm_fake):
+        mxm, install = mxm_fake
+        install([[_mxm_track(11)]], lyrics={11: 'first line of the verse\nsecond line'})
+        [r] = mxm.MusixmatchProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['strategy'] == 'search' and r['source_id'] == 11
+        assert r['album_name'] == 'Album' and r['duration'] == 200
+        assert r['match_details']['duration_diff'] == 0
+
+    def test_title_only_fallback_when_best_is_gated(self, mxm_fake):
+        mxm, install = mxm_fake
+        fake = install([[_mxm_track(1, artist='Other Act')], [_mxm_track(2)]],
+                       lyrics={2: 'first line of the verse\nsecond line'})
+        [r] = mxm.MusixmatchProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['source_id'] == 2
+        assert 'q_artist' not in fake.calls[1][1]
+
+    def test_strict_skips_lyrics_calls_for_gated(self, mxm_fake):
+        mxm, install = mxm_fake
+        fake = install([[_mxm_track(1, artist='Other Act')], [_mxm_track(1, artist='Other Act')]],
+                       lyrics={1: 'first line of the verse\nsecond line'})
+        assert mxm.MusixmatchProvider().search(track_name='Song', artist_name='Band', duration=200) == []
+        assert 'track.lyrics.get' not in fake.endpoints()
+        assert 'track.subtitle.get' not in fake.endpoints()
+
+    def test_manual_search_fetches_gated(self, mxm_fake):
+        mxm, install = mxm_fake
+        install([[_mxm_track(1, artist='Other Act')], [_mxm_track(1, artist='Other Act')]],
+                lyrics={1: 'first line of the verse\nsecond line'})
+        [r] = mxm.MusixmatchProvider().search(track_name='Song', artist_name='Band', duration=200, strict=False)
+        assert r['match_details']['gate'] == 'artist_mismatch'
+
+    def test_instrumental_flag_gives_hint(self, mxm_fake):
+        mxm, install = mxm_fake
+        fake = install([[_mxm_track(3, length=202, instrumental=1)]])
+        [r] = mxm.MusixmatchProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['plain_lyrics'] is None and r['synced_lyrics'] is None
+        assert 'instrumental' not in r
+        assert r['instrumental_hint']['kind'] == 'mxm_instrumental'
+        assert r['instrumental_hint']['duration_diff'] == 2
+        assert 'track.lyrics.get' not in fake.endpoints()
+
+    def test_no_hint_for_instrumental_titled_track(self, mxm_fake):
+        mxm, install = mxm_fake
+        install([[_mxm_track(4, name='Song (Karaoke Version)', instrumental=1)]] * 2)
+        assert mxm.MusixmatchProvider().search(track_name='Song', artist_name='Band', duration=200) == []
+
+
+# ---------------------------------------------------------------------------
+# Genius: excluded terms, search_all scoring, cleanup
+# ---------------------------------------------------------------------------
+
+class GeniusFake:
+    def __init__(self, sections, pages):
+        self.sections = sections
+        self.pages = pages
+        self.excluded_terms = ['tracklist', 'credits', '(instrumental)']
+        self.fetched = []
+        self.queries = []
+
+    def search_all(self, term, per_page=None, page=None):
+        self.queries.append(term)
+        return {'sections': self.sections}
+
+    def lyrics(self, song_id=None, song_url=None, remove_section_headers=False):
+        self.fetched.append(song_id)
+        return self.pages.get(song_id)
+
+
+def _g_hit(gid, title='Song', artist='Band', instrumental=False):
+    return {'type': 'song', 'result': {'id': gid, 'title': title, 'artist_names': artist,
+                                       'primary_artist': {'name': artist}, 'url': f'https://genius.com/{gid}',
+                                       'lyrics_state': 'complete', 'instrumental': instrumental}}
+
+
+GENIUS_PAGE = "Song Lyrics\n[Verse 1]\nfirst line of the verse\nsecond line &amp; more\nthird line here\n12Embed"
+
+
+@pytest.fixture
+def genius_mod(monkeypatch):
+    from lyrarr.metadata.lyrics import genius
+    monkeypatch.setattr(genius.GeniusProvider, '_api_key', property(lambda self: 'k'))
+    return genius
+
+
+class TestGenius:
+    def test_excluded_terms_keep_defaults(self, genius_mod):
+        client = genius_mod.GeniusProvider()._get_client()
+        assert 'tracklist' in client.excluded_terms
+        assert '(Remix)' in client.excluded_terms and '(Live)' in client.excluded_terms
+
+    def test_scores_all_hits_fetches_best_only(self, genius_mod, monkeypatch):
+        fake = GeniusFake(
+            [{'type': 'top_hit', 'hits': [_g_hit(1, title='Other Song')]},
+             {'type': 'song', 'hits': [_g_hit(1, title='Other Song'), _g_hit(2, artist='Band Tribute Act'),
+                                       _g_hit(3)]}],
+            {1: GENIUS_PAGE, 2: GENIUS_PAGE, 3: GENIUS_PAGE})
+        monkeypatch.setattr(genius_mod.GeniusProvider, '_get_client', lambda self: fake)
+        [r] = genius_mod.GeniusProvider().search(track_name='Song', artist_name='Band', duration=200)
+        assert r['source_id'] == 3 and fake.fetched == [3]
+        assert r['strategy'] == 'search' and r['duration'] is None and r['album_name'] is None
+        assert r['match_details']['gate'] is None
+        assert '&amp;' not in r['plain_lyrics'] and 'second line & more' in r['plain_lyrics']
+        assert 'Embed' not in r['plain_lyrics']
+
+    def test_next_hit_when_best_page_empty(self, genius_mod, monkeypatch):
+        fake = GeniusFake([{'type': 'song', 'hits': [_g_hit(3), _g_hit(4, artist='Band feat. Guest')]}],
+                          {3: '', 4: GENIUS_PAGE})
+        monkeypatch.setattr(genius_mod.GeniusProvider, '_get_client', lambda self: fake)
+        [r] = genius_mod.GeniusProvider().search(track_name='Song', artist_name='Band')
+        assert r['source_id'] == 4 and fake.fetched == [3, 4]
+
+    def test_only_gated_hits_nothing_fetched(self, genius_mod, monkeypatch):
+        fake = GeniusFake([{'type': 'song', 'hits': [_g_hit(5, title='Different Words'),
+                                                     _g_hit(6, artist='Someone Else')]}],
+                          {5: GENIUS_PAGE, 6: GENIUS_PAGE})
+        monkeypatch.setattr(genius_mod.GeniusProvider, '_get_client', lambda self: fake)
+        assert genius_mod.GeniusProvider().search(track_name='Song', artist_name='Band') == []
+        assert fake.fetched == []
+
+    def test_instrumental_flag_ignored(self, genius_mod, monkeypatch):
+        # Genius' flag is neither a hint nor a reason to drop real lyrics.
+        fake = GeniusFake([{'type': 'song', 'hits': [_g_hit(7, instrumental=True)]}], {7: GENIUS_PAGE})
+        monkeypatch.setattr(genius_mod.GeniusProvider, '_get_client', lambda self: fake)
+        [r] = genius_mod.GeniusProvider().search(track_name='Song', artist_name='Band')
+        assert 'instrumental' not in r and 'instrumental_hint' not in r
+
+    def test_excluded_term_skipped_unless_in_query(self, genius_mod, monkeypatch):
+        fake = GeniusFake([{'type': 'song', 'hits': [_g_hit(8, title='Song (Credits)')]}], {8: GENIUS_PAGE})
+        monkeypatch.setattr(genius_mod.GeniusProvider, '_get_client', lambda self: fake)
+        assert genius_mod.GeniusProvider().search(track_name='Song', artist_name='Band') == []

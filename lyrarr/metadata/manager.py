@@ -91,111 +91,122 @@ def album_track_paths(album_id):
 
 
 def save_cover_art(album_id, image_data, provider_name):
-    """Save cover art to disk for an album (manual pick — replaces the embedded front cover)."""
-    from lyrarr.metadata.cover_fetch import sniff_image
+    """Save cover art for an album (manual pick — replaces the embedded front cover).
+
+    Returns (ok, reason). reason is a cover_fetch.COVER_REASONS key
+    ('no_path', 'album_dir_missing', 'artist_root'), 'not_found',
+    'not_image' or 'write_failed'. The album folder must already exist: no
+    directory is ever created (an unmounted library must not grow ghost dirs).
+    """
+    from lyrarr.metadata.cover_fetch import album_dir_writable, sniff_image
+    from lyrarr.metadata.lyrics_store import atomic_write_bytes
 
     album = database.execute(
         select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
     ).scalars().first()
+    if not album:
+        logger.error(f"Album {album_id} not found")
+        return False, 'not_found'
 
-    if not album or not album.path:
-        logger.error(f"Album {album_id} not found or has no path")
-        return False
+    ok, reason = album_dir_writable(album)
+    if not ok:
+        logger.warning(f"Not saving cover art for album {album_id}: {reason} ({album.path})")
+        return False, reason
 
     sniffed = sniff_image(image_data)
     if not sniffed:
         logger.error(f"Cover art for album {album_id} is not a JPEG/PNG/WebP/GIF image")
-        return False
+        return False, 'not_image'
 
+    filename = settings.metadata.covers.folder_art_filename
+    # Extension from the actual bytes, so a PNG isn't saved as .jpg
+    filepath = os.path.join(album.path, f"{filename}.{sniffed[0]}")
     try:
-        filename = settings.metadata.covers.folder_art_filename
-        # Extension from the actual bytes, so a PNG isn't saved as .jpg
-        filepath = os.path.join(album.path, f"{filename}.{sniffed[0]}")
-
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-        with open(filepath, 'wb') as f:
-            f.write(image_data)
-
-        # Update database
-        database.execute(
-            update(TableAlbums)
-            .where(TableAlbums.lidarrAlbumId == album_id)
-            .values(cover_status='available', updated_at_timestamp=datetime.now())
-        )
-
-        # Add to history
-        from sqlalchemy.dialects.sqlite import insert
-        database.execute(
-            insert(TableHistory).values(
-                action=1,
-                description=f"Downloaded cover art for {album.title}",
-                metadata_type='cover',
-                provider=provider_name,
-                lidarrAlbumId=album_id,
-                lidarrArtistId=album.artistId,
-                timestamp=datetime.now(),
-                metadata_path=filepath,
-            )
-        )
-
-        logger.info(f"Saved cover art for album '{album.title}' to {filepath}")
-
-        # Embed in audio files if profile says so
-        try:
-            profile = None
-            if album.profileId:
-                profile = database.execute(
-                    select(TableProfiles).where(TableProfiles.id == album.profileId)
-                ).scalars().first()
-            if not profile:
-                profile = database.execute(
-                    select(TableProfiles).where(TableProfiles.is_default == True)
-                ).scalars().first()
-            if profile and profile.embed_cover_art:
-                embed_cover_in_files(album.path, image_data, sniffed[0],
-                                     track_paths=album_track_paths(album_id), overwrite=True)
-        except Exception as e:
-            logger.error(f"Error embedding cover art for album {album_id}: {e}")
-
-        return True
-
-    except Exception as e:
+        atomic_write_bytes(filepath, image_data)
+    except OSError as e:
         logger.error(f"Error saving cover art for album {album_id}: {e}")
-        return False
+        return False, 'write_failed'
+
+    database.execute(
+        update(TableAlbums)
+        .where(TableAlbums.lidarrAlbumId == album_id)
+        .values(cover_status='available', updated_at_timestamp=datetime.now())
+    )
+    from sqlalchemy.dialects.sqlite import insert
+    database.execute(
+        insert(TableHistory).values(
+            action=1,
+            description=f"Downloaded cover art for {album.title}",
+            metadata_type='cover',
+            provider=provider_name,
+            lidarrAlbumId=album_id,
+            lidarrArtistId=album.artistId,
+            timestamp=datetime.now(),
+            metadata_path=filepath,
+        )
+    )
+    logger.info(f"Saved cover art for album '{album.title}' to {filepath}")
+
+    # Embed in audio files if profile says so
+    try:
+        profile = None
+        if album.profileId:
+            profile = database.execute(
+                select(TableProfiles).where(TableProfiles.id == album.profileId)
+            ).scalars().first()
+        if not profile:
+            profile = database.execute(
+                select(TableProfiles).where(TableProfiles.is_default == True)
+            ).scalars().first()
+        if profile and profile.embed_cover_art:
+            embed_cover_in_files(album.path, image_data, sniffed[0],
+                                 track_paths=album_track_paths(album_id), overwrite=True)
+    except Exception as e:
+        logger.error(f"Error embedding cover art for album {album_id}: {e}")
+
+    return True, None
 
 
-def save_lyrics(track_id, lyrics_data, provider_name, source='manual'):
+def save_lyrics(track_id, lyrics_data, provider_name, source='manual', **persist_kw):
     """Save lyrics to disk as .lrc for a track (manual/interactive path).
 
     Thin wrapper over the shared persist path so manual saves, uploads, and the
     editor behave identically to the scheduled downloader (archiving, status,
-    history, language detection).
+    history, language detection). Returns the lyrics_store.PersistResult
+    (truthy on success; `reason`/`message` say why it failed). The history
+    action is derived by persist (4 for manual/translated/generated), and a
+    manual save marks the track "has vocals" there (rule M).
+
+    persist_kw: extra persist_lyrics_result() options for derived saves
+    (archive_translated_from, detected_language); never history_action.
     """
-    from lyrarr.metadata.lyrics_store import persist_lyrics
+    from lyrarr.metadata.lyrics_store import PersistResult, persist_lyrics_result
 
     track = database.execute(
         select(TableTracks).where(TableTracks.lidarrTrackId == track_id)
     ).scalars().first()
-
-    if not track or not track.path:
-        logger.error(f"Track {track_id} not found or has no path")
-        return False
+    if not track:
+        logger.error(f"Track {track_id} not found")
+        return PersistResult(False, 'not_found', 'Track not found.', None)
 
     # Prefer synced over plain
-    content = lyrics_data.get('synced_lyrics') or lyrics_data.get('plain_lyrics')
-    if not content:
-        return False
+    content = (lyrics_data or {}).get('synced_lyrics') or (lyrics_data or {}).get('plain_lyrics')
+    if not content or not content.strip():
+        return PersistResult(False, 'empty', 'No lyrics content to save.', None)
 
-    result = persist_lyrics(track, content, provider_name, source=source, detect_lang=True)
+    persist_kw.pop('history_action', None)
+    persist_kw.setdefault('detect_lang', not persist_kw.get('detected_language'))
+    result = persist_lyrics_result(track, content, provider_name, source=source, **persist_kw)
     if not result:
-        return False
+        logger.warning(f"Could not save lyrics for track {track_id}: {result.reason} ({result.message})")
+        return result
 
+    info = result.info or {}
     logger.info(
-        f"Saved lyrics for track '{track.title}' to {result['filepath']} "
-        f"(lang={result['detected_language']}, synced={result['is_synced']})"
+        f"Saved lyrics for track '{track.title}' to {info.get('filepath')} "
+        f"(lang={info.get('detected_language')}, synced={info.get('is_synced')})"
     )
-    return True
+    return result
 
 
 class _DeepLTranslator:
@@ -256,7 +267,8 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
         mode: 'replace' (replace original) or 'dual' (interleave original + translation)
 
     Returns:
-        Translated content string, or None on failure.
+        Translated content string, or None when any translator call failed
+        or the result is identical to the input (nothing was translated).
     """
     import re
 
@@ -290,7 +302,14 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
         # repeat heavily (choruses), so de-duping avoids re-translating the same
         # line and turns hundreds of per-line requests into a handful.
         unique_texts = list({text for tag, text in parsed if text})
-        translations = _translate_texts(translator, unique_texts)
+        translations, failed = _translate_texts(translator, unique_texts)
+        if failed:
+            # A partial translation would be saved as if it were complete.
+            logger.warning(f"Translation failed for {failed}/{len(unique_texts)} line(s) — not saving")
+            return None
+        if unique_texts and all(translations.get(t, t) == t for t in unique_texts):
+            logger.info("Translation returned the original text — nothing to save")
+            return None
 
         def _render(text):
             return translations.get(text, text) if text else text
@@ -319,9 +338,10 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
                         dual.append(trans)
                 else:
                     dual.append('')
-            return '\n'.join(dual)
-
-        return '\n'.join(translated_lines)
+            out = '\n'.join(dual)
+        else:
+            out = '\n'.join(translated_lines)
+        return None if out.strip() == content.strip() else out
 
     except Exception as e:
         logger.error(f"Translation failed: {e}")
@@ -329,29 +349,34 @@ def translate_lyrics_content(content, target_lang, mode='replace'):
 
 
 def _translate_texts(translator, texts):
-    """Translate a list of strings, returning an {original: translation} map.
+    """Translate a list of strings. Returns ({original: translation}, failed_count).
 
-    Uses deep-translator's batch API when available and falls back to
-    per-item translation. Individual failures fall back to the original text
-    so a single bad line never aborts the whole song.
+    Uses the translator's batch API when it has one and falls back to
+    per-item translation. A line whose call raised keeps its original text
+    and is counted in failed_count, so callers can refuse to save a partial
+    "translation".
     """
     result = {}
     if not texts:
-        return result
+        return result, 0
 
-    try:
-        batch = translator.translate_batch(texts)
-        if batch and len(batch) == len(texts):
-            for original, translated in zip(texts, batch):
-                result[original] = translated or original
-            return result
-    except Exception as e:
-        logger.debug(f"Batch translation unavailable, falling back per-line: {e}")
+    batch_fn = getattr(translator, 'translate_batch', None)
+    if callable(batch_fn):
+        try:
+            batch = batch_fn(texts)
+            if batch and len(batch) == len(texts):
+                for original, translated in zip(texts, batch):
+                    result[original] = translated or original
+                return result, 0
+        except Exception as e:
+            logger.debug(f"Batch translation unavailable, falling back per-line: {e}")
 
+    failed = 0
     for text in texts:
         try:
             result[text] = translator.translate(text) or text
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Translating a line failed: {e}")
             result[text] = text
-    return result
-
+            failed += 1
+    return result, failed

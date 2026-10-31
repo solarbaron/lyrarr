@@ -6,11 +6,13 @@ Requires a free API key (1000 requests/day on free tier).
 """
 
 import logging
+import re
 
 import requests
 
 from lyrarr.app.config import settings
 from lyrarr.metadata.base import LyricsProvider
+from lyrarr.metadata.lyrics_text import instrumental_title_tier, version_tags
 from lyrarr.metadata.normalize import clean_for_search, duration_seconds
 from lyrarr.metadata.provider_utils import ProviderTransientError, is_transient_status, note_transient_error
 
@@ -19,12 +21,22 @@ logger = logging.getLogger(__name__)
 MUSIXMATCH_BASE = 'https://api.musixmatch.com/ws/1.1'
 
 
+# A candidate the worker could accept: no gate and at least this score.
+_AUTO_ACCEPT_SCORE = 0.5
+
+_INSTRUMENTAL_TITLE_RE = re.compile(r'伴奏|纯音乐|純音樂|karaoke|instrumental|off[\s-]?vocal|inst\.', re.IGNORECASE)
+
+
 class MusixmatchProvider(LyricsProvider):
     """Fetch synced and plain lyrics from Musixmatch (requires API key).
 
-    Uses normalized queries and picks the best-scoring track result
-    instead of blindly taking the first. Falls back to title-only search
-    if the full query returns no results.
+    Searches tracks that have lyrics (f_has_lyrics=1) by title + artist and
+    scores every hit. Falls back to a title-only search when the first search
+    finds nothing, or only a gated / weak (< 0.5) candidate. With strict=True
+    (the worker), the lyrics/subtitle calls are skipped for gated candidates.
+    A track Musixmatch flags instrumental yields no lyrics plus an
+    ``instrumental_hint`` (only for a good, ungated, non-instrumental-titled
+    match).
     """
 
     name = 'musixmatch'
@@ -33,13 +45,15 @@ class MusixmatchProvider(LyricsProvider):
     def _api_key(self):
         return settings.musixmatch.apikey
 
-    def search(self, track_name=None, artist_name=None, album_name=None, duration=None, **kwargs):
+    def search(self, track_name=None, artist_name=None, album_name=None, duration=None,
+               mb_recording_id=None, *, alt_artist_names=(), strict=True, **kwargs):
         """
         Search for lyrics on Musixmatch with normalized queries and real scoring.
 
-        Returns a list of lyrics results:
-        [{'synced_lyrics': str|None, 'plain_lyrics': str|None, 'provider': str,
-          'score': float, 'match_details': dict}]
+        Returns at most one result:
+        [{'synced_lyrics', 'plain_lyrics', 'plain_truncated', 'provider', 'score',
+          'match_details', 'strategy': 'search', 'source_id', 'track_name',
+          'artist_name', 'album_name', 'duration'[, 'instrumental_hint']}]
         """
         if not self._api_key:
             logger.debug("Musixmatch API key not configured, skipping")
@@ -49,27 +63,56 @@ class MusixmatchProvider(LyricsProvider):
             return []
 
         meta = clean_for_search(track_name, artist_name or '')
-        results = []
+        alt = tuple(a for a in alt_artist_names or () if a)
+        title_q = meta['title_query'] or meta['title_clean']
 
-        # Step 1: Find the best matching track
-        track_info = self._find_best_track(
-            meta['title_clean'], meta['artist_clean'],
-            album_name, duration, track_name, artist_name
-        )
+        # Step 1: title + artist
+        track_info = self._find_best_track(title_q, meta['artist_query'] or None,
+                                           duration, track_name, artist_name, alt)
 
-        # Step 2: Fallback — search with title only if full query failed
-        if not track_info:
-            track_info = self._find_best_track(
-                meta['title_clean'], None,
-                None, duration, track_name, artist_name
-            )
+        # Step 2: title only — when nothing, or nothing acceptable, was found
+        if not track_info or not _auto_acceptable(track_info['match']):
+            fallback = self._find_best_track(title_q, None, duration, track_name, artist_name, alt)
+            if fallback and (not track_info or _rank(fallback) > _rank(track_info)):
+                track_info = fallback
 
         if not track_info:
-            return results
+            return []
+
+        match = track_info['match']
+        if strict and match.get('gate'):
+            return []
+
+        result = {
+            'synced_lyrics': None,
+            'plain_lyrics': None,
+            'plain_truncated': False,
+            'provider': self.name,
+            'score': match['score'],
+            'match_details': match,
+            'strategy': 'search',
+            'source_id': track_info['track_id'],
+            'track_name': track_info['track_name'],
+            'artist_name': track_info['artist_name'],
+            'album_name': track_info['album_name'],
+            'duration': track_info['duration'],
+        }
+
+        if track_info.get('instrumental'):
+            if self._hint_allowed(track_info):
+                result['instrumental_hint'] = {
+                    'provider': self.name,
+                    'kind': 'mxm_instrumental',
+                    'matched_title': track_info['track_name'],
+                    'matched_album': track_info['album_name'],
+                    'score': match['score'],
+                    'title_score': match.get('title_score'),
+                    'duration_diff': match.get('duration_diff'),
+                }
+                return [result]
+            return []
 
         mxm_track_id = track_info['track_id']
-        result_title = track_info.get('track_name', '')
-        result_artist = track_info.get('artist_name', '')
 
         # Step 3: Get plain lyrics
         plain_lyrics, plain_truncated = self._get_lyrics(mxm_track_id)
@@ -77,27 +120,25 @@ class MusixmatchProvider(LyricsProvider):
         # Step 4: Try to get synced lyrics (subtitle)
         synced_lyrics = self._get_subtitle(mxm_track_id)
 
-        if plain_lyrics or synced_lyrics:
-            # Compute real match score
-            match = self.score_result(
-                track_name, artist_name, duration,
-                result_title, result_artist,
-                track_info.get('duration')
-            )
+        if not (plain_lyrics or synced_lyrics):
+            return []
+        result.update({
+            'synced_lyrics': synced_lyrics,
+            'plain_lyrics': plain_lyrics,
+            # Free-tier excerpt: the plain text is only part of the song.
+            'plain_truncated': plain_truncated,
+        })
+        return [result]
 
-            results.append({
-                'synced_lyrics': synced_lyrics,
-                'plain_lyrics': plain_lyrics,
-                # Free-tier excerpt: the plain text is only part of the song.
-                'plain_truncated': plain_truncated,
-                'provider': self.name,
-                'score': match['score'],
-                'match_details': match,
-                'track_name': result_title,
-                'artist_name': result_artist,
-            })
-
-        return results
+    @staticmethod
+    def _hint_allowed(track_info):
+        match = track_info['match']
+        if match.get('gate') or match['score'] < _AUTO_ACCEPT_SCORE:
+            return False
+        title = track_info.get('track_name') or ''
+        if _INSTRUMENTAL_TITLE_RE.search(title) or instrumental_title_tier(title) is not None:
+            return False
+        return not (version_tags(title) & {'instrumental', 'karaoke'})
 
     def _api_get(self, endpoint, params):
         """GET a Musixmatch endpoint and return its message.body dict, or None.
@@ -149,55 +190,51 @@ class MusixmatchProvider(LyricsProvider):
         body = message.get('body')
         return body if isinstance(body, dict) else None
 
-    def _find_best_track(self, title, artist=None, album=None,
-                         duration_s=None, orig_title=None, orig_artist=None):
-        """Search for a track and return the best-scoring match info.
+    def _find_best_track(self, title, artist=None, duration_s=None, orig_title=None,
+                         orig_artist=None, alt_artists=()):
+        """Search tracks with lyrics and return the best-scoring one (any score).
 
-        Instead of blindly returning track_list[0], we score all results
-        and pick the best match.
+        The duration and album are NOT sent as filters (f_track_length /
+        q_album hid the right track whenever Lidarr's length or album title
+        differed slightly); they are only used for scoring.
         """
         params = {
             'q_track': title,
+            'f_has_lyrics': 1,
             's_track_rating': 'desc',
             'page_size': 5,
         }
         if artist:
             params['q_artist'] = artist
-        if album:
-            params['q_album'] = album
-
-        duration_s = duration_seconds(duration_s)
-        if duration_s:
-            params['f_track_length'] = duration_s
 
         body = self._api_get('track.search', params)
         track_list = (body or {}).get('track_list') or []
-        if not track_list:
-            return None
 
-        # Score all results and pick the best
         best = None
-        best_score = -1
-
         for item in track_list:
-            track = (item or {}).get('track') or {}
+            track = (item or {}).get('track') if isinstance(item, dict) else None
+            if not isinstance(track, dict):
+                continue
             result_title = track.get('track_name', '')
             result_artist = track.get('artist_name', '')
-            result_duration = track.get('track_length')  # seconds
+            result_duration = track.get('track_length') or None  # seconds
 
             match = self.score_result(
-                orig_title or title, orig_artist or artist, duration_s,
-                result_title, result_artist, result_duration
+                orig_title or title, orig_artist or artist, duration_seconds(duration_s),
+                result_title, result_artist, result_duration,
+                alt_artists=alt_artists,
             )
-
-            if match['score'] > best_score:
-                best_score = match['score']
-                best = {
-                    'track_id': track.get('track_id'),
-                    'track_name': result_title,
-                    'artist_name': result_artist,
-                    'duration': result_duration,
-                }
+            cand = {
+                'track_id': track.get('track_id'),
+                'track_name': result_title,
+                'artist_name': result_artist,
+                'album_name': track.get('album_name') or None,
+                'duration': result_duration,
+                'instrumental': track.get('instrumental') in (1, '1', True),
+                'match': match,
+            }
+            if best is None or _rank(cand) > _rank(best):
+                best = cand
 
         return best
 
@@ -225,6 +262,16 @@ class MusixmatchProvider(LyricsProvider):
         if subtitle_body:
             subtitle_body, _ = split_musixmatch_disclaimer(subtitle_body)
         return subtitle_body or None
+
+
+def _auto_acceptable(match):
+    return not match.get('gate') and match['score'] >= _AUTO_ACCEPT_SCORE
+
+
+def _rank(cand):
+    """Ungated before gated, then score, then raw score."""
+    m = cand['match']
+    return (0 if m.get('gate') else 1, m['score'], m.get('raw_score', m['score']))
 
 
 _DISCLAIMER_MARKER = '******* This Lyrics is NOT'

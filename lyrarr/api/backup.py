@@ -42,7 +42,7 @@ class BackupExport(Resource):
 
         # Gather settings (dynaconf to dict)
         settings_data = {}
-        for section in ['general', 'lidarr', 'fanart', 'genius', 'notifications', 'auth', 'metadata']:
+        for section in ['general', 'lidarr', 'fanart', 'genius', 'notifications', 'auth', 'metadata', 'audit']:
             try:
                 section_obj = getattr(settings, section, None)
                 if section_obj:
@@ -150,9 +150,36 @@ class BackupRestore(Resource):
 
                 restored_profiles += 1
 
+            _ensure_single_default_profile(
+                [p.get('name') for p in data['profiles'] if p.get('is_default') and p.get('name')]
+            )
+
         return {
             'message': f'Restored {restored_profiles} profiles and {restored_settings} setting sections{notes}',
         }
+
+
+def _ensure_single_default_profile(restored_default_names=()):
+    """Leave exactly one default profile after a restore.
+
+    The last profile the backup marked as default wins; otherwise the existing
+    default with the lowest id is kept (or the first profile becomes default).
+    """
+    from lyrarr.app.database import update
+
+    profiles = database.execute(select(TableProfiles).order_by(TableProfiles.id)).scalars().all()
+    if not profiles:
+        return
+    by_name = {p.name: p for p in profiles}
+    chosen = None
+    for name in reversed(list(restored_default_names)):
+        if name in by_name:
+            chosen = by_name[name]
+            break
+    if chosen is None:
+        chosen = next((p for p in profiles if p.is_default), profiles[0])
+    database.execute(update(TableProfiles).where(TableProfiles.id != chosen.id).values(is_default=False))
+    database.execute(update(TableProfiles).where(TableProfiles.id == chosen.id).values(is_default=True))
 
 
 def run_scheduled_backup():

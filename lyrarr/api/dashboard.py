@@ -2,12 +2,21 @@
 from datetime import datetime, timedelta
 
 from flask_restx import Namespace, Resource
-from sqlalchemy import case
+from sqlalchemy import and_, case, or_
 
 from lyrarr.app.database import TableAlbums, TableArtists, TableHistory, TableTracks, database, func, select
 from lyrarr.utilities.album_status import SATISFIED_TRACK_STATES
 
 api_ns_dashboard = Namespace('dashboard', description='Dashboard statistics')
+
+# Lyrics "acquired": downloads, upgrades and manual saves. Publishes (also the
+# pre-1.7 ones, recorded as action 1), deletions, classifications and audit
+# rows are not.
+_LYRICS_ACQUIRED_ACTIONS = (1, 2, 4)
+
+
+def _counts_as_lyrics_acquired(h):
+    return h.action in _LYRICS_ACQUIRED_ACTIONS and not (h.description or '').startswith('Published lyrics')
 
 
 @api_ns_dashboard.route('/dashboard/stats')
@@ -20,6 +29,15 @@ class DashboardStats(Resource):
         history_rows = database.execute(
             select(TableHistory)
             .where(TableHistory.timestamp >= thirty_days_ago)
+            .where(or_(
+                TableHistory.metadata_type == 'cover',
+                and_(
+                    TableHistory.metadata_type == 'lyrics',
+                    TableHistory.action.in_(_LYRICS_ACQUIRED_ACTIONS),
+                    or_(TableHistory.description.is_(None),
+                        ~TableHistory.description.like('Published lyrics%')),
+                ),
+            ))
             .order_by(TableHistory.timestamp)
         ).scalars().all()
 
@@ -31,7 +49,7 @@ class DashboardStats(Resource):
                 daily[day] = {'date': day, 'covers': 0, 'lyrics': 0}
             if h.metadata_type == 'cover':
                 daily[day]['covers'] += 1
-            elif h.metadata_type == 'lyrics':
+            elif h.metadata_type == 'lyrics' and _counts_as_lyrics_acquired(h):
                 daily[day]['lyrics'] += 1
 
         # Fill in missing days

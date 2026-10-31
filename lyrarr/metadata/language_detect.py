@@ -6,7 +6,7 @@ Uses the 'langdetect' library (Google's language-detection, MIT license).
 
 import logging
 
-from lyrarr.metadata.lrc_repair import LRC_META_TAG, LRC_TIMESTAMP
+from lyrarr.metadata.lrc_repair import LRC_ENHANCED_TIMESTAMP, LRC_META_TAG, LRC_TIMESTAMP
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def strip_lrc_formatting(text: str) -> str:
         stripped = line.strip()
         if not stripped or _LRC_TAG.match(stripped):
             continue
-        stripped = _LRC_TIMESTAMP.sub('', stripped).strip()
+        stripped = LRC_ENHANCED_TIMESTAMP.sub('', _LRC_TIMESTAMP.sub('', stripped)).strip()
         if stripped:
             lines.append(stripped)
     return '\n'.join(lines)

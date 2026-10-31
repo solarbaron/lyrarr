@@ -12,6 +12,7 @@ search (Deezer/iTunes/TheAudioDB) can't hand back some other album's cover.
 """
 
 import logging
+import os
 from difflib import SequenceMatcher
 from urllib.parse import urljoin, urlparse
 
@@ -173,3 +174,87 @@ def cover_result_matches(result, artist_name, album_name):
         if ratio < COVER_ARTIST_MIN:
             return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Cover files on disk and where covers may be written (PLAN §1.3)
+# ---------------------------------------------------------------------------
+
+COVER_FILE_BASENAMES = ('cover', 'folder', 'front', 'albumart')
+COVER_FILE_EXTENSIONS = ('jpg', 'jpeg', 'png', 'webp', 'gif')
+
+COVER_REASONS = {
+    'no_path': 'This album has no folder in Lidarr yet.',
+    'album_dir_missing': "The album folder isn't reachable at {path}. Check that the music folder is mounted.",
+    'artist_root': "This album has no folder of its own (it points at the artist folder), so no cover was written.",
+}
+
+
+def find_cover_files(album_path, folder_art_filename='cover'):
+    """Existing cover images in an album folder (case-insensitive names).
+
+    Looks for {folder_art_filename, cover, folder, front, albumart} with a
+    jpg/jpeg/png/webp/gif extension. Returns full paths; [] when the folder
+    is missing or unreadable.
+    """
+    if not album_path or not os.path.isdir(album_path):
+        return []
+    names = []
+    for base in (folder_art_filename or 'cover',) + COVER_FILE_BASENAMES:
+        b = base.casefold()
+        if b not in names:
+            names.append(b)
+    wanted = {f'{b}.{ext}' for b in names for ext in COVER_FILE_EXTENSIONS}
+    try:
+        entries = os.listdir(album_path)
+    except OSError:
+        return []
+    found = []
+    for entry in sorted(entries):
+        if entry.casefold() in wanted:
+            full = os.path.join(album_path, entry)
+            if os.path.isfile(full):
+                found.append(full)
+    return found
+
+
+def album_dir_writable(album, artist_path=None):
+    """Whether a cover may be written into the album's own folder.
+
+    (False, 'no_path') without a path; (False, 'album_dir_missing') when the
+    folder doesn't exist (unmounted library — never created here);
+    (False, 'artist_root') when the album path is the artist folder itself;
+    else (True, None). `artist_path` None → looked up from the album's artist.
+    """
+    path = getattr(album, 'path', None)
+    if not path:
+        return False, 'no_path'
+    if not os.path.isdir(path):
+        return False, 'album_dir_missing'
+    if artist_path is None:
+        artist_path = _artist_path_for(album)
+    if artist_path and os.path.normpath(path) == os.path.normpath(artist_path):
+        return False, 'artist_root'
+    return True, None
+
+
+def _artist_path_for(album):
+    artist_id = getattr(album, 'artistId', None)
+    if artist_id is None:
+        return None
+    try:
+        from lyrarr.app.database import TableArtists, database, select
+        return database.execute(
+            select(TableArtists.path).where(TableArtists.lidarrArtistId == artist_id)
+        ).scalar()
+    except Exception:
+        return None
+
+
+def cover_reason_message(reason, album=None):
+    """User-readable text for an album_dir_writable reason."""
+    template = COVER_REASONS.get(reason, reason or '')
+    try:
+        return template.format(path=getattr(album, 'path', '') or '')
+    except (KeyError, IndexError):
+        return template

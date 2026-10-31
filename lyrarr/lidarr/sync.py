@@ -1,8 +1,10 @@
 
+import json
 import logging
 import os
 import re
 import threading
+import time
 from datetime import datetime
 
 from lyrarr.app.config import settings
@@ -18,6 +20,8 @@ from lyrarr.app.database import (
 )
 from lyrarr.app.event_handler import event_stream
 from lyrarr.lidarr.api_client import LidarrError, lidarr_api
+from lyrarr.metadata import lyrics_store
+from lyrarr.metadata.lyrics_text import instrumental_title_tier
 
 logger = logging.getLogger(__name__)
 
@@ -222,12 +226,14 @@ def _existing_profile_id(profile_id):
     return pid
 
 
-def _upsert_album(album, track_files=None):
+def _upsert_album(album, track_files=None, reach=None):
     """Insert or update a single album row from a Lidarr album payload.
 
     `track_files` is the pre-fetched /trackfile list for this album; passing it
     avoids one Lidarr API round-trip per album during bulk syncs. The album's
-    artist must already be stored (FOREIGN KEY).
+    artist must already be stored (FOREIGN KEY). `reach` (a
+    lyrics_store.Reachability) gates the cover status: albums under an
+    unreachable library root keep theirs.
     """
     album_id = album.get('id')
 
@@ -284,21 +290,17 @@ def _upsert_album(album, track_files=None):
         'updated_at_timestamp': datetime.now(),
     }
 
+    cover_status = _derive_cover_status(existing, album_path, artist_id, reach)
+    if cover_status is not None:
+        values['cover_status'] = cover_status
+
     if existing:
         database.execute(
             update(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id).values(**values)
         )
     else:
         values['created_at_timestamp'] = datetime.now()
-        # Reconcile cover status against any art already on disk.
-        cover_exists = False
-        if album_path:
-            cover_filename = settings.metadata.covers.folder_art_filename
-            for ext in ['.jpg', '.png', '.webp']:
-                if os.path.isfile(os.path.join(album_path, f"{cover_filename}{ext}")):
-                    cover_exists = True
-                    break
-        values['cover_status'] = 'available' if cover_exists else 'missing'
+        values.setdefault('cover_status', 'missing')
         # API responses compute album lyrics status from its tracks; this
         # column is legacy and not relied upon.
         values['lyrics_status'] = 'unknown'
@@ -309,6 +311,33 @@ def _upsert_album(album, track_files=None):
 
         from sqlalchemy.dialects.sqlite import insert
         database.execute(insert(TableAlbums).values(**values))
+
+
+def _derive_cover_status(existing, album_path, artist_id, reach):
+    """cover_status from the art on disk, or None to keep the stored value.
+
+    Kept when the album folder isn't reachable (unmounted root, folder gone)
+    and, for existing albums, when the album points at its artist folder
+    (artist-level art says nothing about this album).
+    """
+    if not album_path:
+        return None
+    if reach is not None and not reach.ok_for(album_path):
+        return None
+    if not os.path.isdir(album_path):
+        return None
+    if existing is not None:
+        artist_path = database.execute(
+            select(TableArtists.path).where(TableArtists.lidarrArtistId == artist_id)
+        ).scalar()
+        if artist_path and os.path.normpath(artist_path) == os.path.normpath(album_path):
+            return None
+    from lyrarr.metadata.cover_fetch import find_cover_files
+    found = find_cover_files(album_path, settings.metadata.covers.folder_art_filename)
+    if found:
+        current = existing.cover_status if existing is not None else None
+        return current if current in ('available', 'manual') else 'available'
+    return 'missing'
 
 
 def _fetch_artist_track_data(artist_id):
@@ -331,7 +360,7 @@ def _fetch_artist_track_data(artist_id):
     return files_by_album, records_by_album
 
 
-def _sync_album_tracks(album, track_files=None, track_records=None):
+def _sync_album_tracks(album, track_files=None, track_records=None, reach=None):
     """Sync all track files for one album row. Returns number of tracks synced.
 
     Joins /trackfile (paths) with /track (title, number, duration, recording
@@ -339,6 +368,10 @@ def _sync_album_tracks(album, track_files=None, track_records=None):
     Pre-fetched per-artist `track_files`/`track_records` avoid two API
     round-trips per album. Errors propagate so the caller knows the album's
     tracks are incomplete.
+
+    Lyrics state is only derived from the disk when it can be trusted: albums
+    under an unreachable library root (`reach`) and tracks whose audio file
+    is missing keep their stored status, flags and language.
     """
     synced = 0
     if track_files is None:
@@ -357,7 +390,7 @@ def _sync_album_tracks(album, track_files=None, track_records=None):
                     'title': tr.get('title', ''),
                     'trackNumber': tr.get('absoluteTrackNumber') or tr.get('trackNumber'),
                     'mediumNumber': tr.get('mediumNumber', 1),
-                    'duration': int((tr.get('duration', 0) or 0) / 1000) if tr.get('duration') else None,
+                    'duration': _duration_seconds(tr.get('duration')),
                     'mbId': tr.get('foreignRecordingId') or None,
                 }
 
@@ -371,6 +404,8 @@ def _sync_album_tracks(album, track_files=None, track_records=None):
             select(TableTracks).where(TableTracks.lidarrTrackId.in_(track_ids))
         ).scalars().all()
     }
+    album_ok = reach is None or reach.ok_for(album.path or '')
+    check_tombstones = lyrics_store.tombstones_exist()
 
     for tf in track_files:
         track_id = tf.get('id')
@@ -393,31 +428,15 @@ def _sync_album_tracks(album, track_files=None, track_records=None):
             title = 'Unknown'
 
         existing = existing_tracks.get(track_id)
+        audio_ok = bool(track_path) and os.path.isfile(track_path)
+        trusted = audio_ok and album_ok and (reach is None or reach.ok_for(track_path))
 
-        lyrics_exist = False
-        detected_lang = None
-        is_synced_flag = False
-        if track_path:
-            lyrics_path = os.path.splitext(track_path)[0] + '.lrc'
-            if os.path.isfile(lyrics_path):
-                lyrics_exist = True
-                try:
-                    from lyrarr.metadata.language_detect import detect_language, is_synced_lyrics
-                    with open(lyrics_path, encoding='utf-8', errors='ignore') as lf:
-                        lyrics_content = lf.read()
-                    is_synced_flag = is_synced_lyrics(lyrics_content)
-                    detected_lang = detect_language(lyrics_content)
-                except Exception:
-                    pass
-
-        # Preserve terminal lyrics states lyrarr set itself (a re-sync must not
-        # reset a blacklisted or instrumental track back to 'missing').
-        if existing and existing.lyrics_status in _TERMINAL_LYRICS_STATES:
-            new_lyrics_status = existing.lyrics_status
-            new_has_lyrics = False
-        else:
-            new_lyrics_status = 'available' if lyrics_exist else 'missing'
-            new_has_lyrics = lyrics_exist
+        # Lidarr renamed/moved the file: move its .lrc along. Safe on its own
+        # terms (new audio present, old audio gone), so it doesn't wait for
+        # the root check, which a library-wide rename can trip for one sync
+        # (it samples the old paths) — the old path would be lost by then.
+        if audio_ok and existing is not None:
+            _rename_moved_sidecar(existing.path, track_path)
 
         values = {
             'lidarrTrackId': track_id,
@@ -428,27 +447,217 @@ def _sync_album_tracks(album, track_files=None, track_records=None):
             'discNumber': meta.get('mediumNumber', 1),
             'duration': meta.get('duration'),
             'path': track_path,
-            'lyrics_status': new_lyrics_status,
-            'hasLyrics': new_has_lyrics,
-            'detected_language': detected_lang,
-            'is_synced': is_synced_flag,
             'updated_at_timestamp': datetime.now(),
         }
         # Only overwrite a known recording id, never blank it out.
         if meta.get('mbId'):
             values['mbId'] = meta['mbId']
 
+        if trusted:
+            values.update(_lyrics_state_values(existing, title, track_path))
+        elif existing is None:
+            values.update(lyrics_status='missing', hasLyrics=False, is_synced=False)
+
         if existing:
+            # Read before the UPDATE (it synchronises the loaded row in place).
+            title_flag_lost = (
+                trusted and existing.lyrics_status == 'instrumental' and existing.instrumental_reason == 'title'
+                and existing.instrumental_override != 'always' and existing.title != title
+                and instrumental_title_tier(title) != 'strong')
             database.execute(
                 update(TableTracks).where(TableTracks.lidarrTrackId == track_id).values(**values)
             )
+            # Lidarr renamed a track flagged by its title, and the new title no
+            # longer declares an instrumental: the flag has no basis left.
+            if title_flag_lost:
+                try:
+                    lyrics_store.clear_instrumental(track_id, why='weak-title', actor='sync',
+                                                    expect_status=('instrumental',))
+                except Exception as e:
+                    logger.warning(f"Could not clear the title flag of renamed track {track_id}: {e}")
         else:
             values['created_at_timestamp'] = datetime.now()
             from sqlalchemy.dialects.sqlite import insert
             database.execute(insert(TableTracks).values(**values))
+            if check_tombstones:
+                try:
+                    lyrics_store.restore_from_tombstone(track_id)
+                except Exception as e:
+                    logger.warning(f"Could not restore the state of re-imported track {track_id}: {e}")
         synced += 1
 
     return synced
+
+
+def _duration_seconds(ms):
+    """Lidarr track duration (ms) → whole seconds, rounded (None when unknown)."""
+    try:
+        ms = float(ms)
+    except (TypeError, ValueError):
+        return None
+    if ms <= 0:
+        return None
+    return int(round(ms / 1000))
+
+
+def _read_lyrics_kind(track_path):
+    """(classification, content) of the track's sidecar; (None, None) if absent.
+
+    A file that isn't valid UTF-8 or can't be read is SIDECAR_UNKNOWN
+    (present, content not judged) — never 'empty' from its replacement
+    characters; content is then the lossy text, or '' when unreadable.
+    """
+    kind, sr = lyrics_store.read_sidecar_kind(os.path.splitext(track_path)[0] + '.lrc')
+    if kind is None:
+        return None, None
+    return kind, (sr.text if sr is not None else '')
+
+
+def _detect(content):
+    try:
+        from lyrarr.metadata.language_detect import detect_language
+        return detect_language(content)
+    except Exception:
+        return None
+
+
+def _is_synced(content):
+    from lyrarr.metadata.language_detect import is_synced_lyrics
+    return is_synced_lyrics(content)
+
+
+def _conflict_evidence(existing_evidence):
+    """Rule T entry for a STRONG-title row that has lyrics (kept if already there)."""
+    ev = lyrics_store._parse_json(existing_evidence)
+    if isinstance(ev, list) and any(isinstance(e, dict) and e.get('veto') for e in ev):
+        return existing_evidence
+    return json.dumps([{'source': 'title', 'kind': 'title', 'veto': 'sidecar',
+                        'at': datetime.now().isoformat()}])
+
+
+def _lyrics_state_values(existing, title, track_path):
+    """Lyrics columns for a track whose audio is present under a reachable root.
+
+    * blacklisted stays; instrumental stays unless real lyrics sit next to a
+      non-STRONG title (and the user didn't say 'always') → available;
+    * only 'lyrics' content counts as present (markers/placeholders don't);
+      a file that isn't UTF-8 or can't be read is present but not judged
+      (SIDECAR_UNKNOWN): an available row keeps its status, source and
+      language, a missing row becomes available, an instrumental row stays;
+    * provenance is cleared on a flip to missing, and on a flip to available
+      unless the content hash proves it describes the file on disk;
+    * the language is written for new rows, NULL values and presence flips,
+      never None over a value and never over manual/translated;
+    * retry state is reset only when the status changes;
+    * STRONG-title rows that are available get the title-conflict entry.
+    """
+    kind, content = _read_lyrics_kind(track_path)
+    unknown = kind == lyrics_store.SIDECAR_UNKNOWN
+    has = lyrics_store.sidecar_present(kind)
+    tier = instrumental_title_tier(title)
+    now = datetime.now()
+    v = {}
+
+    if existing is None:
+        v.update(lyrics_status='available' if has else 'missing', hasLyrics=has,
+                 is_synced=_is_synced(content) if has else False)
+        if has:
+            v['detected_language'] = None if unknown else _detect(content)
+            v['language_source'] = 'detected'
+            if tier == 'strong':
+                v['instrumental_evidence'] = _conflict_evidence(None)
+        return v
+
+    cur = existing.lyrics_status
+    override = existing.instrumental_override
+    user_lang = existing.language_source in ('manual', 'translated')
+
+    if cur == 'blacklisted':
+        return {'hasLyrics': False}
+    if cur == 'instrumental':
+        # Only real, readable lyrics lift the flag (an unknown file doesn't).
+        if not (kind == 'lyrics' and tier != 'strong' and override != 'always'):
+            return {'hasLyrics': False}
+        new_status = 'available'
+    elif unknown and cur == 'available':
+        # Present but not judgeable: keep status, source, language and flags
+        # (audit F-3 reports the encoding); only the title-conflict entry.
+        v = {'hasLyrics': True}
+        if tier == 'strong' and override != 'never' and existing.lyrics_source != 'manual':
+            v['instrumental_evidence'] = _conflict_evidence(existing.instrumental_evidence)
+        return v
+    elif has:
+        new_status = 'available'
+    else:
+        new_status = 'missing'
+
+    changed = new_status != cur
+    v['lyrics_status'] = new_status
+    v['hasLyrics'] = has
+
+    if new_status == 'available':
+        v['is_synced'] = _is_synced(content)
+        if unknown:
+            if not user_lang and changed:
+                v['detected_language'] = None
+                v['language_source'] = 'detected'
+        elif not user_lang and (changed or existing.detected_language is None):
+            detected = _detect(content)
+            if detected is not None or changed:
+                v['detected_language'] = detected
+                v['language_source'] = 'detected'
+        if changed:
+            v['lyrics_source'] = lyrics_store.rediscovered_source(existing, content)
+            v.update(lyrics_store.stale_provenance_values(existing, content))
+            v['instrumental_reason'] = None
+            v['instrumental_evidence'] = None
+            v['lyrics_replace_requested'] = None
+            if cur == 'instrumental':
+                logger.info(f"'{title}': real lyrics found next to an instrumental-flagged track — now available")
+        source = v.get('lyrics_source', existing.lyrics_source)
+        if tier == 'strong' and override != 'never' and source != 'manual':
+            v['instrumental_evidence'] = _conflict_evidence(
+                None if changed else existing.instrumental_evidence)
+    else:  # missing
+        v['is_synced'] = False
+        if changed:
+            v['lyrics_source'] = None
+            v.update(lyrics_store.cleared_provenance())
+            v['lyrics_replace_requested'] = None
+            if not user_lang:
+                v['detected_language'] = None
+            ev = lyrics_store._parse_json(existing.instrumental_evidence)
+            if isinstance(ev, list) and any(isinstance(e, dict) and e.get('veto') for e in ev):
+                v['instrumental_evidence'] = None
+
+    if changed:
+        v.update(lyrics_retry_count=0, lyrics_retry_after=None, lyrics_transient_count=0,
+                 lyrics_cooldown_count=0, lyrics_retry_set_at=now)
+    return v
+
+
+def _rename_moved_sidecar(old_audio, new_audio):
+    """Lidarr renamed/moved a track file: move its .lrc along when it is safe.
+
+    Only when the stem changed, `<old>.lrc` exists, `<new>.lrc` doesn't, the
+    old audio is gone and the new audio exists. Returns True if renamed.
+    """
+    if not old_audio or not new_audio:
+        return False
+    old_lrc = os.path.splitext(old_audio)[0] + '.lrc'
+    new_lrc = os.path.splitext(new_audio)[0] + '.lrc'
+    if old_lrc == new_lrc:
+        return False
+    try:
+        if (os.path.isfile(old_lrc) and not os.path.exists(new_lrc)
+                and not os.path.exists(old_audio) and os.path.isfile(new_audio)
+                and os.path.isdir(os.path.dirname(new_lrc))):
+            os.replace(old_lrc, new_lrc)
+            logger.info(f"Moved lyrics file along with its track: {old_lrc} → {new_lrc}")
+            return True
+    except OSError as e:
+        logger.warning(f"Could not move lyrics file {old_lrc} → {new_lrc}: {e}")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +680,15 @@ def _path_stem(path):
 
 
 def _carry_over_track_state(old, new):
-    """Move user/lyrarr state from a stale track row onto its replacement."""
+    """Move user/lyrarr state from a stale track row onto its replacement.
+
+    * history, blacklist and archived versions follow the track;
+    * 'blacklisted' (a user Skip) always carries over; 'instrumental' only
+      onto a replacement that is 'missing' (lyrics found on disk win);
+    * override, instrumental_prev, hint evidence, a manual/translated
+      language, provenance and the retry backoff carry over when they apply;
+    * when Lidarr renamed the file, its .lrc is moved along if that is safe.
+    """
     from lyrarr.app.database import TableBlacklist, TableHistory, TableLyricsVersions
 
     for table in (TableHistory, TableBlacklist, TableLyricsVersions):
@@ -481,17 +698,61 @@ def _carry_over_track_state(old, new):
             .values(lidarrTrackId=new.lidarrTrackId)
         )
 
+    same_file = _path_stem(old.path) == _path_stem(new.path)
+    if not same_file and _rename_moved_sidecar(old.path, new.path):
+        same_file = True
+        fresh = lyrics_store._fresh_row(new.lidarrTrackId)
+        if fresh is not None and fresh.lyrics_status in ('missing', None):
+            lyrics_store.adopt_sidecar(fresh, keep_source=False)
+        new = lyrics_store._fresh_row(new.lidarrTrackId) or new
+
     values = {}
-    if old.lyrics_status in _TERMINAL_LYRICS_STATES and new.lyrics_status not in _TERMINAL_LYRICS_STATES:
-        values.update(lyrics_status=old.lyrics_status, hasLyrics=False)
+    if old.lyrics_status == 'blacklisted' and new.lyrics_status != 'blacklisted':
+        values.update(lyrics_status='blacklisted', hasLyrics=False, is_synced=False, lyrics_source=None)
+    elif old.lyrics_status == 'instrumental' and new.lyrics_status == 'missing' and not (
+            # A title flag only carries over to a title that still declares it.
+            old.instrumental_reason == 'title' and instrumental_title_tier(new.title) != 'strong'):
+        values.update(
+            lyrics_status='instrumental', hasLyrics=False, is_synced=False,
+            instrumental_reason=old.instrumental_reason,
+            instrumental_evidence=old.instrumental_evidence,
+            instrumental_checked_at=old.instrumental_checked_at,
+        )
     elif old.lyrics_status == 'missing' and new.lyrics_status == 'missing':
         # Keep the retry backoff so an upgrade doesn't re-hammer providers.
         values.update(
             lyrics_retry_count=old.lyrics_retry_count,
             lyrics_retry_after=old.lyrics_retry_after,
+            lyrics_transient_count=old.lyrics_transient_count,
+            lyrics_cooldown_count=old.lyrics_cooldown_count,
+            lyrics_retry_set_at=old.lyrics_retry_set_at,
         )
-    if new.lyrics_source is None and old.lyrics_source and _path_stem(old.path) == _path_stem(new.path):
-        values['lyrics_source'] = old.lyrics_source
+        if old.instrumental_evidence and not new.instrumental_evidence:
+            values.update(instrumental_evidence=old.instrumental_evidence,
+                          instrumental_checked_at=old.instrumental_checked_at)
+
+    if old.instrumental_override and not new.instrumental_override:
+        values['instrumental_override'] = old.instrumental_override
+    if old.instrumental_prev and not new.instrumental_prev:
+        values['instrumental_prev'] = old.instrumental_prev
+    if old.track_artist and not new.track_artist:
+        values['track_artist'] = old.track_artist
+
+    if same_file:
+        if new.lyrics_source is None and old.lyrics_source:
+            values['lyrics_source'] = old.lyrics_source
+            for col in ('lyrics_provider', 'lyrics_source_id', 'lyrics_match_score', 'lyrics_match_json',
+                        'lyrics_content_hash'):
+                if getattr(new, col) is None and getattr(old, col) is not None:
+                    values[col] = getattr(old, col)
+        if old.language_source in ('manual', 'translated') and new.language_source not in ('manual', 'translated'):
+            values.update(language_source=old.language_source, detected_language=old.detected_language)
+        if old.lyrics_status == 'available' and new.lyrics_status == 'available' and old.upgrade_retry_count:
+            values.update(upgrade_retry_count=old.upgrade_retry_count,
+                          upgrade_retry_after=old.upgrade_retry_after,
+                          upgrade_retry_set_at=old.upgrade_retry_set_at)
+    if values.get('lyrics_status') in ('blacklisted', 'instrumental'):
+        values['lyrics_source'] = None
     if not new.mbId and old.mbId:
         values['mbId'] = old.mbId
     if values:
@@ -511,7 +772,8 @@ def _reconcile_artist(artist_id, lidarr_albums, files_by_album):
     Only call with COMPLETE Lidarr data for the artist: `lidarr_albums` is every
     album Lidarr lists for it (unfiltered) and `files_by_album` every track file.
     Albums stay if Lidarr still has files for them (even if filtered out by
-    only_monitored); tracks stay if their trackfile id still exists.
+    only_monitored); tracks stay if their trackfile id still exists. Removed
+    rows without a replacement leave a tombstone with their user state.
     """
     current_file_ids = {
         tf.get('id') for tfs in files_by_album.values() for tf in tfs if tf.get('id')
@@ -530,6 +792,7 @@ def _reconcile_artist(artist_id, lidarr_albums, files_by_album):
                 by_recording.setdefault((t.albumId, t.mbId), t)
             if t.path:
                 by_stem.setdefault(_path_stem(t.path), t)
+        orphans = []
         for old in stale:
             replacement = None
             if old.mbId:
@@ -538,6 +801,11 @@ def _reconcile_artist(artist_id, lidarr_albums, files_by_album):
                 replacement = by_stem.get(_path_stem(old.path))
             if replacement is not None:
                 _carry_over_track_state(old, replacement)
+            else:
+                orphans.append(old)
+        if orphans:
+            lyrics_store.tombstone_tracks(orphans)
+        for old in stale:
             database.execute(delete(TableTracks).where(TableTracks.lidarrTrackId == old.lidarrTrackId))
         logger.info(f"Artist {artist_id}: removed {len(stale)} track(s) no longer in Lidarr")
 
@@ -553,14 +821,14 @@ def _reconcile_artist(artist_id, lidarr_albums, files_by_album):
         logger.info(f"Artist {artist_id}: removed {result.rowcount} album(s) no longer in Lidarr (or without files)")
 
 
-def _sync_artist_albums(artist_id, lidarr_albums, files_by_album, records_by_album):
+def _sync_artist_albums(artist_id, lidarr_albums, files_by_album, records_by_album, reach=None):
     """Upsert one artist's albums and tracks, then remove what Lidarr dropped.
 
     `lidarr_albums` is the artist's full album list from Lidarr. One bad album
     (FK failure, unexpected payload) is logged and skipped instead of aborting
     the sync; removal of stale rows is then skipped for this artist because its
     local state is not known to be complete.
-    Returns (albums_synced, tracks_synced, albums_skipped_no_files).
+    Returns (albums_synced, tracks_synced, albums_skipped_no_files, complete).
     """
     synced_albums = 0
     total_tracks = 0
@@ -580,13 +848,13 @@ def _sync_artist_albums(artist_id, lidarr_albums, files_by_album, records_by_alb
             skipped_no_files += 1
             continue
         try:
-            _upsert_album(album, track_files=track_files)
+            _upsert_album(album, track_files=track_files, reach=reach)
             album_row = database.execute(
                 select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
             ).scalars().first()
             if album_row:
                 total_tracks += _sync_album_tracks(
-                    album_row, track_files, records_by_album.get(album_id, [])
+                    album_row, track_files, records_by_album.get(album_id, []), reach=reach
                 )
                 synced_albums += 1
         except Exception as e:
@@ -599,12 +867,13 @@ def _sync_artist_albums(artist_id, lidarr_albums, files_by_album, records_by_alb
         try:
             _reconcile_artist(artist_id, lidarr_albums, files_by_album)
         except Exception as e:
+            complete = False
             database.rollback()
             logger.error(f"Error removing stale albums/tracks for artist {artist_id}: {e}")
     else:
         logger.warning(f"Artist {artist_id}: sync incomplete, not removing stale albums/tracks this run")
 
-    return synced_albums, total_tracks, skipped_no_files
+    return synced_albums, total_tracks, skipped_no_files, complete
 
 
 # ---------------------------------------------------------------------------
@@ -617,6 +886,12 @@ def _delete_artist(artist_id):
         select(TableArtists).where(TableArtists.lidarrArtistId == artist_id)
     ).scalars().first()
     if existing:
+        try:
+            lyrics_store.tombstone_tracks(database.execute(
+                select(TableTracks).where(TableTracks.artistId == artist_id)
+            ).scalars().all())
+        except Exception as e:
+            logger.warning(f"Could not keep the track state of removed artist {artist_id}: {e}")
         database.execute(delete(TableArtists).where(TableArtists.lidarrArtistId == artist_id))
         logger.info(f"Removed artist {artist_id} '{existing.name}' (deleted in Lidarr)")
 
@@ -664,8 +939,9 @@ def sync_artist(artist_id):
         logger.warning(f"Incremental sync of artist {artist_id}: could not fetch albums/tracks: {e}")
         return
 
-    synced_albums, total_tracks, _ = _sync_artist_albums(
-        artist_id, albums, files_by_album, records_by_album
+    reach = _library_reachability()
+    synced_albums, total_tracks, _, _ = _sync_artist_albums(
+        artist_id, albums, files_by_album, records_by_album, reach=reach
     )
 
     logger.info(
@@ -677,11 +953,61 @@ def sync_artist(artist_id):
     })
 
 
+def _refresh_library_roots():
+    """Store Lidarr's root folders in table_library_roots (source 'lidarr').
+
+    When Lidarr's list can't be fetched or is empty, the stored rows are kept;
+    with none stored, lyrics_store.library_roots() falls back to the parent
+    folders of the artists ('derived').
+    """
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    from lyrarr.app.database import TableLibraryRoots
+
+    try:
+        folders = lidarr_api.get_root_folders()
+    except Exception as e:
+        logger.warning(f"Could not fetch Lidarr root folders (using the artists' parent folders): {e}")
+        return False
+    paths = sorted({lyrics_store.normalize_root(f.get('path')) for f in folders or []
+                    if isinstance(f, dict) and f.get('path')})
+    if not paths:
+        return False
+    now = datetime.now()
+    database.execute(delete(TableLibraryRoots).where(TableLibraryRoots.path.not_in(paths)))
+    for path in paths:
+        database.execute(
+            sqlite_insert(TableLibraryRoots)
+            .values(path=path, source='lidarr', updated_at=now)
+            .on_conflict_do_update(index_elements=['path'], set_={'source': 'lidarr', 'updated_at': now})
+        )
+    return True
+
+
+def _library_reachability():
+    """Per-root reachability for one sync run (None if it can't be computed)."""
+    try:
+        reach = lyrics_store.library_reachability()
+    except Exception as e:
+        logger.warning(f"Could not check library reachability: {e}")
+        return None
+    for status in reach.unreachable:
+        if not status.exists and not status.checked:
+            continue  # not mounted, but no tracks under it (unused Lidarr root)
+        logger.warning(f"Music folder not reachable: {status.root} — keeping the lyrics/cover state "
+                       f"of everything under it this sync")
+    return reach
+
+
 def update_artists(force=False):
-    """Sync artists from Lidarr to the local database."""
+    """Sync artists from Lidarr to the local database.
+
+    Returns True only when Lidarr answered every request and every artist
+    synced completely.
+    """
     if not force and not settings.general.use_lidarr:
         logger.debug("Lidarr not enabled, skipping sync")
-        return
+        return False
 
     logger.info("Starting artist sync from Lidarr...")
     event_stream(type='sync_start', payload={'message': 'Syncing with Lidarr...'})
@@ -689,15 +1015,17 @@ def update_artists(force=False):
         artists = lidarr_api.get_artists()
     except LidarrError as e:
         logger.error(f"Failed to fetch artists from Lidarr: {e}")
-        return
+        return False
 
     if not artists:
         # Never treat an empty list as "everything was deleted".
         logger.warning("No artists received from Lidarr")
-        return
+        return False
 
     logger.info(f"Fetched {len(artists)} artists from Lidarr")
+    _refresh_library_roots()
 
+    complete = True
     lidarr_artist_ids = {a.get('id') for a in artists if a.get('id')}
     synced = 0
     for artist in artists:
@@ -709,6 +1037,7 @@ def update_artists(force=False):
             _upsert_artist(artist)
             synced += 1
         except Exception as e:
+            complete = False
             database.rollback()
             logger.error(f"Error syncing artist {artist.get('id')} ('{artist.get('artistName', '?')}'): {e}")
 
@@ -721,7 +1050,8 @@ def update_artists(force=False):
         _delete_artist(artist_id)
 
     # Now sync albums + tracks (only albums with files on disk)
-    update_albums(force=force, lidarr_artist_ids=lidarr_artist_ids)
+    albums_complete = update_albums(force=force, lidarr_artist_ids=lidarr_artist_ids)
+    return bool(complete and albums_complete)
 
 
 def update_albums(force=False, lidarr_artist_ids=None):
@@ -733,23 +1063,28 @@ def update_albums(force=False, lidarr_artist_ids=None):
     track files are stored; presence in the /trackfile response is the source
     of truth, not the albums' statistics block. `lidarr_artist_ids` (the
     complete artist list of this sync) lets artists whose albums all vanished
-    be cleaned up too.
+    be cleaned up too. Library reachability is computed once per run; albums
+    under an unreachable root keep their lyrics/cover state.
+
+    Returns True when every artist's albums and tracks synced completely.
     """
     if not force and not settings.general.use_lidarr:
-        return
+        return False
 
     logger.info("Starting album sync from Lidarr...")
     try:
         albums = lidarr_api.get_albums()
     except LidarrError as e:
         logger.error(f"Failed to fetch albums from Lidarr: {e}")
-        return
+        return False
 
     if not albums:
         logger.warning("No albums received from Lidarr")
-        return
+        return False
 
     logger.info(f"Fetched {len(albums)} albums from Lidarr")
+    reach = _library_reachability()
+    complete = True
 
     # Grouped unfiltered: reconciliation needs every album Lidarr has, while
     # _sync_artist_albums applies the only_monitored filter for upserts.
@@ -801,13 +1136,16 @@ def update_albums(force=False, lidarr_artist_ids=None):
         try:
             files_by_album, records_by_album = _fetch_artist_track_data(artist_id)
         except Exception as e:
+            complete = False
             logger.error(f"Error fetching track data for artist {artist_id}: {e}")
             continue
 
-        a, t, s = _sync_artist_albums(artist_id, artist_albums, files_by_album, records_by_album)
+        a, t, s, ok = _sync_artist_albums(artist_id, artist_albums, files_by_album, records_by_album,
+                                          reach=reach)
         synced += a
         total_tracks += t
         skipped_no_files += s
+        complete = complete and ok
 
     logger.info(
         f"Synced {synced} albums and {total_tracks} tracks from Lidarr "
@@ -829,3 +1167,45 @@ def update_albums(force=False, lidarr_artist_ids=None):
         'artists_synced': artist_count,
         'albums_synced': album_count,
     })
+    return complete
+
+
+def run_full_sync(timeout_s: float = 1800) -> bool:
+    """Run a full Lidarr sync now, synchronously (audit bootstrap phase 0, S-9).
+
+    Same work as the scheduled full sync (artists → albums → per-artist
+    tracks → reconcile, refreshing table_library_roots and rewriting every
+    duration), holding the sync single-flight state: waits up to `timeout_s`
+    for a running sync to finish. Returns True only when Lidarr was reachable
+    and every artist synced completely; False otherwise. Never raises.
+    """
+    global _sync_running
+    try:
+        if not settings.general.use_lidarr:
+            logger.info("Full sync requested but Lidarr is not enabled")
+            return False
+        deadline = time.monotonic() + max(0.0, float(timeout_s))
+        while True:
+            with _sync_lock:
+                if not _sync_running:
+                    _sync_running = True
+                    break
+            if time.monotonic() >= deadline:
+                logger.warning("Full sync not run: another sync is still in progress")
+                return False
+            time.sleep(0.5)
+        try:
+            return bool(update_artists(force=True))
+        finally:
+            with _sync_lock:
+                _sync_running = False
+                pending = _sync_pending_full or bool(_pending_artist_ids)
+            if pending:
+                _start_sync()
+    except Exception as e:
+        try:
+            database.rollback()
+        except Exception:
+            pass
+        logger.error(f"Full sync failed: {e}")
+        return False

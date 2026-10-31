@@ -180,7 +180,7 @@ class TestProfiles:
 
 class TestNoUnarchivedDeletes:
     def test_batch_delete_keeps_file_when_archive_fails(self, client, library, monkeypatch):
-        monkeypatch.setattr(lyrics_store, '_archive_existing', lambda *a: False)
+        monkeypatch.setattr(lyrics_store, '_archive_existing', lambda *a, **k: False)
         r = client.post('/metadata/lyrics/batch-delete', json={'albumIds': [10]})
         assert r.get_json()['deleted'] == 0
         assert (library / '100.lrc').exists()
@@ -203,7 +203,7 @@ class TestNoUnarchivedDeletes:
         assert client.post('/metadata/lyrics/batch-delete', json={'albumIds': 5}).status_code == 400
 
     def test_blacklist_keeps_file_when_archive_fails(self, client, library, monkeypatch):
-        monkeypatch.setattr(lyrics_store, '_archive_existing', lambda *a: False)
+        monkeypatch.setattr(lyrics_store, '_archive_existing', lambda *a, **k: False)
         r = client.put('/tracks/100', json={'lyrics_status': 'blacklisted'})
         assert r.status_code == 500
         assert (library / '100.lrc').exists()
@@ -213,8 +213,18 @@ class TestNoUnarchivedDeletes:
     def test_blacklist_archives_then_deletes(self, client, library):
         r = client.put('/tracks/100', json={'lyrics_status': 'blacklisted'})
         assert r.status_code == 200 and r.get_json()['lyrics_status'] == 'blacklisted'
+        assert r.get_json()['track']['lyrics_status'] == 'blacklisted'
         assert not (library / '100.lrc').exists()
         assert database.execute(select(TableLyricsVersions.lidarrTrackId)).scalars().all() == [100]
+        v = database.execute(select(TableLyricsVersions)).scalars().one()
+        assert v.replaced_by == 'blacklist'
+
+    def test_instrumental_mode_deletes_only_non_lyrics(self, client, library):
+        (library / '108.lrc').write_text('real words on line one\nreal words on line two\nmore of them here')
+        r = client.post('/metadata/lyrics/batch-delete', json={'albumIds': [20], 'mode': 'instrumental'})
+        body = r.get_json()
+        assert body['deleted'] == 0 and body['unflagged'] == 1
+        assert (library / '108.lrc').exists()
 
 
 def test_dashboard_orders_by_outstanding_work(client, library):

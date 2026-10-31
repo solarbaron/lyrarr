@@ -75,12 +75,10 @@ def check_album_coherence(album_id):
         line_count = 0
 
         if os.path.isfile(filepath):
-            try:
-                with open(filepath, encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                line_count = _count_text_lines(content)
-            except Exception:
-                pass
+            from lyrarr.metadata.lyrics_store import read_sidecar
+            sr = read_sidecar(filepath)
+            if sr is not None:
+                line_count = _count_text_lines(sr.text)
 
         track_data.append({
             'id': track.lidarrTrackId,

@@ -85,6 +85,12 @@ def login(client, password='secret', prefix=''):
     '/api/system/test/notification',
     '/api/webhook/lidarr',
     '/api/system/settings',
+    '/api/audit/runs',
+    '/api/audit/runs/1/apply',
+    '/api/audit/runs/1/cancel',
+    '/api/audit/ignore',
+    '/api/audit/unignore',
+    '/api/tracks/instrumental',
 ])
 def test_csrf_form_posts_refused(cfg, path):
     client = make_app(cfg, with_api=True).test_client()

@@ -1,81 +1,97 @@
-
 """
 Lyrics quality validation pipeline.
 
 Catches common quality issues in downloaded lyrics before saving to disk:
-  - Instrumental tracks getting random lyrics
+  - Marker-only content ("[Instrumental]") — reported as is_instrumental,
+    which is a *vote* for the instrumental policy, never a verdict by itself
+  - Provider placeholders ("Lyrics not available") and credit-only text
   - Truncated content from free-tier APIs
-  - Language mismatches (e.g. Chinese lyrics for an English artist)
   - Duplicate/repeated lines suggesting parsing errors
-  - Garbage content (encoding artifacts, excessive special characters)
+  - Garbage content (encoding artifacts, HTML entities, excessive special characters)
   - LRC files with only metadata tags but no actual lyrics
+
+A language-mismatch check exists (artist_language), but the download worker
+doesn't pass an artist language (there is no reliable per-artist language),
+so it only runs for callers that supply one.
+
+synced_fits_duration() checks synced lyrics against the track length.
 """
 
 import logging
 import re
 from collections import Counter
 
-from lyrarr.metadata.lrc_repair import LRC_META_TAG, LRC_TIMESTAMP
+from lyrarr.metadata.lrc_repair import (
+    LRC_ENHANCED_TIMESTAMP,
+    LRC_META_TAG,
+    LRC_TIMESTAMP,
+    is_fake_synced,
+    lyric_timestamps,
+)
+from lyrarr.metadata.lyrics_text import (
+    classify_lyrics_text,
+    instrumental_title_tier,
+    is_credit_line,
+    is_placeholder_line,
+)
 
 logger = logging.getLogger(__name__)
-
-# A line that, on its own, says "this track has no lyrics". Only counts when the
-# whole content is made of such markers (plus section headers): Genius keeps
-# "[Intro]" / "[Outro]" headers in real lyrics, so one marker line among lyric
-# lines means nothing.
-_INSTRUMENTAL_MARKER_LINE = re.compile(
-    r'^\s*[\[\(]?\s*(?:instrumental|no lyrics|no vocals?|'
-    r'without vocals?|interlude|intro|outro|skit)\s*[\]\)]?\s*$',
-    re.IGNORECASE
-)
 
 # Section header line ("[Verse 1]", "[Chorus: Artist]"). Parenthesised lines
 # are ad-libs/backing vocals — real lyrics — so they don't count.
 _SECTION_HEADER = re.compile(r'^\s*\[[^\]]*\]\s*$')
 
-# Provider "nothing here" placeholders — not lyrics, and not evidence of an
-# instrumental either (the provider just lacks them).
-_PLACEHOLDER_LINE = re.compile(
-    r'^\s*(?:lyrics?\s+(?:not\s+(?:available|found)|unavailable|coming\s+soon)|'
-    r'no\s+lyrics\s+(?:found|available)|lyrics\s+will\s+be\s+available\s+soon)[.!]*\s*$',
-    re.IGNORECASE
-)
-
 # Musixmatch's free-tier footer must never end up in a saved file.
 _PROVIDER_DISCLAIMER = re.compile(r'This Lyrics is NOT for Commercial use', re.IGNORECASE)
 
-# Patterns indicating an instrumental track *by its title*. These tracks have no
-# lyrics, so any "match" a provider returns is a different (vocal) song — exactly
-# the nonsense we want to avoid saving. Kept deliberately specific (parenthetical
-# tags, "X version/mix", or a trailing "- instrumental") so an album or band
-# literally named "Instrumental" isn't swept up.
-_INSTRUMENTAL_TITLE = re.compile(
-    r'[\(\[]\s*(?:instrumental|karaoke|off[\s-]?vocals?|no[\s-]?vocals?|'
-    r'backing[\s-]?track)\b[^\)\]]*[\)\]]'
-    r'|\b(?:instrumental|karaoke)\s+(?:version|mix|edit|take)\b'
-    r'|[-–—]\s*instrumental\s*$'
-    r'|\binstrumental\s*$',
-    re.IGNORECASE
-)
+# Synced lyrics may end this long after the track before they're "another edit".
+SYNC_OVERRUN_TOLERANCE_S = 3.0
 
 
 def is_instrumental_title(title):
-    """Whether a track title indicates an instrumental/karaoke track.
+    """Whether a track title is a STRONG instrumental/karaoke title (PLAN §1.2).
 
-    Used to skip lyrics search entirely for tracks that can't have lyrics,
-    preventing a wrong (vocal-version) match from being saved.
+    "Song (Instrumental)", "Song (Off Vocal)", "Song - Instrumental",
+    "Song (Karaoke Version)"... but not "The Instrumental", "Song
+    (Instrumental Intro)" or a bare "Instrumental" (those are weak or none).
     """
     if not title:
         return False
-    return bool(_INSTRUMENTAL_TITLE.search(title))
+    return instrumental_title_tier(title) == 'strong'
+
+
+def synced_fits_duration(content, duration_s):
+    """Whether synced lyrics fit the track length. Returns (ok, reason).
+
+    reason: 'overrun' (last lyric timestamp > duration + 3 s: timed for a
+    longer edit), 'starts_after_end' (first lyric timestamp beyond the end)
+    or 'fake_synced' (the timing carries no information). `[offset:]` is
+    honoured. An unknown duration or untimed content is (True, None).
+    """
+    try:
+        d = float(duration_s) if duration_s else None
+    except (TypeError, ValueError):
+        d = None
+    stamps = lyric_timestamps(content)
+    if stamps and is_fake_synced(content, d):
+        return False, 'fake_synced'
+    if not d or d <= 0 or not stamps:
+        return True, None
+    if stamps[0] > d:
+        return False, 'starts_after_end'
+    if stamps[-1] > d + SYNC_OVERRUN_TOLERANCE_S:
+        return False, 'overrun'
+    return True, None
 
 # LRC timestamps / metadata tags (shared definitions — [mm:ss] without a
 # fraction and unknown [tool:..] tags included)
 _LRC_TS = LRC_TIMESTAMP
 _LRC_META = LRC_META_TAG
 
-# Garbage character patterns (encoding artifacts)
-_GARBAGE_CHARS = re.compile(r'[ïœãâ]{3,}|\\x[0-9a-f]{2}|&#\d{3,};')
+# Garbage character patterns (encoding artifacts, unescaped HTML entities)
+_GARBAGE_CHARS = re.compile(
+    r'[ïœãâ]{3,}|\\x[0-9a-f]{2}|&#x?[0-9a-fA-F]+;|&(?:amp|quot|lt|gt|apos|nbsp);'
+)
 
 # Minimum meaningful lyrics length (characters, after stripping)
 MIN_LYRICS_LENGTH = 20
@@ -131,7 +147,7 @@ def validate_lyrics(content, track_title=None, artist_name=None,
     # ------------------------------------------------------------------
     # 1. Instrumental detection (by title or by content)
     # ------------------------------------------------------------------
-    if is_instrumental_title(track_title) or _is_instrumental(clean_lines):
+    if is_instrumental_title(track_title) or classify_lyrics_text(content) == 'marker':
         is_instrumental = True
         issues.append({
             'type': 'instrumental',
@@ -148,7 +164,7 @@ def validate_lyrics(content, track_title=None, artist_name=None,
 
     metadata_only = _is_metadata_only(content)
 
-    if clean_lines and all(_PLACEHOLDER_LINE.match(line) for line in clean_lines):
+    if _is_placeholder(clean_lines):
         issues.append({
             'type': 'placeholder',
             'severity': 'error',
@@ -273,27 +289,22 @@ def _strip_to_text_lines(content):
         if _LRC_META.match(stripped):
             continue
         # Remove LRC timestamps
-        cleaned = _LRC_TS.sub('', stripped).strip()
+        cleaned = LRC_ENHANCED_TIMESTAMP.sub('', _LRC_TS.sub('', stripped)).strip()
         if cleaned:
             lines.append(cleaned)
     return lines
 
 
-def _is_instrumental(clean_lines):
-    """Detect content that only says "instrumental".
-
-    True only when there is at least one marker line and every remaining line
-    is a marker or a section header — never for real lyrics that happen to
-    contain an "[Intro]" header. Tiny content alone is not evidence (that's a
-    too_short error, not an instrumental track).
-    """
-    has_marker = False
+def _is_placeholder(clean_lines):
+    """At least one provider placeholder line, and every other line is a
+    placeholder, a credit line or a section header (no lyrics at all)."""
+    has_placeholder = False
     for line in clean_lines:
-        if _INSTRUMENTAL_MARKER_LINE.match(line):
-            has_marker = True
-        elif not _SECTION_HEADER.match(line):
+        if is_placeholder_line(line):
+            has_placeholder = True
+        elif not (is_credit_line(line) or _SECTION_HEADER.match(line)):
             return False
-    return has_marker
+    return has_placeholder
 
 
 def _is_metadata_only(content):

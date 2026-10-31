@@ -186,42 +186,51 @@ class AlbumItem(Resource):
 @api_ns_albums.route('/albums/<int:album_id>/upload-cover')
 class AlbumUploadCover(Resource):
     def post(self, album_id):
-        """Upload a custom cover image for an album."""
+        """Upload a custom cover image for an album.
+
+        The image type is taken from the bytes (a PNG named .jpg is saved as
+        .png) and written as `{folder_art_filename}.{ext}` into the album's
+        own folder. Nothing is written (and no folder is created) when that
+        folder isn't reachable: 409 with a readable message.
+        """
         import os
         from datetime import datetime
+
+        from lyrarr.app.config import settings
+        from lyrarr.metadata.cover_fetch import album_dir_writable, cover_reason_message, sniff_image
+        from lyrarr.metadata.lyrics_store import atomic_write_bytes
 
         album = database.execute(
             select(TableAlbums).where(TableAlbums.lidarrAlbumId == album_id)
         ).scalars().first()
         if not album:
-            return {'message': 'Album not found'}, 404
+            return {'message': 'Album not found', 'code': 'not_found'}, 404
 
         if 'file' not in request.files:
-            return {'message': 'No file provided'}, 400
+            return {'message': 'No file provided', 'code': 'no_file'}, 400
 
         file = request.files['file']
         if not file.filename:
-            return {'message': 'No file selected'}, 400
+            return {'message': 'No file selected', 'code': 'no_file'}, 400
 
-        # Validate file type
-        allowed = {'png', 'jpg', 'jpeg', 'webp'}
-        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-        if ext not in allowed:
-            return {'message': f'Invalid format. Allowed: {", ".join(allowed)}'}, 400
-
-        if not album.path:
-            return {'message': 'Album has no path on disk'}, 400
-
-        # Normalize extension
-        if ext == 'jpeg':
-            ext = 'jpg'
+        ok, reason = album_dir_writable(album)
+        if not ok:
+            return {'message': cover_reason_message(reason, album), 'code': reason}, 409
 
         cover_data = file.read()
-        filepath = os.path.join(album.path, f'cover.{ext}')
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        sniffed = sniff_image(cover_data)
+        if not sniffed:
+            return {'message': 'The uploaded file is not a JPEG, PNG, WebP or GIF image.',
+                    'code': 'not_image'}, 400
+        ext = sniffed[0]
 
-        with open(filepath, 'wb') as f:
-            f.write(cover_data)
+        basename = getattr(settings.metadata.covers, 'folder_art_filename', None) or 'cover'
+        filepath = os.path.join(album.path, f'{basename}.{ext}')
+        try:
+            atomic_write_bytes(filepath, cover_data)
+        except OSError as e:
+            logger.error(f"Cover upload for album {album_id} failed: {e}")
+            return {'message': f'Could not write {filepath}: {e}', 'code': 'write_failed'}, 500
 
         # Update database
         database.execute(
@@ -233,10 +242,10 @@ class AlbumUploadCover(Resource):
         # Log to history
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-        from lyrarr.app.database import TableHistory
+        from lyrarr.app.database import HISTORY_ACTION_MANUAL, TableHistory
         database.execute(
             sqlite_insert(TableHistory).values(
-                action=1,
+                action=HISTORY_ACTION_MANUAL,
                 description=f"Uploaded custom cover art for {album.title}",
                 metadata_type='cover',
                 provider='upload',
@@ -261,5 +270,4 @@ class AlbumUploadCover(Resource):
         except Exception as e:
             logger.warning(f"Embedding uploaded cover for album {album.lidarrAlbumId} failed: {e}")
 
-        return {'message': f'Cover art uploaded for "{album.title}"'}
-
+        return {'message': f'Cover art uploaded for "{album.title}"', 'path': filepath}

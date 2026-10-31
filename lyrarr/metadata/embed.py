@@ -1,6 +1,7 @@
 
 """
-Embed cover art into audio files using mutagen.
+Embed cover art into audio files using mutagen, and read embedded lyrics
+and artist tags (read_embedded_lyrics / read_embedded_artist).
 Supports MP3 (ID3 APIC), FLAC (Picture), M4A/MP4 (covr) and Ogg
 (Vorbis, Opus, FLAC-in-Ogg via METADATA_BLOCK_PICTURE).
 
@@ -12,6 +13,7 @@ overwrite is requested.
 import base64
 import logging
 import os
+from collections import namedtuple
 
 from lyrarr.metadata.cover_fetch import sniff_image
 
@@ -229,3 +231,176 @@ def _embed_ogg(audio, filepath, image_data, mime_type, overwrite):
     audio.save()
     logger.debug(f"Embedded Ogg cover: {os.path.basename(filepath)}")
     return 1
+
+
+# ---------------------------------------------------------------------------
+# Reading embedded lyrics / artist tags
+# ---------------------------------------------------------------------------
+
+EmbeddedLyrics = namedtuple('EmbeddedLyrics', 'text synced source_tag')
+
+_VORBIS_LYRICS_KEYS = ('lyrics', 'unsyncedlyrics', 'unsynced lyrics', 'lyric')
+
+
+def _first_text(values):
+    """First non-empty string in a tag value (str, list of str, or frames)."""
+    if values is None:
+        return None
+    if isinstance(values, (list, tuple)):
+        for v in values:
+            t = _first_text(v)
+            if t:
+                return t
+        return None
+    text = getattr(values, 'text', values)
+    if isinstance(text, (list, tuple)):
+        return _first_text(list(text))
+    if isinstance(text, bytes):
+        try:
+            text = text.decode('utf-8')
+        except UnicodeDecodeError:
+            return None
+    if not isinstance(text, str):
+        text = str(getattr(values, 'value', '') or '')
+    text = text.replace('\r\n', '\n').replace('\r', '\n').strip('\ufeff').strip()
+    return text or None
+
+
+def _sylt_to_lrc(frame):
+    """An ID3 SYLT frame (millisecond timestamps) as LRC text, or None."""
+    if getattr(frame, 'format', 2) != 2:  # 1 = MPEG frames: no usable time base
+        return None
+    lines = []
+    for text, ms in getattr(frame, 'text', None) or []:
+        text = (text or '').strip()
+        if not text:
+            continue
+        cs = int(round((ms or 0) / 10))
+        lines.append(f'[{cs // 6000:02d}:{(cs % 6000) // 100:02d}.{cs % 100:02d}] {text}')
+    return '\n'.join(lines) or None
+
+
+def _vorbis_get(tags, keys):
+    try:
+        for key in keys:
+            values = tags.get(key)
+            if values:
+                return key, values
+        # VComment keys are case-insensitive in the spec but not always in mutagen
+        lowered = {str(k).lower(): k for k in tags.keys()}
+        for key in keys:
+            if key in lowered:
+                values = tags.get(lowered[key])
+                if values:
+                    return lowered[key], values
+    except Exception:
+        return None, None
+    return None, None
+
+
+def _lyrics_from_tags(audio):
+    tags = getattr(audio, 'tags', None)
+    if tags is None:
+        return None
+
+    # ID3 (MP3, AIFF, ...): USLT, then SYLT
+    getall = getattr(tags, 'getall', None)
+    if callable(getall):
+        try:
+            for frame in getall('USLT'):
+                text = _first_text(frame)
+                if text:
+                    return text, 'USLT'
+            for frame in getall('SYLT'):
+                text = _sylt_to_lrc(frame)
+                if text:
+                    return text, 'SYLT'
+        except Exception as e:
+            logger.debug(f"ID3 lyrics read failed: {e}")
+        return None
+
+    # MP4 / M4A
+    try:
+        from mutagen.mp4 import MP4Tags
+        if isinstance(tags, MP4Tags):
+            text = _first_text(tags.get('\xa9lyr'))
+            return (text, '\xa9lyr') if text else None
+    except Exception:
+        pass
+
+    # ASF / WMA
+    try:
+        from mutagen.asf import ASFTags
+        if isinstance(tags, ASFTags):
+            text = _first_text(tags.get('WM/Lyrics'))
+            return (text, 'WM/Lyrics') if text else None
+    except Exception:
+        pass
+
+    # Vorbis comments (FLAC, Ogg Vorbis/Opus/FLAC)
+    key, values = _vorbis_get(tags, _VORBIS_LYRICS_KEYS)
+    if values:
+        text = _first_text(values)
+        if text:
+            return text, str(key).upper()
+    return None
+
+
+def read_embedded_lyrics(path):
+    """Lyrics embedded in an audio file's tags, or None. Never raises.
+
+    Reads ID3 USLT/SYLT, Vorbis LYRICS/UNSYNCEDLYRICS, MP4 ©lyr and ASF
+    WM/Lyrics. `synced` is True when the text carries LRC timestamps.
+    """
+    if not path:
+        return None
+    try:
+        if not os.path.isfile(path):
+            return None
+        import mutagen
+        audio = mutagen.File(path)
+        if audio is None:
+            return None
+        found = _lyrics_from_tags(audio)
+        if not found:
+            return None
+        text, source_tag = found
+        from lyrarr.metadata.language_detect import is_synced_lyrics
+        return EmbeddedLyrics(text, is_synced_lyrics(text), source_tag)
+    except Exception as e:
+        logger.debug(f"Could not read embedded lyrics from {path}: {e}")
+        return None
+
+
+def read_embedded_artist(path):
+    """The track artist from the file's tags (TPE1 / ARTIST / ©ART), or None. Never raises."""
+    if not path:
+        return None
+    try:
+        if not os.path.isfile(path):
+            return None
+        import mutagen
+        audio = mutagen.File(path)
+        tags = getattr(audio, 'tags', None) if audio is not None else None
+        if tags is None:
+            return None
+        getall = getattr(tags, 'getall', None)
+        if callable(getall):
+            return _first_text(getall('TPE1'))
+        try:
+            from mutagen.mp4 import MP4Tags
+            if isinstance(tags, MP4Tags):
+                return _first_text(tags.get('\xa9ART'))
+        except Exception:
+            pass
+        try:
+            from mutagen.asf import ASFTags
+            if isinstance(tags, ASFTags):
+                return _first_text(tags.get('Author'))
+        except Exception:
+            pass
+        _key, values = _vorbis_get(tags, ('artist',))
+        return _first_text(values)
+    except Exception as e:
+        logger.debug(f"Could not read the artist tag from {path}: {e}")
+        return None
