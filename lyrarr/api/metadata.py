@@ -1683,7 +1683,7 @@ class LyricsLanguageStats(Resource):
 
         # Provider distribution (from history)
         # Only automatic downloads/upgrades: not manual saves, publishes,
-        # classifications or audit repairs (incl. pre-1.7 rows that recorded
+        # classifications or audit repairs (incl. pre-2.0 rows that recorded
         # manual saves and publishes as downloads).
         from lyrarr.app.database import legacy_non_download_filter
         provider_rows = database.execute(

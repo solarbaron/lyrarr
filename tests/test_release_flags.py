@@ -2,7 +2,7 @@
 
 The backend gates its high-frequency events (audit progress, per-item
 download progress) behind ``event_handler.FRONTEND_EVENTS_V2`` because the
-pre-1.7 frontend turned every unknown event into an activity-feed item. The
+pre-2.0 frontend turned every unknown event into an activity-feed item. The
 bundled frontend consumes them now, so the flag must be on, and the set of
 event types the server never replays must equal the set the frontend never
 buffers (a mismatch either floods a refreshed tab or loses a replayed event).

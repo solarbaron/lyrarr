@@ -406,7 +406,7 @@ def test_malformed_json_is_400(client, library):
 
 
 # ---------------------------------------------------------------------------
-# 7. 1.7: PersistResult error contract, publish rules, stats, rescans, repairs
+# 7. 2.0: PersistResult error contract, publish rules, stats, rescans, repairs
 # ---------------------------------------------------------------------------
 
 LYRICS = "first placeholder line of the verse\nsecond placeholder line of the verse\n" \

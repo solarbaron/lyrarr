@@ -214,7 +214,7 @@ def strip_instrumental_qualifier(title) -> str:
     return out or t
 
 
-# The pre-1.7 broad title regex (validation.py), kept for audit diffing only:
+# The pre-2.0 broad title regex (validation.py), kept for audit diffing only:
 # rows it flagged that the new tiers no longer call STRONG are legacy mistakes.
 _LEGACY_TITLE_RE = re.compile(
     r'[\(\[]\s*(?:instrumental|karaoke|off[\s-]?vocals?|no[\s-]?vocals?|'
@@ -227,7 +227,7 @@ _LEGACY_TITLE_RE = re.compile(
 
 
 def matches_legacy_title_rule(title) -> bool:
-    """Whether the OLD (pre-1.7) instrumental title regex matches."""
+    """Whether the OLD (pre-2.0) instrumental title regex matches."""
     return bool(title) and bool(_LEGACY_TITLE_RE.search(title))
 
 

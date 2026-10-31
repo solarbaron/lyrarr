@@ -1377,7 +1377,7 @@ def file_provenance_proven(row, path, sr):
 
 
 def backfill_content_hash(track):
-    """Record lyrics_content_hash for an 'auto' row written before 1.7.
+    """Record lyrics_content_hash for an 'auto' row written before 2.0.
 
     'set' when lyrarr's own newest download/upgrade history row for this file
     is not older than the file (mtime - 60 s); 'downgraded' (lyrics_source →
@@ -1714,7 +1714,7 @@ def pick_best_synced(results, min_score=0.0):
 
 def candidate_hashes(text):
     """Every hash a blacklist entry for `text` may have been stored under:
-    the current content_hash, the pre-1.7 merge hash, and the hash of the
+    the current content_hash, the pre-2.0 merge hash, and the hash of the
     repaired LRC when the text needs repair."""
     out = set()
     if not text or not text.strip():

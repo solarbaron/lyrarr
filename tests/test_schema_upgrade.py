@@ -19,7 +19,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO, 'tests', 'fixtures', 'legacy_schema_v1_0.sql')
 
 MIGRATIONS = {
-    '2026-10-app-version-1.7.0',
+    '2026-10-app-version-2.0.0',
     '2026-10-stale-lyrics-source',
     '2026-10-hasLyrics-invariant',
     '2026-10-language-source',

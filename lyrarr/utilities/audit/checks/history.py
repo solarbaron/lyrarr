@@ -118,7 +118,7 @@ class LegacyPublishZeroDuration(Check):
     def detect(self, ctx):
         from lyrarr.app.database import TableHistory, data_migration_applied, database, select
         H = TableHistory
-        cutoff = data_migration_applied('2026-10-app-version-1.7.0') or ctx.now
+        cutoff = data_migration_applied('2026-10-app-version-2.0.0') or ctx.now
         rows = database.execute(
             select(H).where(H.description.like('Published lyrics for % to LRCLIB'), H.action == 1,
                             H.timestamp < cutoff).order_by(H.timestamp)).scalars().all()

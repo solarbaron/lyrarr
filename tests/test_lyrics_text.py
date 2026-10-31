@@ -124,7 +124,7 @@ class TestTitleTier:
         assert strip_instrumental_qualifier(title) == stripped
 
     def test_legacy_rule_is_broader(self):
-        # Titles the pre-1.7 regex flagged that the new tiers never call STRONG.
+        # Titles the pre-2.0 regex flagged that the new tiers never call STRONG.
         for title in ('The Instrumental', 'Mostly Instrumental', 'Rap Over My Instrumental',
                       'Song (Instrumental Intro)'):
             assert matches_legacy_title_rule(title)

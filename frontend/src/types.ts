@@ -167,7 +167,7 @@ export interface LyricsVersion {
   lyrics_type: string;
   /** Origin of the archived text (legacy rows: the writer that replaced it). */
   provider: string;
-  /** Who replaced or removed it; null on rows from before 1.7. */
+  /** Who replaced or removed it; null on rows from before 2.0. */
   replaced_by?: string | null;
   content: string;
   translated_from?: string | null;

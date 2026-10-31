@@ -25,7 +25,7 @@ _LRC_TS = LRC_TIMESTAMP
 _LRC_META = LRC_META_TAG
 _LRC_WORD_TS = LRC_ENHANCED_TIMESTAMP
 
-# The pre-1.7 definitions: blacklist rows written by older versions hold
+# The pre-2.0 definitions: blacklist rows written by older versions hold
 # hashes computed with these, so legacy_content_hash() keeps them matchable.
 _LEGACY_LRC_TS = re.compile(r'\[\d{1,2}:\d{2}[.:]\d{2,3}\]\s*')
 _LEGACY_LRC_META = re.compile(r'^\[(?:ar|ti|al|au|length|by|offset|re|ve|id|la):.*\]$', re.IGNORECASE)
@@ -189,7 +189,7 @@ def _content_hash(text):
 
 
 def legacy_content_hash(text):
-    """The content hash as computed before 1.7 (narrower timestamp/meta
+    """The content hash as computed before 2.0 (narrower timestamp/meta
     patterns, no enhanced-tag stripping). Blacklist rows written by older
     versions hold these, so blacklist matching checks both."""
     if not text:

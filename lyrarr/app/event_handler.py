@@ -20,7 +20,7 @@ _NO_REPLAY_TYPES = frozenset({
     'lyrics_audit_progress', 'download_scope', 'download_item', 'instrumental_classified',
 })
 
-# Compatibility gate (PLAN §1.6). The pre-1.7 frontend added an activity-feed
+# Compatibility gate (PLAN §1.6). The pre-2.0 frontend added an activity-feed
 # item for every unknown event, so the high-frequency event types below were
 # dropped until the new frontend shipped. The bundled frontend consumes them
 # now (tests/test_release_flags.py keeps this True). While False, gated types

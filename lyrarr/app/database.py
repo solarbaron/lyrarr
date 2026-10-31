@@ -124,7 +124,7 @@ HISTORY_ACTION_AUDIT_REPAIR = 7
 LYRICS_STATUSES = ('missing', 'available', 'manual', 'blacklisted', 'instrumental')
 LYRICS_SOURCES = ('auto', 'manual', 'translated', 'generated')
 
-# Providers that pre-1.7 manual saves recorded with history action 1.
+# Providers that pre-2.0 manual saves recorded with history action 1.
 MANUAL_PROVIDER_LABELS = ('editor', 'upload', 'restored', 'manual', 'batch-sync-generate')
 
 
@@ -269,7 +269,7 @@ class TableTracks(Base):
     lyrics_cooldown_count = mapped_column(Integer, default=0)
     upgrade_retry_count = mapped_column(Integer, default=0)
     upgrade_retry_after = mapped_column(DateTime, nullable=True)
-    # Written by every 1.7+ backoff write; NULL with a non-trivial backoff = older version.
+    # Written by every 2.0+ backoff write; NULL with a non-trivial backoff = older version.
     lyrics_retry_set_at = mapped_column(DateTime, nullable=True)
     upgrade_retry_set_at = mapped_column(DateTime, nullable=True)
     created_at_timestamp = mapped_column(DateTime)
@@ -330,7 +330,7 @@ class TableLyricsVersions(Base):
     provider = mapped_column(Text)
     translated_from = mapped_column(Text, nullable=True)  # source language if this is a translation
     # Who replaced/removed this version ('lrclib', 'editor', 'batch-delete', 'audit:F-6', ...).
-    # From 1.7 `provider` is the ORIGIN of the archived text; rows with
+    # From 2.0 `provider` is the ORIGIN of the archived text; rows with
     # replaced_by NULL are older and their provider is the replacer.
     replaced_by = mapped_column(Text, nullable=True)
     timestamp = mapped_column(DateTime, default=datetime.now)
@@ -461,7 +461,7 @@ class TableTrackTombstones(Base):
 
 
 def legacy_non_download_filter():
-    """True unless the history row is a pre-1.7 publish or manual save that was
+    """True unless the history row is a pre-2.0 publish or manual save that was
     recorded with a download action (NULL-safe on description and provider)."""
     return and_(
         or_(TableHistory.description.is_(None), ~TableHistory.description.like('Published lyrics%')),
@@ -774,7 +774,7 @@ def _dm_instrumental_title_reason(conn):
 
 
 def _dm_upgrade_backoff_split(conn):
-    # The pre-1.7 upgrade pass deferred available rows through lyrics_retry_*;
+    # The pre-2.0 upgrade pass deferred available rows through lyrics_retry_*;
     # move that backoff to its own columns (kept, not reset). *_set_at stay
     # NULL: that marks the backoff as written by an older version.
     n = conn.execute(text(
@@ -790,7 +790,7 @@ def _dm_upgrade_backoff_split(conn):
 
 
 DATA_MIGRATIONS = (
-    ('2026-10-app-version-1.7.0', _dm_app_version),
+    ('2026-10-app-version-2.0.0', _dm_app_version),
     ('2026-10-stale-lyrics-source', _dm_stale_lyrics_source),
     ('2026-10-hasLyrics-invariant', _dm_has_lyrics_invariant),
     ('2026-10-language-source', _dm_language_source),

@@ -172,7 +172,7 @@ def exclusive_downloads(timeout_s: float = 0):
 
 
 def _emit_v2(type, payload):
-    """download_scope / download_item: only for the 1.7 frontend (PLAN §1.6)."""
+    """download_scope / download_item: only for the 2.0 frontend (PLAN §1.6)."""
     if not getattr(_events, 'FRONTEND_EVENTS_V2', False):
         return
     try:

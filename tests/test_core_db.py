@@ -4,7 +4,7 @@ Covers: legacy TEXT-boolean rebuild recovering from a leftover `__boolfix`
 column, model indexes created on existing databases, the in-process Alembic
 stamp leaving the app's logging configuration intact, configure_logging not
 duplicating handlers, and the Lidarr health URL / auth-disabled warning.
-Also the 1.7 additions: legacy_non_download_filter, JSON columns in to_dict,
+Also the 2.0 additions: legacy_non_download_filter, JSON columns in to_dict,
 data-migration bookkeeping, the FRONTEND_EVENTS_V2 gate and emit_throttled,
 audit settings, single default profile after a restore, the dashboard lyrics
 series and per-root library health.
@@ -170,7 +170,7 @@ def test_health_warns_when_auth_disabled(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 1.7 schema helpers, events, settings, backup restore, dashboard series
+# 2.0 schema helpers, events, settings, backup restore, dashboard series
 # ---------------------------------------------------------------------------
 
 def _clean_history():
@@ -182,8 +182,8 @@ def test_legacy_non_download_filter():
     _clean_history()
     rows = [
         (1, 'Downloaded lyrics for A', 'lrclib'),
-        (1, 'Published lyrics for B', 'lrclib'),         # pre-1.7 publish
-        (1, 'Downloaded lyrics for C', 'editor'),        # pre-1.7 manual save
+        (1, 'Published lyrics for B', 'lrclib'),         # pre-2.0 publish
+        (1, 'Downloaded lyrics for C', 'editor'),        # pre-2.0 manual save
         (1, 'Downloaded lyrics for D', 'batch-translate-de'),
         (2, 'Upgraded lyrics for E', 'netease'),
         (1, 'Downloaded lyrics for F', None),

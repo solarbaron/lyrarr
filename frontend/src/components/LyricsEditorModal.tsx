@@ -541,7 +541,7 @@ export default function LyricsEditorModal({ trackId, trackTitle, albumId, opened
                                   </span>
                                   <span className={c.versionMeta}>
                                     <Tag>{v.lyrics_type}</Tag>
-                                    {/* From 1.7 `provider` is the origin of the text and `replaced_by` the
+                                    {/* From 2.0 `provider` is the origin of the text and `replaced_by` the
                                         writer that replaced it; legacy rows only have `provider`. */}
                                     <span>
                                       {versionActor(v.provider)}

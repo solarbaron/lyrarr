@@ -10,7 +10,7 @@ from lyrarr.utilities.album_status import SATISFIED_TRACK_STATES
 api_ns_dashboard = Namespace('dashboard', description='Dashboard statistics')
 
 # Lyrics "acquired": downloads, upgrades and manual saves. Publishes (also the
-# pre-1.7 ones, recorded as action 1), deletions, classifications and audit
+# pre-2.0 ones, recorded as action 1), deletions, classifications and audit
 # rows are not.
 _LYRICS_ACQUIRED_ACTIONS = (1, 2, 4)
 

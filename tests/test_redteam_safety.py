@@ -137,7 +137,7 @@ def test_s6_keeps_manual_origin_of_failed_translation(lib, monkeypatch):
     when = datetime.now() - timedelta(days=3)
     L.add_track(4, lib['album'], 10, 1, 'Own Lyrics', status='available', lyrics_source='translated',
                 language_source='translated', lrc=original)
-    # The archived pre-translation text: origin 'editor' (1.7 semantics),
+    # The archived pre-translation text: origin 'editor' (2.0 semantics),
     # replaced by the batch translation that failed and saved it unchanged.
     L.add_version(4, original, provider='editor', replaced_by='batch-translate-de', translated_from='en', when=when)
     L.add_history(4, 10, 1, action=4, provider='editor', when=when - timedelta(days=1))
