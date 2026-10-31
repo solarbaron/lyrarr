@@ -1,1 +1,0 @@
-const a={complete:"Complete",available:"Complete",partial:"Partial",missing:"Missing",unknown:"Unknown"},e={complete:"green",available:"green",partial:"yellow",missing:"red",unknown:"gray"},l=n=>a[n||"unknown"]||n||"Unknown",o=n=>e[n||"unknown"]||"gray";export{o as a,l};

@@ -1,0 +1,1 @@
+const i={musicbrainz:"MusicBrainz",fanart:"fanart.tv",deezer:"Deezer",itunes:"iTunes",theaudiodb:"TheAudioDB",lrclib:"LRCLIB",genius:"Genius",musixmatch:"Musixmatch",netease:"NetEase"};function t(e){return i[e]||e}export{t as p};
