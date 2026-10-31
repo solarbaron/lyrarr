@@ -1,0 +1,243 @@
+/* Sidebar (DESIGN.md 6.2) */
+.sidebar {
+  position: sticky;
+  top: 0;
+  z-index: var(--ly-z-sidebar);
+  width: 240px;
+  height: 100vh;
+  height: 100dvh;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--ly-nav);
+  border-right: 1px solid var(--ly-border);
+}
+
+.sidebar[data-rail] {
+  width: 64px;
+}
+
+.sidebar[data-overlay] {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  box-shadow: var(--ly-shadow);
+  border-right-color: var(--ly-border-strong);
+  animation: ly-sidebar-in var(--ly-dur-slow) var(--ly-ease);
+}
+
+@keyframes ly-sidebar-in {
+  from { transform: translateX(-24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.brand {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 16px;
+}
+
+.sidebar[data-rail] .brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.brandLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  color: var(--ly-text);
+  text-decoration: none;
+  border-radius: var(--ly-radius-md);
+}
+
+.sidebar[data-rail] .brandLink {
+  flex: none;
+}
+
+.brandLink svg {
+  flex: none;
+}
+
+.wordmark {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.version {
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.close {
+  margin-left: 4px;
+}
+
+.nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 12px 12px;
+}
+
+.sidebar[data-rail] .nav {
+  padding: 4px 12px 12px;
+  align-items: center;
+}
+
+.group {
+  padding: 18px 10px 6px;
+  font-size: 11.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ly-muted);
+}
+
+.divider {
+  width: 24px;
+  height: 1px;
+  margin: 10px auto;
+  background: var(--ly-border-strong);
+  flex: none;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--ly-radius-md);
+  color: var(--ly-text-2);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background var(--ly-dur-fast) var(--ly-ease), color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.sidebar[data-rail] .item {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--ly-radius-sm);
+}
+
+.item:hover {
+  background: var(--ly-hover);
+  color: var(--ly-text);
+}
+
+html[data-contrast="high"] .item:hover {
+  outline: 1px solid var(--ly-border-strong);
+  outline-offset: -1px;
+}
+
+.item.active {
+  background: var(--ly-active);
+  color: var(--ly-text);
+  font-weight: 600;
+}
+
+.icon {
+  width: 20px;
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--ly-text-2);
+}
+
+.item.active .icon {
+  color: var(--ly-accent-text);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.backlog {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ly-neutral-soft);
+  color: var(--ly-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-contrast="high"] .backlog {
+  border: 1px solid currentColor;
+}
+
+.railDot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ly-text-2);
+}
+
+.bottom {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.sidebar[data-rail] .bottom {
+  align-items: center;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.sidebar[data-rail] .footer {
+  flex-direction: column;
+}
+
+.signOut {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.collapse {
+  margin-left: auto;
+}
+
+.sidebar[data-rail] .collapse {
+  margin-left: 0;
+}

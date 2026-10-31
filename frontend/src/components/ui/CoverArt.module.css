@@ -1,0 +1,67 @@
+/* CoverArt (DESIGN.md 7.2) */
+.root {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  background: var(--ly-neutral-soft);
+  color: var(--ly-muted);
+  container-type: inline-size;
+  vertical-align: middle;
+  isolation: isolate;
+}
+
+.root[data-fill] {
+  display: grid;
+}
+
+button.root {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  cursor: zoom-in;
+}
+
+button.root:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 3px;
+}
+
+.img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--ly-dur-base) var(--ly-ease);
+}
+
+.img[data-loaded] {
+  opacity: 1;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  font-size: 40cqi;
+  line-height: 1;
+}
+
+.icon svg {
+  width: 1em;
+  height: 1em;
+}
+
+.monogram {
+  /* scales with the tile, never below the 11.5px text minimum (spec 4.1) */
+  font-size: max(11.5px, 32cqi);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--ly-text-2);
+  user-select: none;
+}

@@ -1,23 +1,59 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TextInput, PasswordInput, Switch, Button, NumberInput, Loader, FileButton, Select } from '@mantine/core';
+import { Button } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+import { faCircleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { getSettings, saveSettings, testLidarr, testNotification, exportBackup, importBackup, getProfiles } from '../api';
-import PageHeader from '../components/PageHeader';
-import { notifyError } from '../notify';
+import { errorMessage, notifyError } from '../notify';
+import { CardSkeleton, EmptyState, PageHeader, Panel, SaveBar, useConfirm } from '../components/ui';
+import { useHealthChecks } from '../components/shell';
+import { ServerSections, type SettingsForm, type TestResult } from './settings/ServerSections';
+import { AppearanceSection } from './settings/Appearance';
+import { SettingsNav, scrollToSection, type SettingsNavItem } from './settings/SettingsNav';
+import c from './settings/Settings.module.css';
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
-  const { data: settings, isLoading } = useQuery({ queryKey: ['settings'], queryFn: getSettings });
-  const [form, setForm] = useState<any>({});
+  const confirm = useConfirm();
+  const location = useLocation();
+  const phone = useMediaQuery('(max-width: 479px)');
+  const { data: settings, isLoading, isError, error, refetch } = useQuery({ queryKey: ['settings'], queryFn: getSettings });
+  const [form, setForm] = useState<SettingsForm>({});
+  const [baseline, setBaseline] = useState<SettingsForm>({});
   const { data: profiles } = useQuery({ queryKey: ['profiles'], queryFn: getProfiles });
+  const { checks } = useHealthChecks();
+  const [lidarrResult, setLidarrResult] = useState<TestResult | null>(null);
+  const [notificationResult, setNotificationResult] = useState<TestResult | null>(null);
 
+  const dirty = !!settings && !same(form, baseline);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  // Load (and reload after a save) from the server, but never clobber edits in
+  // progress when the query refetches in the background.
   useEffect(() => {
-    if (settings) setForm(settings);
+    if (settings && !dirtyRef.current) {
+      setForm(settings);
+      setBaseline(settings);
+    }
   }, [settings]);
 
-  const updateField = (section: string, key: string, value: any) => {
-    setForm((prev: any) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+  const updateField = (section: string, key: string, value: unknown) => {
+    setForm(prev => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+  };
+
+  const updateWhisper = (key: string, value: unknown) => {
+    setForm(prev => ({
+      ...prev,
+      metadata: {
+        ...prev.metadata,
+        whisper: { ...prev.metadata?.whisper, [key]: value },
+      },
+    }));
   };
 
   // Mantine's NumberInput reports a cleared field as ''. Keep that in the form
@@ -30,31 +66,42 @@ export default function SettingsPage() {
   };
   const lidarrPortError = form.lidarr ? portError(form.lidarr.port ?? 8686) : undefined;
   const generalPortError = form.general ? portError(form.general.port ?? 6868) : undefined;
-
-  const handleSave = () => {
-    if (lidarrPortError || generalPortError) {
-      notifications.show({ title: 'Not saved', message: 'Fix the highlighted fields first', color: 'orange' });
-      return;
-    }
-    saveMutation.mutate(form);
+  const rangeError = (v: unknown, min: number, max: number) => {
+    const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+    return (typeof n === 'number' && Number.isInteger(n) && n >= min && n <= max) ? undefined : `Enter ${min} to ${max.toLocaleString()}`;
   };
+  const auditErrors = form.audit ? {
+    network: rangeError(form.audit.network_max_tracks ?? 200, 1, 5000),
+    retention: rangeError(form.audit.report_retention ?? 10, 1, 100),
+  } : undefined;
+  const auditInvalid = !!(auditErrors?.network || auditErrors?.retention);
 
   const saveMutation = useMutation({
-    mutationFn: (data: any) => {
-      const flattened: Record<string, any> = {};
-      Object.entries(data).forEach(([section, values]: [string, any]) => {
-        Object.entries(values).forEach(([key, val]) => {
+    mutationFn: (data: SettingsForm) => {
+      const flattened: Record<string, unknown> = {};
+      Object.entries(data).forEach(([section, values]) => {
+        Object.entries(values as Record<string, unknown>).forEach(([key, val]) => {
           flattened[`settings-${section}-${key}`] = val;
         });
       });
       return saveSettings(flattened);
     },
-    onSuccess: () => {
-      notifications.show({ title: 'Settings saved', message: 'Changes applied', color: 'green' });
+    onSuccess: (_data, saved) => {
+      notifications.show({ title: 'Settings saved', message: 'Changes applied', color: 'success' });
+      setBaseline(saved);
       queryClient.invalidateQueries({ queryKey: ['settings'] });
     },
     onError: (err) => notifyError('Failed to save settings', err),
   });
+
+  const handleSave = () => {
+    if (lidarrPortError || generalPortError || auditInvalid) {
+      notifications.show({ title: 'Not saved', message: 'Fix the highlighted fields first', color: 'warning' });
+      scrollToSection(generalPortError ? 'general' : lidarrPortError ? 'lidarr' : 'audit');
+      return;
+    }
+    saveMutation.mutate(form);
+  };
 
   const testMutation = useMutation({
     mutationFn: () => testLidarr({
@@ -62,14 +109,31 @@ export default function SettingsPage() {
       base_url: form.lidarr?.base_url, apikey: form.lidarr?.apikey, ssl: form.lidarr?.ssl,
       verify_ssl: form.lidarr?.verify_ssl,
     }),
-    onSuccess: (data: any) => notifications.show({ title: 'Success', message: data.message || 'Connected!', color: 'green' }),
-    onError: (e: any) => notifications.show({ title: 'Error', message: e?.response?.data?.message || 'Failed', color: 'red' }),
+    onMutate: () => setLidarrResult(null),
+    onSuccess: (data: any) => {
+      const message = data?.message || 'Connected!';
+      setLidarrResult({ ok: true, message });
+      notifications.show({ title: 'Success', message, color: 'success' });
+    },
+    onError: (e: unknown) => {
+      const message = errorMessage(e, 'Failed');
+      setLidarrResult({ ok: false, message });
+      notifications.show({ title: 'Error', message, color: 'danger' });
+    },
   });
 
   const testNotifMutation = useMutation({
     mutationFn: testNotification,
-    onSuccess: (data: any) => notifications.show({ title: 'Sent', message: data.message || 'Test sent', color: 'green' }),
-    onError: (err) => notifyError('Error', err, 'Failed to send'),
+    onMutate: () => setNotificationResult(null),
+    onSuccess: (data: any) => {
+      const message = data?.message || 'Test sent';
+      setNotificationResult({ ok: true, message });
+      notifications.show({ title: 'Sent', message, color: 'success' });
+    },
+    onError: (err) => {
+      setNotificationResult({ ok: false, message: errorMessage(err, 'Failed to send') });
+      notifyError('Error', err, 'Failed to send');
+    },
   });
 
   const handleExport = async () => {
@@ -79,287 +143,136 @@ export default function SettingsPage() {
       const a = document.createElement('a');
       a.href = url; a.download = 'lyrarr-backup.json'; a.click();
       URL.revokeObjectURL(url);
-      notifications.show({ title: 'Exported', message: 'Backup downloaded', color: 'green' });
+      notifications.show({ title: 'Exported', message: 'Backup downloaded', color: 'success' });
     } catch {
-      notifications.show({ title: 'Error', message: 'Export failed', color: 'red' });
+      notifications.show({ title: 'Error', message: 'Export failed', color: 'danger' });
     }
   };
 
   const handleImport = async (file: File | null) => {
     if (!file) return;
+    const ok = await confirm({
+      title: 'Restore from backup?',
+      message: (
+        <>
+          Restore settings and profiles from <strong>{file.name}</strong>? Values in the file replace the current ones.
+          {dirty && ' Your unsaved changes on this page are discarded.'}
+        </>
+      ),
+      confirmLabel: 'Restore backup',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       const text = await file.text();
       const data = JSON.parse(text);
       await importBackup(data);
-      notifications.show({ title: 'Restored', message: 'Backup imported', color: 'green' });
-      queryClient.invalidateQueries();
+      notifications.show({ title: 'Restored', message: 'Backup imported', color: 'success' });
+      // Show the restored values, even over unsaved edits (the user confirmed).
+      await queryClient.invalidateQueries();
+      const fresh = queryClient.getQueryData<SettingsForm>(['settings']);
+      if (fresh) { setForm(fresh); setBaseline(fresh); }
     } catch {
-      notifications.show({ title: 'Error', message: 'Import failed', color: 'red' });
+      notifications.show({ title: 'Error', message: 'Import failed', color: 'danger' });
     }
   };
 
-  if (isLoading) return <div className="empty-state"><Loader color="violet" /></div>;
+  // Health dots on the sub-nav mirror the top-bar checks.
+  const navItems: SettingsNavItem[] = useMemo(() => {
+    const alertFor = (id: string) => {
+      const check = checks.find(ch => ch.id === id);
+      if (!check || check.level === 'ok') return undefined;
+      return { tone: check.level === 'error' ? 'danger' as const : 'warning' as const, label: check.title };
+    };
+    return [
+      { id: 'general', label: 'General' },
+      { id: 'lidarr', label: 'Lidarr', alert: alertFor('lidarr') },
+      { id: 'providers', label: 'Providers & keys' },
+      { id: 'translation', label: 'Translation' },
+      { id: 'whisper', label: 'Whisper (AI sync)' },
+      { id: 'notifications', label: 'Notifications' },
+      { id: 'security', label: 'Security', alert: alertFor('auth') },
+      { id: 'audit', label: 'Library audit' },
+      { id: 'backup', label: 'Backup & restore' },
+      { id: 'appearance', label: 'Appearance' },
+    ];
+  }, [checks]);
 
-  const inputStyles = {
-    input: { background: 'rgba(25,20,50,0.4)', border: '1px solid var(--card-border)', color: 'var(--text-primary)' },
-    label: { color: 'var(--text-secondary)', marginBottom: 4 },
-  };
+  // Deep links (/settings#lidarr from the health pill, #appearance from the
+  // theme picker): scroll once the sections exist.
+  const ready = !isLoading;
+  useEffect(() => {
+    const id = location.hash.replace(/^#/, '');
+    if (!ready || !id) return;
+    const t = requestAnimationFrame(() => scrollToSection(id, false));
+    return () => cancelAnimationFrame(t);
+  }, [ready, location.hash, location.key]);
+
+  const notificationsDirty = !!settings && !same(form.notifications, baseline.notifications);
+
+  let server;
+  if (isLoading) {
+    server = (
+      <>
+        <CardSkeleton height={320} />
+        <CardSkeleton height={420} />
+      </>
+    );
+  } else if (isError) {
+    server = (
+      <Panel id="general">
+        <EmptyState
+          size="sm"
+          tone="danger"
+          icon={faCircleExclamation}
+          title="Couldn't load settings"
+          message={errorMessage(error)}
+          action={<Button variant="default" onClick={() => refetch()}>Retry</Button>}
+        />
+      </Panel>
+    );
+  } else {
+    server = (
+      <ServerSections
+        form={form}
+        updateField={updateField}
+        updateWhisper={updateWhisper}
+        profiles={profiles || []}
+        lidarrPortError={lidarrPortError}
+        generalPortError={generalPortError}
+        auditErrors={auditErrors}
+        onTestLidarr={() => testMutation.mutate()}
+        testingLidarr={testMutation.isPending}
+        lidarrResult={lidarrResult}
+        onTestNotification={() => testNotifMutation.mutate()}
+        testingNotification={testNotifMutation.isPending}
+        notificationResult={notificationResult}
+        notificationsDirty={notificationsDirty}
+        onExport={handleExport}
+        onImport={handleImport}
+      />
+    );
+  }
 
   return (
-    <div className="fade-in">
+    <div className="ly-page">
       <PageHeader
         title="Settings"
-        subtitle="Configure Lyrarr"
-        actions={
-          <Button variant="gradient" gradient={{ from: '#8b3dff', to: '#6a1bfa' }}
-            onClick={handleSave} loading={saveMutation.isPending}>
-            Save Settings
-          </Button>
-        }
+        subtitle="Connections, providers, notifications and security are saved together; appearance applies instantly"
       />
-
-      {/* Lidarr */}
-      <div className="settings-section">
-        <h3>🔗 Lidarr Connection</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Switch label="Enable Lidarr" checked={form.general?.use_lidarr || false}
-            onChange={(e) => updateField('general', 'use_lidarr', e.currentTarget.checked)}
-            styles={{ label: { color: 'var(--text-secondary)' } }} />
-          <div />
-          <TextInput label="Host" placeholder="127.0.0.1" value={form.lidarr?.ip || ''}
-            onChange={(e) => updateField('lidarr', 'ip', e.currentTarget.value)} styles={inputStyles} />
-          <NumberInput label="Port" placeholder="8686" min={1} max={65535} allowDecimal={false}
-            value={form.lidarr?.port ?? 8686} onChange={(v) => updateField('lidarr', 'port', v)}
-            error={lidarrPortError} styles={inputStyles} />
-          <TextInput label="Base URL" placeholder="/" value={form.lidarr?.base_url || ''}
-            onChange={(e) => updateField('lidarr', 'base_url', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="API Key" placeholder="Your Lidarr API key" value={form.lidarr?.apikey || ''}
-            onChange={(e) => updateField('lidarr', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          <Switch label="SSL" checked={form.lidarr?.ssl || false}
-            onChange={(e) => updateField('lidarr', 'ssl', e.currentTarget.checked)}
-            styles={{ label: { color: 'var(--text-secondary)' } }} />
-          <Switch label="Verify SSL Certificate" checked={form.lidarr?.verify_ssl || false}
-            onChange={(e) => updateField('lidarr', 'verify_ssl', e.currentTarget.checked)}
-            styles={{ label: { color: 'var(--text-secondary)' } }} />
-          <Button variant="light" color="violet" onClick={() => testMutation.mutate()} loading={testMutation.isPending}>
-            Test Connection
-          </Button>
-        </div>
-      </div>
-
-      {/* Providers */}
-      <div className="settings-section">
-        <h3>🔑 Provider API Keys</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
-          Deezer, iTunes, LRCLIB, and NetEase work without API keys. Configure keys below for additional providers.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <TextInput label="fanart.tv API Key" placeholder="Optional — for artist art"
-            value={form.fanart?.apikey || ''}
-            onChange={(e) => updateField('fanart', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="Genius API Key" placeholder="Optional — for plain lyrics"
-            value={form.genius?.apikey || ''}
-            onChange={(e) => updateField('genius', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="Musixmatch API Key" placeholder="Optional — for synced lyrics"
-            description="Free tier: 1000 requests/day. Get key at developer.musixmatch.com"
-            value={form.musixmatch?.apikey || ''}
-            onChange={(e) => updateField('musixmatch', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="TheAudioDB API Key" placeholder="Default: free test key"
-            description="Free test key '2' is used by default. Upgrade at theaudiodb.com/patreon"
-            value={form.theaudiodb?.apikey || ''}
-            onChange={(e) => updateField('theaudiodb', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="LRCLIB Instance" placeholder="https://lrclib.net"
-            description="Point at a self-hosted LRCLIB server, or leave the default"
-            value={form.lrclib?.instance || ''}
-            onChange={(e) => updateField('lrclib', 'instance', e.currentTarget.value)} styles={inputStyles} />
-        </div>
-      </div>
-
-      {/* Translation Engine */}
-      <div className="settings-section">
-        <h3>🌐 Translation Engine</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
-          Used by the lyrics editor, auto-translate, and Mass Edit bulk translation.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Select label="Engine"
-            data={[
-              { value: 'google', label: 'Google Translate (free, no key)' },
-              { value: 'deepl', label: 'DeepL (API key required)' },
-            ]}
-            value={form.translation?.engine || 'google'}
-            onChange={(v) => updateField('translation', 'engine', v || 'google')}
-            styles={inputStyles} />
-          <TextInput label="DeepL API Key" placeholder="xxxxxxxx-xxxx-...:fx"
-            description="Free-tier keys (ending in :fx) are detected automatically"
-            value={form.translation?.deepl_api_key || ''}
-            onChange={(e) => updateField('translation', 'deepl_api_key', e.currentTarget.value)} styles={inputStyles} />
-        </div>
-      </div>
-
-      {/* Notifications */}
-      <div className="settings-section">
-        <h3>🔔 Notifications</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Switch label="Enable Notifications" checked={form.notifications?.enabled || false}
-            onChange={(e) => updateField('notifications', 'enabled', e.currentTarget.checked)}
-            styles={{ label: { color: 'var(--text-secondary)' } }} />
-          <div />
-          <TextInput label="Discord Webhook URL" placeholder="https://discord.com/api/webhooks/..."
-            value={form.notifications?.discord_webhook || ''}
-            onChange={(e) => updateField('notifications', 'discord_webhook', e.currentTarget.value)} styles={inputStyles} />
-          <div />
-          <TextInput label="Telegram Bot Token" placeholder="123456:ABC-DEF..."
-            value={form.notifications?.telegram_bot_token || ''}
-            onChange={(e) => updateField('notifications', 'telegram_bot_token', e.currentTarget.value)} styles={inputStyles} />
-          <TextInput label="Telegram Chat ID" placeholder="Chat or group ID"
-            value={form.notifications?.telegram_chat_id || ''}
-            onChange={(e) => updateField('notifications', 'telegram_chat_id', e.currentTarget.value)} styles={inputStyles} />
-          <Button variant="light" color="violet" onClick={() => testNotifMutation.mutate()} loading={testNotifMutation.isPending}>
-            Send Test Notification
-          </Button>
-        </div>
-      </div>
-
-      {/* Security */}
-      <div className="settings-section">
-        <h3>🔒 Security</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
-          Configure authentication for the Lyrarr web UI and API. Changes require a restart to take effect.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Select
-            label="Authentication"
-            description="How users authenticate to Lyrarr"
-            data={[
-              { value: 'none', label: 'None (no authentication)' },
-              { value: 'form', label: 'Forms (login page)' },
-              { value: 'basic', label: 'Basic (browser popup)' },
-            ]}
-            value={form.auth?.type || 'none'}
-            onChange={(v) => updateField('auth', 'type', v === 'none' ? null : v)}
-            styles={inputStyles}
+      <div className={c.layout}>
+        <SettingsNav items={navItems} />
+        <div className={c.sections}>
+          {server}
+          <AppearanceSection />
+          <SaveBar
+            dirty={dirty}
+            saving={saveMutation.isPending}
+            onSave={handleSave}
+            onDiscard={() => setForm(baseline)}
+            message={phone ? 'Unsaved' : undefined}
+            saveLabel={phone ? 'Save' : 'Save settings'}
           />
-          <TextInput label="API Key" placeholder="Auto-generated key for external access"
-            description="Use X-API-KEY header — always works regardless of auth type"
-            value={form.auth?.apikey || ''}
-            onChange={(e) => updateField('auth', 'apikey', e.currentTarget.value)} styles={inputStyles} />
-          {form.auth?.type && (
-            <>
-              <TextInput label="Username"
-                placeholder="Admin username"
-                value={form.auth?.username || ''}
-                onChange={(e) => updateField('auth', 'username', e.currentTarget.value)} styles={inputStyles} />
-              <PasswordInput label="Password"
-                placeholder="Admin password"
-                value={form.auth?.password || ''}
-                onChange={(e) => updateField('auth', 'password', e.currentTarget.value)}
-                styles={{
-                  ...inputStyles,
-                  innerInput: { color: 'var(--text-primary)' },
-                }} />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* General */}
-      <div className="settings-section">
-        <h3>⚙️ General</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <TextInput label="Instance Name" placeholder="Lyrarr" value={form.general?.instance_name || ''}
-            onChange={(e) => updateField('general', 'instance_name', e.currentTarget.value)} styles={inputStyles} />
-          <NumberInput label="Port" min={1} max={65535} allowDecimal={false} value={form.general?.port ?? 6868}
-            onChange={(v) => updateField('general', 'port', v)} error={generalPortError} styles={inputStyles} />
-          <TextInput label="URL Base" placeholder="/lyrarr"
-            description="For reverse proxies serving Lyrarr under a subpath. Requires restart."
-            value={form.general?.base_url || ''}
-            onChange={(e) => updateField('general', 'base_url', e.currentTarget.value)} styles={inputStyles} />
-          <Select
-            label="Default Profile for New Albums"
-            description="Automatically assign this profile to newly synced albums"
-            placeholder="None (no auto-assign)"
-            clearable
-            data={(profiles || []).map((p: any) => ({ value: String(p.id), label: p.name }))}
-            value={form.general?.default_profile_id ? String(form.general.default_profile_id) : null}
-            onChange={(v) => updateField('general', 'default_profile_id', v ? Number(v) : null)}
-            styles={inputStyles}
-          />
-        </div>
-      </div>
-
-      {/* Whisper */}
-      <div className="settings-section">
-        <h3>🎤 Whisper (AI Lyrics Sync)</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: -8, marginBottom: 16 }}>
-          Settings for generating synced lyrics from plain text using audio transcription.
-          Requires <code>faster-whisper</code> (included in the Docker image).
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <Select label="Model" description="Larger = more accurate but slower"
-            data={[
-              { value: 'tiny', label: 'Tiny (~1GB RAM, fastest)' },
-              { value: 'base', label: 'Base (~1.5GB RAM, balanced)' },
-              { value: 'small', label: 'Small (~2GB RAM, better)' },
-              { value: 'medium', label: 'Medium (~5GB RAM, best)' },
-              { value: 'large-v3', label: 'Large v3 (~10GB RAM, highest)' },
-            ]}
-            value={form.metadata?.whisper?.model || 'base'}
-            onChange={(v) => {
-              setForm((prev: any) => ({
-                ...prev,
-                metadata: {
-                  ...prev.metadata,
-                  whisper: { ...prev.metadata?.whisper, model: v },
-                },
-              }));
-            }}
-            styles={inputStyles} />
-          <Select label="Device" description="GPU (cuda) is much faster if available"
-            data={[
-              { value: 'cpu', label: 'CPU' },
-              { value: 'cuda', label: 'CUDA (GPU)' },
-              { value: 'auto', label: 'Auto-detect' },
-            ]}
-            value={form.metadata?.whisper?.device || 'cpu'}
-            onChange={(v) => {
-              setForm((prev: any) => ({
-                ...prev,
-                metadata: {
-                  ...prev.metadata,
-                  whisper: { ...prev.metadata?.whisper, device: v },
-                },
-              }));
-            }}
-            styles={inputStyles} />
-          <Select label="Compute Type" description="int8 is fastest, float32 is most accurate"
-            data={[
-              { value: 'int8', label: 'int8 (fastest)' },
-              { value: 'float16', label: 'float16 (balanced)' },
-              { value: 'float32', label: 'float32 (most accurate)' },
-            ]}
-            value={form.metadata?.whisper?.compute_type || 'int8'}
-            onChange={(v) => {
-              setForm((prev: any) => ({
-                ...prev,
-                metadata: {
-                  ...prev.metadata,
-                  whisper: { ...prev.metadata?.whisper, compute_type: v },
-                },
-              }));
-            }}
-            styles={inputStyles} />
-        </div>
-      </div>
-
-      {/* Backup */}
-      <div className="settings-section">
-        <h3>💾 Backup & Restore</h3>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Button variant="light" color="violet" onClick={handleExport}>Export Backup</Button>
-          <FileButton onChange={handleImport} accept="application/json">
-            {(props) => <Button variant="light" color="grape" {...props}>Import Backup</Button>}
-          </FileButton>
         </div>
       </div>
     </div>

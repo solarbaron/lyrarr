@@ -1,0 +1,166 @@
+/* Settings (DESIGN.md 8.10) */
+
+.layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+
+/* ---------- Sub-nav ---------- */
+.nav {
+  position: sticky;
+  top: calc(var(--ly-sticky-top, 56px) + 16px);
+}
+
+.nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ly-text-2);
+  text-decoration: none;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease), color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.navItem:hover {
+  background: var(--ly-hover);
+  color: var(--ly-text);
+}
+
+.navItem[data-active] {
+  background: var(--ly-active);
+  color: var(--ly-text);
+  font-weight: 600;
+}
+
+.navDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--ly-warning);
+}
+
+.navDot[data-tone='danger'] {
+  background: var(--ly-danger);
+}
+
+.tabsRow {
+  position: sticky;
+  top: var(--ly-sticky-top, 56px);
+  z-index: var(--ly-z-sticky, 10);
+  margin: 0 calc(-1 * var(--ly-page-pad-x, 16px));
+  padding: 8px var(--ly-page-pad-x, 16px);
+  background: var(--ly-bg);
+  border-bottom: 1px solid var(--ly-border);
+}
+
+/* ---------- Sections ---------- */
+/* Block (not flex) so the sticky SaveBar keeps its full width and can stick
+   within the whole column. */
+.sections {
+  display: block;
+  min-width: 0;
+}
+
+.sections > * + * {
+  margin-top: 16px;
+}
+
+.section {
+  scroll-margin-top: calc(var(--ly-sticky-top, 56px) + 16px);
+}
+
+@media (max-width: 1023px) {
+  .section {
+    scroll-margin-top: calc(var(--ly-sticky-top, 56px) + 64px);
+  }
+}
+
+.rows {
+  margin-top: -12px;
+}
+
+.testControl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.outcome {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.outcome[data-tone='success'] {
+  background: var(--ly-success-soft);
+  color: var(--ly-text);
+}
+
+.outcome[data-tone='danger'] {
+  background: var(--ly-danger-soft);
+  color: var(--ly-text);
+}
+
+.outcome > :first-child {
+  margin-top: 3px;
+}
+
+html[data-contrast='high'] .outcome {
+  border: 1px solid currentColor;
+}
+
+.withButton {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.endButton {
+  align-self: flex-end;
+}
+
+@media (max-width: 767px) {
+  .testControl {
+    align-items: flex-start;
+  }
+
+  .endButton {
+    align-self: flex-start;
+  }
+}

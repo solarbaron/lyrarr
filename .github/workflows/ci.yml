@@ -66,7 +66,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      # `npm run build` type-checks (tsc) and writes the production bundle to
+      # `npm run build` first runs the theme guardrails (prebuild → `npm run check`:
+      # scripts/check-themes.mjs contrast/hue/token checks and scripts/check-colors.mjs,
+      # which fails on purple, gradients, palette colour names and colour literals in
+      # page code), then type-checks (tsc) and writes the production bundle to
       # lyrarr/frontend, which is committed so `python -m lyrarr` works from a
       # plain checkout.
       - name: Build

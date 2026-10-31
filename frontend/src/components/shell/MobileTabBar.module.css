@@ -1,0 +1,189 @@
+/* Mobile tab bar + job bar (DESIGN.md 6.5) */
+.bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--ly-z-tabbar);
+  height: calc(60px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex;
+  background: var(--ly-nav);
+  border-top: 1px solid var(--ly-border);
+}
+
+.tab {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--ly-text-2);
+  text-decoration: none;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.tab:focus-visible {
+  outline-offset: -3px;
+}
+
+.tab.active {
+  color: var(--ly-accent-text);
+  font-weight: 600;
+}
+
+.iconWrap {
+  position: relative;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.label {
+  white-space: nowrap;
+}
+
+.dot,
+.pip {
+  position: absolute;
+  top: -2px;
+  right: -7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ly-nav);
+}
+
+.dot {
+  background: var(--ly-text-2);
+}
+
+.pip {
+  background: var(--ly-accent);
+}
+
+.pip[data-tone="danger"] {
+  background: var(--ly-danger);
+}
+
+/* ---- Job bar ---- */
+.jobBar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--ly-z-tabbar);
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: var(--ly-raised);
+  border-top: 1px solid var(--ly-border-strong);
+  color: var(--ly-text);
+  font-size: 13px;
+}
+
+.jobIcon {
+  flex: none;
+  color: var(--ly-accent-text);
+}
+
+.jobLabel {
+  flex: 0 1 auto;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.jobCount {
+  flex: none;
+  color: var(--ly-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.jobTrack {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 32px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ly-track);
+  overflow: hidden;
+}
+
+.jobFill {
+  display: block;
+  height: 100%;
+  background: var(--ly-accent);
+  transition: width var(--ly-dur-slow) var(--ly-ease);
+}
+
+.jobIndeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: var(--ly-accent);
+  left: 0;
+  animation: ly-tab-slide 1.2s var(--ly-ease) infinite;
+}
+
+/* Always partly on-track (10% at each end), so it never reads as an empty, stalled bar. */
+@keyframes ly-tab-slide {
+  from { transform: translateX(-66.667%); }
+  to { transform: translateX(300%); }
+}
+
+/* ---- More sheet ---- */
+.sheetBody {
+  padding: 0 8px calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+.sheet {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sheetItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: var(--ly-radius-md);
+  color: var(--ly-text);
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.sheetItem:hover {
+  background: var(--ly-hover);
+}
+
+.sheetActive {
+  background: var(--ly-active);
+}
+
+.sheetActive .sheetIcon {
+  color: var(--ly-accent-text);
+}
+
+.sheetIcon {
+  width: 20px;
+  color: var(--ly-text-2);
+}
+
+.sheetContent {
+  border: 0;
+  border-top: 1px solid var(--ly-border-strong);
+  border-radius: var(--ly-radius-xl) var(--ly-radius-xl) 0 0;
+}

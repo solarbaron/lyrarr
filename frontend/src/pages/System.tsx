@@ -1,208 +1,82 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Button, Loader, Code, ScrollArea, Badge, Progress } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
-import { notifyError } from '../notify';
-import { getSystemStatus, getTasks, getLogs, getHealth, runTask, getProviderHealth, resetProviderHealth } from '../api';
-import PageHeader from '../components/PageHeader';
+import { useQuery } from '@tanstack/react-query';
+import { Tabs } from '@mantine/core';
+import { getSystemStatus, getTasks, getHealth, getProviderHealth } from '../api';
+import { PageHeader } from '../components/ui';
+import { useUrlState } from '../hooks/useUrlState';
+import { StatusTab, type SystemStatus } from './system/StatusTab';
+import { ProvidersTab } from './system/ProvidersTab';
+import { TasksTab, type Task } from './system/TasksTab';
+import { LogsTab } from './system/LogsTab';
+import { AuditTab } from './system/AuditTab';
+import type { ProviderHealthEntry, ServiceHealth } from './home/types';
+import c from './system/System.module.css';
 
-const PROVIDER_LABELS: Record<string, string> = {
-  musicbrainz: 'MusicBrainz', fanart: 'fanart.tv', deezer: 'Deezer',
-  itunes: 'iTunes', theaudiodb: 'TheAudioDB', lrclib: 'LRCLIB',
-  genius: 'Genius', musixmatch: 'Musixmatch', netease: 'NetEase',
-};
+const TABS = ['status', 'audit', 'providers', 'tasks', 'logs'] as const;
+type Tab = typeof TABS[number];
+
+/** "3.13.15" → "3.13" for the subtitle (the full version is in Status). */
+function shortVersion(v: string | undefined): string | undefined {
+  return v?.split('.').slice(0, 2).join('.');
+}
 
 export default function SystemPage() {
-  const queryClient = useQueryClient();
-  const { data: status } = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus });
-  const { data: tasks = [] } = useQuery({ queryKey: ['tasks'], queryFn: getTasks });
-  const { data: logs = [], isLoading: logsLoading } = useQuery({ queryKey: ['logs'], queryFn: getLogs });
-  const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth });
+  const [tabParam, setTab] = useUrlState<string>('tab', 'status');
+  const tab: Tab = (TABS as readonly string[]).includes(tabParam) ? tabParam as Tab : 'status';
 
-  const runTaskMutation = useMutation({
-    mutationFn: runTask,
-    onSuccess: (_, taskId) => {
-      notifications.show({ title: 'Task triggered', message: `${taskId} started`, color: 'green' });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    },
-    onError: (err, taskId) => notifyError(`Failed to run ${taskId}`, err),
-  });
-
-  const { data: providerHealth } = useQuery({
+  const { data: status } = useQuery({ queryKey: ['system-status'], queryFn: () => getSystemStatus() as Promise<SystemStatus> });
+  const tasks = useQuery({ queryKey: ['tasks'], queryFn: () => getTasks() as Promise<Task[]> });
+  const { data: health } = useQuery({ queryKey: ['health'], queryFn: () => getHealth() as Promise<Record<string, ServiceHealth>> });
+  const providerHealth = useQuery({
     queryKey: ['provider-health'],
-    queryFn: getProviderHealth,
+    queryFn: () => getProviderHealth() as Promise<{ providers?: Record<string, ProviderHealthEntry> }>,
     refetchInterval: 15000,
   });
 
-  const resetHealthMutation = useMutation({
-    mutationFn: (provider?: string) => resetProviderHealth(provider),
-    onSuccess: (_, provider) => {
-      notifications.show({ title: 'Reset', message: `Health stats reset for ${provider || 'all providers'}`, color: 'green' });
-      queryClient.invalidateQueries({ queryKey: ['provider-health'] });
-    },
-    onError: (err) => notifyError('Failed to reset provider health', err),
-  });
+  const subtitle = [
+    `Lyrarr v${status?.version || 'dev'}`,
+    status?.python_version && `Python ${shortVersion(status.python_version)}`,
+    status?.os,
+  ].filter(Boolean).join(' · ');
 
   return (
-    <div className="fade-in">
-      <PageHeader title="System" subtitle="System status, tasks, and logs" />
+    <div className="ly-page">
+      <PageHeader title="System" subtitle={subtitle} />
 
-      {/* Status */}
-      <div className="settings-section">
-        <h3>📊 Status</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Version</div>
-            <div style={{ fontWeight: 600 }}>{status?.version || 'dev'}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Python</div>
-            <div style={{ fontWeight: 600 }}>{status?.python_version || '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>OS</div>
-            <div style={{ fontWeight: 600 }}>{status?.os || '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Lidarr</div>
-            <span className={`status-badge ${health?.lidarr?.healthy ? 'available' : 'missing'}`}>
-              {health?.lidarr?.status || 'Unknown'}
-            </span>
-          </div>
-          {health?.auth && (
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Authentication</div>
-              {/* Disabled auth is a warning, not an outage. */}
-              <span className={`status-badge ${health.auth.healthy ? 'available' : 'partial'}`}>
-                {health.auth.status || 'Unknown'}
-              </span>
-            </div>
-          )}
-        </div>
-        {health?.auth && !health.auth.healthy && health.auth.error && (
-          <div role="alert" style={{
-            marginTop: 16, padding: '10px 14px', borderRadius: 10, fontSize: 13,
-            background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid rgba(250, 204, 21, 0.25)',
-          }}>
-            ⚠️ {health.auth.error}
-          </div>
-        )}
-      </div>
+      <Tabs value={tab} onChange={v => setTab((v as Tab) || 'status', { replace: false })}>
+        <Tabs.List aria-label="System sections">
+          <Tabs.Tab value="status">Status</Tabs.Tab>
+          <Tabs.Tab value="audit">Audit</Tabs.Tab>
+          <Tabs.Tab value="providers">Providers</Tabs.Tab>
+          <Tabs.Tab value="tasks">Tasks</Tabs.Tab>
+          <Tabs.Tab value="logs">Logs</Tabs.Tab>
+        </Tabs.List>
 
-      {/* Provider Health Dashboard */}
-      {providerHealth?.providers && (
-        <div className="settings-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>🏥 Provider Health</h3>
-            <Button
-              variant="subtle" color="gray" size="xs"
-              onClick={() => resetHealthMutation.mutate(undefined)}
-              loading={resetHealthMutation.isPending}
-            >
-              Reset All
-            </Button>
-          </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Provider</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Success</th>
-                <th>Failures</th>
-                <th>Streak</th>
-                <th>Last Failure</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(providerHealth.providers).map(([name, stats]: [string, any]) => (
-                <tr key={name}>
-                  <td style={{ fontWeight: 600 }}>{PROVIDER_LABELS[name] || name}</td>
-                  <td>
-                    <Badge size="xs" color={stats.type === 'lyrics' ? 'violet' : stats.type === 'cover' ? 'blue' : 'grape'} variant="light">
-                      {stats.type}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Badge size="sm" color={stats.available ? 'green' : 'red'} variant="filled">
-                      {stats.available ? 'Online' : 'Cooldown'}
-                    </Badge>
-                    {stats.disabled_until && !stats.available && (
-                      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
-                        until {new Date(stats.disabled_until).toLocaleTimeString()}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{stats.successes}</td>
-                  <td style={{ color: stats.failures > 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.failures}</td>
-                  <td style={{ color: stats.consecutive_failures >= 3 ? '#ef4444' : 'var(--text-secondary)' }}>
-                    {stats.consecutive_failures}
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {stats.last_failure ? new Date(stats.last_failure).toLocaleString() : '—'}
-                  </td>
-                  <td>
-                    {(stats.failures > 0 || !stats.available) && (
-                      <Button
-                        variant="subtle" color="violet" size="compact-xs"
-                        onClick={() => resetHealthMutation.mutate(name)}
-                      >
-                        Reset
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Tasks */}
-      <div className="settings-section">
-        <h3>⏱️ Scheduled Tasks</h3>
-        {tasks.length === 0 ? (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>No scheduled tasks</div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr><th>Task</th><th>Interval</th><th>Next Run</th><th>Action</th></tr>
-            </thead>
-            <tbody>
-              {tasks.map((task: any) => (
-                <tr key={task.job_id}>
-                  <td style={{ fontWeight: 600 }}>{task.name}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{task.interval}</td>
-                  <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{task.next_run_time}</td>
-                  <td>
-                    <Button
-                      size="xs" variant="light" color="violet"
-                      onClick={() => runTaskMutation.mutate(task.job_id)}
-                      loading={runTaskMutation.isPending}
-                    >
-                      Run Now
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Logs */}
-      <div className="settings-section">
-        <h3>📄 Logs</h3>
-        {logsLoading ? (
-          <Loader color="violet" size="sm" />
-        ) : (
-          <ScrollArea h={400} styles={{ viewport: { background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 12 } }}>
-            <Code block style={{ background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'pre-wrap' }}>
-              {logs.length > 0 ? logs.join('\n') : 'No log entries yet.'}
-            </Code>
-          </ScrollArea>
-        )}
-      </div>
+        <Tabs.Panel value="status" className={c.tabPanel}>
+          <StatusTab status={status} health={health} providers={providerHealth.data?.providers} />
+        </Tabs.Panel>
+        <Tabs.Panel value="audit" className={c.tabPanel}>
+          {tab === 'audit' && <AuditTab />}
+        </Tabs.Panel>
+        <Tabs.Panel value="providers" className={c.tabPanel}>
+          <ProvidersTab
+            providers={providerHealth.data?.providers}
+            loading={providerHealth.isLoading}
+            error={providerHealth.isError
+              ? { message: (providerHealth.error as Error)?.message, onRetry: () => providerHealth.refetch() }
+              : null}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value="tasks" className={c.tabPanel}>
+          <TasksTab
+            tasks={tasks.data ?? []}
+            loading={tasks.isLoading}
+            error={tasks.isError ? { message: (tasks.error as Error)?.message, onRetry: () => tasks.refetch() } : null}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value="logs" className={c.tabPanel}>
+          <LogsTab />
+        </Tabs.Panel>
+      </Tabs>
     </div>
   );
 }

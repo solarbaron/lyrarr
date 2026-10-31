@@ -1,0 +1,181 @@
+/* Activity drawer (DESIGN.md 6.10) */
+.content {
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet {
+  border: 0;
+  border-top: 1px solid var(--ly-border-strong);
+  border-radius: var(--ly-radius-xl) var(--ly-radius-xl) 0 0;
+}
+
+.header {
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.body {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--ly-raised);
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.section {
+  padding: 12px 20px 4px;
+}
+
+.overline {
+  padding: 8px 0 6px;
+  font-size: 11.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ly-muted);
+}
+
+/* ---- Running job ---- */
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 8px;
+  border-radius: var(--ly-radius-lg);
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border-strong);
+}
+
+.jobHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.jobTile {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ly-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ly-accent-soft);
+  color: var(--ly-accent-text);
+}
+
+.jobText {
+  flex: 1;
+  min-width: 0;
+}
+
+.jobLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.jobCurrent {
+  font-size: 12px;
+  color: var(--ly-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jobCount {
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Events ---- */
+.log {
+  padding-bottom: 16px;
+}
+
+.group + .group {
+  margin-top: 4px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 0;
+}
+
+.tile {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ly-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  background: var(--ly-neutral-soft);
+  color: var(--ly-text-2);
+}
+
+.tile[data-tone="success"] { background: var(--ly-success-soft); color: var(--ly-success); }
+.tile[data-tone="warning"] { background: var(--ly-warning-soft); color: var(--ly-warning); }
+.tile[data-tone="danger"] { background: var(--ly-danger-soft); color: var(--ly-danger); }
+.tile[data-tone="info"] { background: var(--ly-info-soft); color: var(--ly-info); }
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rowTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ly-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row[data-tone="danger"] .rowTitle {
+  color: var(--ly-danger);
+  /* Errors wrap in full: touch users can't hover for the tooltip. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.provider {
+  font-size: 12px;
+  color: var(--ly-muted);
+}
+
+.time {
+  flex: none;
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}

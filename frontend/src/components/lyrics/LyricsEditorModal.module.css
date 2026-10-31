@@ -1,0 +1,444 @@
+/* LyricsEditorModal (DESIGN.md 8.13) */
+
+.header {
+  gap: 16px;
+}
+
+.titleWrap {
+  display: flex;
+  flex-direction: column;
+  /* basis 0: a long context line ellipsizes instead of pushing the close button down */
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.context {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ly-text-2);
+}
+
+.format {
+  flex: none;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  font-size: 13.5px;
+  color: var(--ly-text-2);
+}
+
+/* ---------- Workspace: editor | side panel ---------- */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.editorFrame {
+  min-width: 0;
+  border: 1px solid var(--ly-control);
+  border-radius: 8px;
+  background: var(--ly-surface);
+  overflow: hidden;
+  transition: border-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.editorFrame:focus-within {
+  border-color: var(--ly-focus);
+}
+
+.editorScroll {
+  display: flex;
+  align-items: flex-start;
+  height: min(58vh, 560px);
+  overflow: auto;
+}
+
+.gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  min-width: 44px;
+  padding: 12px 10px 12px 8px;
+  border-right: 1px solid var(--ly-border);
+  background: var(--ly-surface);
+  font-family: var(--ly-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: right;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.editor {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.editorInput {
+  --input-bd: transparent;
+  --input-bd-focus: transparent;
+  min-height: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--ly-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ly-text);
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: hidden;
+  resize: none;
+}
+
+.editorInput:focus,
+.editorInput:focus-visible {
+  outline: none;
+}
+
+/* ---------- Side panel ---------- */
+.side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: calc(min(58vh, 560px) + 2px);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  background: var(--ly-surface);
+  overflow: hidden;
+}
+
+.sideTabs {
+  flex: none;
+  flex-wrap: nowrap;
+  padding: 0 6px;
+}
+
+.sideTabs :global(.mantine-Tabs-tab) {
+  padding-inline: 8px;
+}
+
+.sideTabs :global(.mantine-Tabs-tabSection) {
+  width: 12px;
+  margin-inline-end: 6px;
+}
+
+.sidePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.explain {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ly-text-2);
+}
+
+.code {
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ly-neutral-soft);
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  color: var(--ly-text);
+}
+
+.fieldLabel {
+  margin-bottom: -6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ly-text-2);
+}
+
+.panelAction {
+  align-self: flex-start;
+}
+
+.note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ly-muted);
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  padding-top: 12px;
+  border-top: 1px solid var(--ly-border);
+}
+
+.resultTitle {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.resultText {
+  margin: 8px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ly-neutral-soft);
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ly-text);
+  white-space: pre-wrap;
+}
+
+.result .resultText {
+  margin-top: 0;
+}
+
+/* ---------- Synced preview ---------- */
+.preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: -6px -8px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.resultPreview {
+  flex: none;
+  max-height: 260px;
+  margin: 0;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--ly-neutral-soft);
+}
+
+.line {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: var(--ly-text-2);
+  cursor: pointer;
+  transition: background-color var(--ly-dur-fast) var(--ly-ease);
+}
+
+.line[data-static] {
+  cursor: default;
+}
+
+.line:not([data-static]):hover {
+  background: var(--ly-hover);
+}
+
+.line[data-active] {
+  background: var(--ly-accent-soft);
+  color: var(--ly-text);
+  font-weight: 600;
+}
+
+.ts {
+  flex: none;
+  font-family: var(--ly-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lineText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.previewEmpty {
+  font-size: 13px;
+  color: var(--ly-muted);
+}
+
+/* ---------- Versions ---------- */
+.versions {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version + .version {
+  border-top: 1px solid var(--ly-border);
+}
+
+.versionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.versionInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.versionDate {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.versionMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.versionReplaced {
+  color: var(--ly-muted);
+}
+
+.versionFrom {
+  font-size: 12.5px;
+  color: var(--ly-muted);
+}
+
+.chevron {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--ly-dur-fast) var(--ly-ease);
+}
+
+.chevron[data-open] {
+  transform: rotate(180deg);
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 16px;
+  border-top: 1px solid var(--ly-border);
+}
+
+.footerEnd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--ly-muted);
+  white-space: nowrap;
+}
+
+.transport {
+  flex: none;
+}
+
+/* Full screen (< 1024px): the footer stays at the bottom while the page scrolls */
+.footer[data-full-screen] {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-top: 12px;
+  background: var(--ly-raised);
+}
+
+/* Full-screen below 1024px: stack the editor over the side panel */
+@media (max-width: 1023px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editorScroll {
+    height: 46vh;
+  }
+
+  .side {
+    height: auto;
+    min-height: 320px;
+    /* clears the sticky footer (two button rows on phones) when a tab scrolls it into view */
+    scroll-margin-top: 12px;
+    scroll-margin-bottom: 128px;
+  }
+
+  .hint {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .format {
+    order: 3;
+    /* the header's right padding is 5px short of the body's (it optically aligns the ✕) */
+    flex: 1 1 calc(100% - 5px);
+    min-width: 0;
+    margin-inline-end: 5px;
+  }
+
+  .sideTabs {
+    flex-wrap: nowrap;
+  }
+
+  .sideTabs :global(.mantine-Tabs-tabSection) {
+    display: none;
+  }
+}

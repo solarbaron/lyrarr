@@ -2,7 +2,9 @@ import axios, { AxiosError } from 'axios';
 import type {
   Artist, Album, Track, Profile, HistoryEntry,
   PaginatedResponse, PaginationParams, DashboardStats,
-  CoverResult, LyricsResult,
+  CoverResult, LyricsResult, LyricsVersion,
+  AuditCheck, AuditIssue, AuditMode, AuditRun, AuditRunning, AuditSummary, StartAuditRunBody,
+  InstrumentalAction, InstrumentalBulkResult, InstrumentalOverride, InstrumentalRow, InstrumentalView,
 } from './types';
 import { BASE_URL } from './baseUrl';
 
@@ -113,7 +115,7 @@ export const batchTranslate = (data: { albumIds?: number[]; artistIds?: number[]
 export const batchSyncGenerate = (data: { albumIds?: number[]; artistIds?: number[]; trackIds?: number[] }) =>
   api.post('/metadata/lyrics/batch-sync-generate', data).then(r => r.data);
 export const getLyricsVersions = (trackId: number) =>
-  api.get(`/metadata/lyrics/versions/${trackId}`).then(r => r.data);
+  api.get(`/metadata/lyrics/versions/${trackId}`).then(r => r.data as { versions?: LyricsVersion[] });
 export const restoreLyricsVersion = (trackId: number, versionId: number) =>
   api.post(`/metadata/lyrics/versions/${trackId}`, { versionId }).then(r => r.data);
 export const getLyricsBlacklist = (trackId: number) =>
@@ -161,6 +163,9 @@ export const getWantedLyrics = (params?: PaginationParams & { search?: string })
 export const getWantedUntimed = (params?: PaginationParams & { search?: string }) =>
   api.get('/wanted/untimed', { params }).then(r => r.data as PaginatedResponse<Track & { artistName?: string; albumTitle?: string }>);
 export const getWantedStats = () => api.get('/wanted/stats').then(r => r.data);
+/** Wanted ▸ Instrumental review (PLAN §1.8). `why` filters the cleared view. */
+export const getWantedInstrumental = (params: PaginationParams & { view: InstrumentalView; reason?: string; why?: string }) =>
+  api.get('/wanted/instrumental', { params }).then(r => r.data as PaginatedResponse<InstrumentalRow>);
 
 // ---------- System ----------
 export const getTasks = () => api.get('/system/tasks').then(r => r.data);
@@ -183,10 +188,24 @@ export const getLanguageStats = () => api.get('/metadata/lyrics/language-stats')
 export const getWantedUndetected = (params?: PaginationParams & { search?: string }) =>
   api.get('/wanted/undetected', { params }).then(r => r.data as PaginatedResponse<Track & { artistName?: string; albumTitle?: string }>);
 export const importSidecarLyrics = () => api.post('/metadata/lyrics/import-sidecar').then(r => r.data);
-export const auditLyricsState = () => api.post('/metadata/lyrics/audit').then(r => r.data);
+/** Legacy endpoint: now starts a small apply run of the audit and returns `{message, run_id}`. */
+export const auditLyricsState = () => api.post('/metadata/lyrics/audit', {}).then(r => r.data as { message?: string; run_id?: number });
 export const getProviderHealth = () => api.get('/metadata/providers/health').then(r => r.data);
 export const resetProviderHealth = (provider?: string) => api.post('/metadata/providers/health', { provider }).then(r => r.data);
 export const updateTrack = (id: number, data: Record<string, unknown>) => api.put(`/tracks/${id}`, data).then(r => r.data);
+/**
+ * The user's instrumental decision for one track (PLAN §1.8). 'never' clears a flag
+ * (and with `search` queues a lyrics search); 'always' marks it instrumental and
+ * answers 409 `user_lyrics` for saved/translated/generated lyrics unless `force`.
+ */
+export const setInstrumentalOverride = (
+  trackId: number,
+  override: InstrumentalOverride | null,
+  opts: { search?: boolean; force?: boolean } = {},
+) => api.put(`/tracks/${trackId}`, { instrumental_override: override, ...opts })
+  .then(r => r.data as { track?: Track; queued?: boolean; message?: string });
+export const bulkInstrumental = (data: { trackIds: number[]; action: InstrumentalAction; search?: boolean; force?: boolean }) =>
+  api.post('/tracks/instrumental', data).then(r => r.data as InstrumentalBulkResult);
 export const updateArtist = (id: number, data: Record<string, unknown>) => api.put(`/artists/${id}`, data).then(r => r.data);
 export const getTrackStreamUrl = (trackId: number) => `${BASE_URL}/api/tracks/${trackId}/stream`;
 export const getEventsUrl = () => `${BASE_URL}/api/events`;
@@ -198,6 +217,39 @@ export const validateTrackLrc = (trackId: number) =>
   api.get(`/metadata/lyrics/validate-lrc/${trackId}`).then(r => r.data);
 export const repairTrackLrc = (trackId: number) =>
   api.post(`/metadata/lyrics/validate-lrc/${trackId}`).then(r => r.data);
+
+// ---------- Library audit (PLAN §1.8) ----------
+export const getAuditChecks = () =>
+  api.get('/audit/checks').then(r => r.data as { checks: AuditCheck[]; running: AuditRunning | null });
+export const startAuditRun = (body: StartAuditRunBody) =>
+  api.post('/audit/runs', body).then(r => r.data as { run_id: number; message?: string });
+export const getAuditRuns = (limit = 10) =>
+  api.get('/audit/runs', { params: { limit } }).then(r => r.data as { data: AuditRun[] });
+/** Latest run (optionally of one mode); null when there is none (404). */
+export const getLatestAuditRun = (mode?: AuditMode) =>
+  api.get('/audit/runs/latest', { params: mode ? { mode } : undefined })
+    .then(r => r.data as AuditRun)
+    .catch((err) => {
+      if (err?.response?.status === 404) return null;
+      throw err;
+    });
+export const getAuditRun = (id: number) => api.get(`/audit/runs/${id}`).then(r => r.data as AuditRun);
+export const getAuditIssues = (runId: number, params: {
+  check?: string; status?: string; severity?: string; search?: string; page?: number; pageSize?: number;
+}) => api.get(`/audit/runs/${runId}/issues`, { params }).then(r => r.data as PaginatedResponse<AuditIssue>);
+/**
+ * `checks`: the auto issues of those checks; `issueIds`: any auto or review issue; `actions`: an
+ * alternative repair per issue id (from `fix.alternatives`). Starts a new apply run.
+ */
+export const applyAuditRun = (runId: number, body: { checks?: string[]; issueIds?: number[]; actions?: Record<number, string> }) =>
+  api.post(`/audit/runs/${runId}/apply`, body).then(r => r.data as { run_id: number; message?: string });
+export const cancelAuditRun = (runId: number) =>
+  api.post(`/audit/runs/${runId}/cancel`, {}).then(r => r.data as { cancelled: boolean });
+export const ignoreAuditIssues = (issueIds: number[]) =>
+  api.post('/audit/ignore', { issueIds }).then(r => r.data as { ignored?: number; message?: string });
+export const unignoreAuditIssue = (checkId: string, entityKey: string) =>
+  api.post('/audit/unignore', { checkId, entityKey }).then(r => r.data);
+export const getAuditSummary = () => api.get('/audit/summary').then(r => r.data as AuditSummary);
 
 // ---------- Search ----------
 export const globalSearch = (q: string, signal?: AbortSignal) => api.get('/search', { params: { q }, signal }).then(r => r.data);

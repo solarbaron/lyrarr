@@ -1,16 +1,13 @@
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import {
-  faMusic, faCompactDisc, faUser, faClockRotateLeft,
-  faMagnifyingGlass, faGear, faServer, faHouse, faIdBadge, faBars, faXmark, faRightFromBracket,
-  faLayerGroup
-} from '@fortawesome/free-solid-svg-icons';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Button, Loader } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { getAuthStatus, authLogout, AUTH_EXPIRED_EVENT } from './api';
 import { EventsProvider } from './events';
+import { JobsProvider } from './jobs';
 import ErrorBoundary from './components/ErrorBoundary';
+import { AppShell } from './components/shell/AppShell';
+import boot from './components/shell/Boot.module.css';
 
 // Lazy-loaded pages (code-split)
 const ArtistsPage = lazy(() => import('./pages/Artists'));
@@ -25,11 +22,8 @@ const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const ProfilesPage = lazy(() => import('./pages/Profiles'));
 const MassEditPage = lazy(() => import('./pages/MassEdit'));
 const LoginPage = lazy(() => import('./pages/Login'));
-
-// Always-loaded components
-import ActivityFeed from './components/ActivityFeed';
-import SearchBar from './components/SearchBar';
-import ThemeToggle from './components/ThemeToggle';
+// Dev-only component gallery (DESIGN.md 7); tree-shaken from production builds.
+const UiGalleryPage = import.meta.env.DEV ? lazy(() => import('./pages/UiGallery')) : null;
 
 // Backoff between /auth/status attempts while the server is unreachable
 // (e.g. a reverse proxy answering 502 during a container restart).
@@ -38,11 +32,14 @@ const STATUS_RETRY_DELAYS = [1000, 2000, 4000, 8000, 15000];
 export default function App() {
   const location = useLocation();
   const queryClient = useQueryClient();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [authType, setAuthType] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | undefined>(undefined);
   const [statusAttempts, setStatusAttempts] = useState(0);
+  // Why the last /auth/status attempt failed: the server answered 429 (its shared
+  // rate limiter) or it couldn't be reached at all.
+  const [statusBusy, setStatusBusy] = useState(false);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const checking = useRef(false);
 
@@ -57,10 +54,12 @@ export default function App() {
       const data = await getAuthStatus();
       setAuthType(data.authType);
       setAuthenticated(!!data.authenticated);
+      setUsername(data.username || undefined);
       setAuthChecked(true);
       setStatusAttempts(0);
       checking.current = false;
-    } catch {
+    } catch (err) {
+      setStatusBusy((err as { response?: { status?: number } })?.response?.status === 429);
       setStatusAttempts(attempt + 1);
       const delay = STATUS_RETRY_DELAYS[Math.min(attempt, STATUS_RETRY_DELAYS.length - 1)];
       retryTimer.current = setTimeout(() => checkAuth(attempt + 1), delay);
@@ -80,38 +79,38 @@ export default function App() {
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler);
   }, [checkAuth]);
 
-  // Close sidebar on navigation (mobile)
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [location.pathname]);
-
   const handleLogin = () => {
     setAuthenticated(true);
     // Drop anything cached (or failed) while signed out.
     queryClient.resetQueries();
+    // Pick up the signed-in username for the account menu.
+    getAuthStatus().then(data => setUsername(data.username || undefined)).catch(() => {});
   };
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
       await authLogout();
     } catch {
       // Signing out locally is still the right outcome.
     }
     setAuthenticated(false);
+    setUsername(undefined);
     queryClient.clear();
-  };
+  }, [queryClient]);
 
   // Show loading while checking auth (and while the server is unreachable)
   if (!authChecked) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-primary)' }}>
-        <Loader color="violet" size="lg" />
+      <div className={boot.screen}>
+        <Loader size="lg" aria-label="Connecting to Lyrarr" />
         {statusAttempts > 0 && (
           <>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 14 }} role="status">
-              Can't reach the Lyrarr server — retrying…
+            <div className={boot.message} role="status">
+              {statusBusy
+                ? 'The Lyrarr server is busy (too many requests) — retrying…'
+                : "Can't reach the Lyrarr server — retrying…"}
             </div>
-            <Button variant="subtle" color="violet" size="xs" onClick={() => { checking.current = false; checkAuth(); }}>
+            <Button variant="subtle" color="gray" size="xs" onClick={() => { checking.current = false; checkAuth(); }}>
               Retry now
             </Button>
           </>
@@ -123,159 +122,36 @@ export default function App() {
   // Show login page if form auth is enabled and not authenticated
   if (authType === 'form' && !authenticated) {
     return (
-      <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Loader color="violet" /></div>}>
+      <Suspense fallback={<div className={boot.screen}><Loader /></div>}>
         <LoginPage onLogin={handleLogin} />
       </Suspense>
     );
   }
 
-  const navItems = [
-    { label: 'Dashboard', icon: faHouse, path: '/' },
-    { label: 'Artists', icon: faUser, path: '/artists' },
-    { label: 'Albums', icon: faCompactDisc, path: '/albums' },
-  ];
-
-  const metadataItems = [
-    { label: 'Wanted', icon: faMagnifyingGlass, path: '/wanted' },
-    { label: 'History', icon: faClockRotateLeft, path: '/history' },
-  ];
-
-  const bulkItems = [
-    { label: 'Mass Edit', icon: faLayerGroup, path: '/bulk' },
-  ];
-
-  const systemItems = [
-    { label: 'Profiles', icon: faIdBadge, path: '/profiles' },
-    { label: 'Settings', icon: faGear, path: '/settings' },
-    { label: 'System', icon: faServer, path: '/system' },
-  ];
-
   return (
     <EventsProvider>
-    <div className="app-layout">
-      {/* Mobile hamburger */}
-      <button
-        className="mobile-hamburger"
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        aria-label={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
-        aria-expanded={sidebarOpen}
-      >
-        <FontAwesomeIcon icon={sidebarOpen ? faXmark : faBars} />
-      </button>
-
-      {/* Mobile backdrop */}
-      {sidebarOpen && <div className="sidebar-backdrop" aria-hidden="true" onClick={() => setSidebarOpen(false)} />}
-
-      <nav className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Main navigation">
-        <div className="sidebar-header">
-          <div className="sidebar-logo">
-            <div className="sidebar-logo-icon">
-              <FontAwesomeIcon icon={faMusic} />
-            </div>
-            <h1>Lyrarr</h1>
-          </div>
-        </div>
-
-        <SearchBar />
-
-        <div className="sidebar-nav">
-          <div className="sidebar-section-label">Library</div>
-          {navItems.map(item => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              end={item.path === '/'}
-            >
-              <span className="nav-link-icon">
-                <FontAwesomeIcon icon={item.icon} />
-              </span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="sidebar-section-label">Metadata</div>
-          {metadataItems.map(item => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-            >
-              <span className="nav-link-icon">
-                <FontAwesomeIcon icon={item.icon} />
-              </span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="sidebar-section-label">Bulk Actions</div>
-          {bulkItems.map(item => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-            >
-              <span className="nav-link-icon">
-                <FontAwesomeIcon icon={item.icon} />
-              </span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="sidebar-section-label">System</div>
-          {systemItems.map(item => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-            >
-              <span className="nav-link-icon">
-                <FontAwesomeIcon icon={item.icon} />
-              </span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </div>
-
-        <div className="sidebar-footer">
-          <ThemeToggle />
-          {authType === 'form' && (
-            <Button
-              variant="subtle"
-              color="gray"
-              size="xs"
-              leftSection={<FontAwesomeIcon icon={faRightFromBracket} />}
-              onClick={handleLogout}
-              style={{ marginTop: 8, width: '100%' }}
-            >
-              Sign Out
-            </Button>
-          )}
-        </div>
-      </nav>
-
-      <main className="main-content">
-        <ErrorBoundary resetKey={location.pathname}>
-        <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}><Loader color="var(--accent)" /></div>}>
-          <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/artists" element={<ArtistsPage />} />
-            <Route path="/artists/:artistId" element={<ArtistDetailPage />} />
-            <Route path="/albums" element={<AlbumsPage />} />
-            <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
-            <Route path="/wanted" element={<WantedPage />} />
-            <Route path="/bulk" element={<MassEditPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/profiles" element={<ProfilesPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/system" element={<SystemPage />} />
-          </Routes>
-        </Suspense>
-        </ErrorBoundary>
-      </main>
-
-      <ActivityFeed />
-    </div>
+      <JobsProvider>
+        <AppShell authType={authType} username={username} onLogout={handleLogout}>
+          <ErrorBoundary resetKey={location.pathname}>
+            <Suspense fallback={<div className={boot.route}><Loader /></div>}>
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/artists" element={<ArtistsPage />} />
+                <Route path="/artists/:artistId" element={<ArtistDetailPage />} />
+                <Route path="/albums" element={<AlbumsPage />} />
+                <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
+                <Route path="/wanted" element={<WantedPage />} />
+                <Route path="/bulk" element={<MassEditPage />} />
+                <Route path="/history" element={<HistoryPage />} />
+                <Route path="/profiles" element={<ProfilesPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/system" element={<SystemPage />} />
+                {UiGalleryPage && <Route path="/__ui" element={<UiGalleryPage />} />}
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
+        </AppShell>
+      </JobsProvider>
     </EventsProvider>
   );
 }

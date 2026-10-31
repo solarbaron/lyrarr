@@ -1,0 +1,299 @@
+/* Global element styles for Lyrarr (DESIGN.md 4, 5.7).
+   Colours come only from the --ly-* tokens that ThemeProvider writes inline on <html>.
+   The only colour literal allowed here is the .ly-sleeve art shadow (4.4). */
+
+/* ---------- Scales ---------- */
+:root {
+  /* spacing (4.2) */
+  --ly-space-1: 4px;
+  --ly-space-2: 8px;
+  --ly-space-3: 12px;
+  --ly-space-4: 16px;
+  --ly-space-5: 20px;
+  --ly-space-6: 24px;
+  --ly-space-8: 32px;
+  --ly-space-10: 40px;
+  --ly-space-14: 56px;
+
+  /* radii (4.3) */
+  --ly-radius-xs: 4px;
+  --ly-radius-sm: 6px;
+  --ly-radius-md: 8px;
+  --ly-radius-lg: 12px;
+  --ly-radius-xl: 16px;
+  --ly-radius-pill: 999px;
+
+  /* type (4.1) */
+  --ly-font: Inter, "Noto Sans CJK JP", "Noto Sans JP", "Hiragino Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ly-font-mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* motion (4.5) */
+  --ly-dur-fast: 120ms;
+  --ly-dur-base: 180ms;
+  --ly-dur-slow: 240ms;
+  --ly-ease: cubic-bezier(.2, .8, .2, 1);
+
+  /* z-index (4.4) */
+  --ly-z-sticky: 10;
+  --ly-z-topbar: 100;
+  --ly-z-sidebar: 110;
+  --ly-z-bulkbar: 150;
+  --ly-z-tabbar: 160;
+  --ly-z-modal: 200;
+  --ly-z-palette: 210;
+  --ly-z-toast: 1000;
+
+  /* layout */
+  --ly-topbar-h: 56px;
+  --ly-sticky-top: 56px;
+  --ly-bottom-reserved: 0px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --ly-topbar-h: 52px;
+    --ly-sticky-top: 52px;
+  }
+}
+
+/* ---------- Density (2.5) ---------- */
+:root,
+[data-density="comfortable"] {
+  --ly-row-h: 52px;
+  --ly-thumb: 40px;
+  --ly-body: 14px;
+  --ly-card-pad: 20px;
+}
+
+[data-density="compact"] {
+  --ly-row-h: 40px;
+  --ly-thumb: 28px;
+  --ly-body: 13px;
+  --ly-card-pad: 16px;
+}
+
+/* ---------- Motion (4.5) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ly-dur-fast: 0ms;
+    --ly-dur-base: 0ms;
+    --ly-dur-slow: 0ms;
+  }
+}
+
+html[data-motion="reduce"] {
+  --ly-dur-fast: 0ms;
+  --ly-dur-base: 0ms;
+  --ly-dur-slow: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html[data-motion="reduce"] *,
+html[data-motion="reduce"] *::before,
+html[data-motion="reduce"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ---------- Document ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Element margins only: an unlayered `* { padding: 0 }` would beat Mantine's layered styles. */
+h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd {
+  margin: 0;
+}
+
+html,
+body {
+  background: var(--ly-bg);
+  color: var(--ly-text);
+}
+
+body {
+  margin: 0;
+  font-family: var(--ly-font);
+  font-size: var(--ly-body);
+  line-height: 1.5;
+  font-feature-settings: 'cv11', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+[data-density="compact"] body {
+  line-height: 1.45;
+}
+
+::selection {
+  background: var(--ly-selection);
+  color: var(--ly-text);
+}
+
+/* Scrollbars: thumb only, track transparent */
+html {
+  scrollbar-color: var(--ly-scrollbar) transparent;
+  scrollbar-width: thin;
+}
+
+* {
+  scrollbar-color: var(--ly-scrollbar) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ly-scrollbar);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ly-scrollbar-hover);
+  background-clip: content-box;
+}
+
+/* ---------- Focus (4.6) ---------- */
+:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 2px;
+}
+
+html[data-contrast="high"] :focus-visible {
+  outline-width: 3px;
+  outline-offset: 2px;
+}
+
+.mantine-Input-input:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+}
+
+tr[data-cursor="true"] {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: -2px;
+}
+
+/* ---------- High contrast (3.1) ---------- */
+/* Text links (Anchor, .ly-link) are always underlined; nav items, tiles and
+   row links that are links only structurally are not. */
+html[data-contrast="high"] .ly-link,
+html[data-contrast="high"] .mantine-Anchor-root {
+  text-decoration: underline;
+}
+
+html[data-contrast="high"] .ly-chip {
+  border: 1px solid currentColor;
+}
+
+html[data-contrast="high"] .mantine-Popover-dropdown,
+html[data-contrast="high"] .mantine-Menu-dropdown,
+html[data-contrast="high"] .mantine-Tooltip-tooltip,
+html[data-contrast="high"] .mantine-Modal-content,
+html[data-contrast="high"] .mantine-Drawer-content,
+html[data-contrast="high"] .mantine-Notification-root {
+  box-shadow: none;
+  border-color: var(--ly-border-strong);
+}
+
+/* ---------- Utilities ---------- */
+.num,
+td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Plain text link (for <Link> / <a> outside Mantine's Anchor) */
+.ly-link {
+  color: var(--ly-accent-text);
+  text-decoration: none;
+}
+
+.ly-link:hover {
+  text-decoration: underline;
+}
+
+.ly-mono {
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.ly-overline {
+  font-size: 11.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ly-muted);
+}
+
+/* Album/artist art sits above the page like a record sleeve (4.4). */
+.ly-sleeve {
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, .55), 0 0 0 1px var(--ly-border);
+}
+
+html[data-contrast="high"] .ly-sleeve {
+  box-shadow: 0 0 0 1px var(--ly-border-strong);
+}
+
+/* Empty meter / progress track at 0% */
+.ly-hatch {
+  background: repeating-linear-gradient(135deg, var(--ly-track) 0 4px, transparent 4px 8px);
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cjk,
+:lang(ja) {
+  letter-spacing: 0;
+}
+
+/* Skeleton pulse (4.5): 1.4s opacity 0.55 -> 1 */
+@keyframes ly-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.ly-pulse {
+  animation: ly-pulse 1.4s var(--ly-ease) infinite;
+}
+
+/* Toasts sit above the bulk bar / mobile tab bar (5.3, 6.11). */
+.mantine-Notifications-root[data-position^="bottom"] {
+  bottom: calc(16px + var(--ly-bottom-reserved, 0px));
+}

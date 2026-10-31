@@ -1,0 +1,244 @@
+/* Artist detail + Album detail (DESIGN.md 8.3, 8.5) */
+
+/* Main column + right-hand panels; panels stack under the main column < 1200px */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.layout[data-wide-side] {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+@media (max-width: 1199px) {
+  .layout,
+  .layout[data-wide-side] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.main {
+  min-width: 0;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Panel header tools: view tabs + view toggle */
+.panelTools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.panelTabsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.panelTabsRow .panelTools {
+  justify-content: flex-start;
+}
+
+.gridWrap {
+  padding: 20px;
+}
+
+@media (max-width: 767px) {
+  .gridWrap {
+    padding: 16px;
+  }
+}
+
+/* Hero byline pieces */
+.sep {
+  color: var(--ly-muted);
+}
+
+.path {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.artistLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ly-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.artistLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:global(html[data-contrast='high']) .artistLink {
+  text-decoration: underline;
+}
+
+/* Settings panel fields */
+.field + .field {
+  margin-top: 16px;
+}
+
+.source {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ly-muted);
+}
+
+/* Album detail: Status panel */
+.statusRows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.meterRow {
+  margin-top: 14px;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.legendCount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-text);
+}
+
+.legendItem[data-zero] .legendCount {
+  color: var(--ly-muted);
+}
+
+.swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.swatch[data-tone='success'] { background: var(--ly-success); }
+.swatch[data-tone='info'] { background: var(--ly-info); }
+.swatch[data-tone='neutral'] { background: var(--ly-muted); }
+
+.legendIcon {
+  flex: none;
+  width: 8px;
+  font-size: 9px;
+  color: var(--ly-text-2);
+}
+
+.ring {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ly-text-2);
+}
+
+/* Folder panel */
+.folder {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.folderPath {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ly-text-2);
+  overflow-wrap: anywhere;
+}
+
+/* Track list */
+.trackNo {
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-muted);
+  font-size: 13px;
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-text-2);
+  font-size: 13px;
+}
+
+.disc {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ly-muted);
+}
+
+.chipCell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.skipMessage p {
+  margin: 0;
+}
+
+.skipMessage p + p {
+  margin-top: 8px;
+  color: var(--ly-text-2);
+}
+
+/* Mobile track cards: the duration sits after the lyrics chip on the status line */
+span:has(> .time) {
+  order: 1;
+}

@@ -1,0 +1,477 @@
+/* System › Audit (PLAN §5.2). Tokens only. */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* ---------- Last check ---------- */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.summaryHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.errorText {
+  font-size: 13px;
+  color: var(--ly-danger);
+  overflow-wrap: anywhere;
+}
+
+/* Failed fixes in an otherwise finished run (status fg as plain text: ≥ 4.5 in every theme). */
+.warnText {
+  color: var(--ly-warning);
+}
+
+.severity {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, max-content));
+  gap: 6px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--ly-text-2);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.legendCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--ly-text);
+  font-weight: 500;
+}
+
+.legendItem[data-zero] .legendCount {
+  color: var(--ly-muted);
+  font-weight: 400;
+}
+
+.swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.swatch[data-tone='danger'] { background: var(--ly-danger); }
+.swatch[data-tone='warning'] { background: var(--ly-warning); }
+.swatch[data-tone='info'] { background: var(--ly-info); }
+.swatch[data-tone='neutral'] { background: var(--ly-muted); }
+
+/* ---------- Running ---------- */
+.running {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.runningHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runningTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.runningPct {
+  font-size: 13px;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.runningCheck {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.runningCheckTitle {
+  font-size: 13.5px;
+  color: var(--ly-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.runningStep {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Report ---------- */
+.reportBar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.reportFilters {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.checkTable tr[data-zero] .checkTitle {
+  color: var(--ly-text-2);
+}
+
+.sevCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chevron svg {
+  transition: transform var(--ly-dur-fast) var(--ly-ease);
+}
+
+.chevron[data-open] svg {
+  transform: rotate(90deg);
+}
+
+.checkCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 0;
+}
+
+.checkTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.checkTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ly-text);
+}
+
+.checkDesc {
+  font-size: 12.5px;
+  color: var(--ly-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.countsMuted {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 13px;
+  color: var(--ly-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Issues (expanded check) ---------- */
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 8px;
+  border-left: 3px solid var(--ly-border-strong);
+  margin-left: 12px;
+  min-width: 0;
+}
+
+.issuesNote {
+  margin: 4px 12px 0;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.cellText {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ly-text-2);
+  font-size: 13px;
+}
+
+.fileCell {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.pathTip {
+  font-family: var(--ly-font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--ly-muted);
+}
+
+.text2 {
+  color: var(--ly-text-2);
+}
+
+.confirmBody p {
+  margin: 0 0 8px;
+}
+
+.confirmBody p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- Banners, history ---------- */
+.bannerLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.shown {
+  color: var(--ly-muted);
+  font-weight: 400;
+}
+
+.emptyLine {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--ly-muted);
+}
+
+/* ---------- Run options ---------- */
+.fieldLabel {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ly-text);
+}
+
+.fieldHint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ly-muted);
+}
+
+.optionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.segmented {
+  align-self: flex-start;
+}
+
+.limit {
+  max-width: 240px;
+  margin-left: 32px;
+}
+
+.checkPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px 4px 4px 0;
+}
+
+.checkGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.checkGroup legend {
+  margin-bottom: 6px;
+}
+
+.checkLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Compare ---------- */
+.compare {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.compareMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.compareStats {
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.compareText,
+.diff {
+  margin: 0;
+  max-height: min(60vh, 560px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--ly-border);
+  border-radius: 8px;
+  background: var(--ly-surface);
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ly-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff {
+  list-style: none;
+  padding: 6px 0;
+}
+
+.diffLine {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.diffLine[data-kind='removed'] {
+  background: var(--ly-danger-soft);
+}
+
+.diffLine[data-kind='added'] {
+  background: var(--ly-success-soft);
+}
+
+.diffLine[data-kind='same'] .diffText {
+  color: var(--ly-text-2);
+}
+
+.diffMark {
+  flex: none;
+  width: 1ch;
+  color: var(--ly-muted);
+  user-select: none;
+}
+
+.diffLine[data-kind='removed'] .diffMark { color: var(--ly-danger); }
+.diffLine[data-kind='added'] .diffMark { color: var(--ly-success); }
+
+.diffText {
+  min-width: 0;
+}
+
+.compareFooter {
+  margin-top: 4px;
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--ly-text-2);
+  font-size: 13px;
+}
+
+@media (max-width: 767px) {
+  .legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reportBar {
+    padding: 12px;
+  }
+
+  .issues {
+    margin-left: 0;
+    border-left: 0;
+  }
+}

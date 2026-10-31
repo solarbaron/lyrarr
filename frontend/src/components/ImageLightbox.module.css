@@ -1,0 +1,97 @@
+/* ImageLightbox (DESIGN.md 8.18) */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  /* Above modals (the cover picker opens previews on top of its modal) */
+  z-index: calc(var(--ly-z-palette, 210) + 10);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ly-bg) 94%, transparent);
+  backdrop-filter: blur(4px);
+  cursor: zoom-out;
+}
+
+:global(html[data-contrast='high']) .backdrop {
+  backdrop-filter: none;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 100%;
+  cursor: default;
+}
+
+.image {
+  display: block;
+  max-width: min(92vw, 100%);
+  max-height: 84vh;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.image:not([data-loaded]) {
+  position: absolute;
+  opacity: 0;
+}
+
+.loading {
+  display: grid;
+  place-items: center;
+  width: min(360px, 80vw);
+  aspect-ratio: 1;
+}
+
+.fallback {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  width: min(360px, 80vw);
+  aspect-ratio: 1;
+  border-radius: 8px;
+  background: var(--ly-neutral-soft);
+  color: var(--ly-muted);
+  font-size: 13px;
+}
+
+.fallback svg {
+  font-size: 64px;
+}
+
+.caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 640px);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--ly-raised);
+  border: 1px solid var(--ly-border-strong);
+  color: var(--ly-text);
+  font-size: 13px;
+  box-shadow: var(--ly-shadow);
+}
+
+.captionText {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dims {
+  flex: none;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}

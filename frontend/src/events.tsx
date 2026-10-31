@@ -13,8 +13,13 @@ const EventsContext = createContext<EventsHub | null>(null);
 // How many recent (non-progress) events to keep for late subscribers, e.g. the
 // Mass Edit monitor mounting after the activity feed already received them.
 const BUFFER_SIZE = 100;
-// Matches the server's _NO_REPLAY_TYPES: momentary signals not worth replaying.
-const NO_BUFFER_TYPES = new Set(['task', 'download_progress', 'lidarr_event']);
+// Must equal the server's _NO_REPLAY_TYPES (lyrarr/app/event_handler.py; PLAN §1.6):
+// momentary signals not worth replaying (per-item progress, scheduler flips, per-track
+// instrumental decisions). tests/test_release_flags.py parses this literal.
+const NO_BUFFER_TYPES = new Set([
+  'task', 'download_progress', 'lidarr_event',
+  'lyrics_audit_progress', 'download_scope', 'download_item', 'instrumental_classified',
+]);
 
 /**
  * Owns the app's single EventSource connection to /api/events and fans events

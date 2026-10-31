@@ -1,0 +1,327 @@
+/* KeyValueList, CoverageCard, JobProgress (DESIGN.md 7.7) */
+
+/* ---------- KeyValueList ---------- */
+.kv {
+  display: grid;
+  grid-template-columns: 1fr;
+  column-gap: 32px;
+  margin: 0;
+}
+
+.kv[data-columns='2'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 767px) {
+  .kv[data-columns='2'] {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kvRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.kvRow:last-child,
+.kv[data-columns='2'] .kvRow:nth-last-child(2):nth-child(odd) {
+  border-bottom: 0;
+}
+
+.kvLabel {
+  flex: none;
+  font-size: 13px;
+  color: var(--ly-text-2);
+}
+
+.kvValue {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  gap: 2px;
+}
+
+.kvText {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.kvMono {
+  font-family: var(--ly-font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ly-text);
+  /* Breaks at the <wbr> after each "/" first; mid-word only as a last resort. */
+  overflow-wrap: anywhere;
+}
+
+.kvSource {
+  font-size: 12px;
+  color: var(--ly-muted);
+}
+
+/* ---------- CoverageCard ---------- */
+.coverage {
+  container: ly-coverage / inline-size;
+  display: flex;
+  flex-direction: column;
+  /* Cards in one row share a height even in an align-items: start grid; the footer sits at the bottom. */
+  align-self: stretch;
+  gap: 14px;
+  min-width: 0;
+  padding: var(--ly-card-pad, 20px);
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 12px;
+  box-shadow: var(--ly-shadow-card);
+}
+
+.coverageHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.iconTile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ly-text-2);
+  background: var(--ly-neutral-soft);
+}
+
+.coverageTitle {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.stateChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ly-text-2);
+  background: var(--ly-neutral-soft);
+  white-space: nowrap;
+}
+
+.stateChip[data-state='complete'] {
+  color: var(--ly-success);
+  background: var(--ly-success-soft);
+}
+
+:global(html[data-contrast='high']) .stateChip {
+  border: 1px solid currentColor;
+}
+
+.coverageMenu {
+  display: inline-flex;
+  margin-right: -6px;
+}
+
+.coverageStat {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.statValue {
+  font-size: 32px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.statOf {
+  font-size: 14px;
+  color: var(--ly-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Narrow card: one legend entry per line. */
+@container ly-coverage (max-width: 260px) {
+  .legend {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.legendSwatch,
+.legendRing {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legendRing {
+  border: 1.5px solid var(--ly-text-2);
+}
+
+.legendLabel {
+  min-width: 0;
+  color: var(--ly-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Has a tooltip with the clarification ("incl. manual uploads"). */
+.legendHint {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--ly-muted);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.legendHint:focus-visible {
+  outline: 2px solid var(--ly-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.legendCount {
+  flex: none;
+  font-weight: 600;
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.legendItem[data-zero] .legendCount {
+  color: var(--ly-muted);
+  font-weight: 500;
+}
+
+.coverageFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--ly-border);
+}
+
+.footLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.footLink svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* ---------- JobProgress ---------- */
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.jobPart {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.jobLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.jobLabel {
+  color: var(--ly-text-2);
+  font-weight: 500;
+}
+
+.jobCount {
+  color: var(--ly-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.jobTrack {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--ly-track);
+}
+
+.jobFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ly-accent);
+  transition: width var(--ly-dur-slow) var(--ly-ease);
+}
+
+.jobIndeterminate {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  border-radius: inherit;
+  background: var(--ly-accent);
+  animation: ly-indeterminate 1.2s var(--ly-ease) infinite;
+}
+
+/* Always partly on-track (10% at each end), so it never reads as an empty, stalled bar. */
+@keyframes ly-indeterminate {
+  from { transform: translateX(-66.667%); }
+  to { transform: translateX(300%); }
+}
+
+.jobEta {
+  font-size: 12px;
+  color: var(--ly-muted);
+  font-variant-numeric: tabular-nums;
+}

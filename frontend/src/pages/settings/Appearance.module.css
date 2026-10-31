@@ -1,0 +1,276 @@
+/* Settings › Appearance (DESIGN.md 8.10) */
+
+.appearance {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-margin-top: calc(var(--ly-sticky-top, 56px) + 16px);
+}
+
+.panel {
+  min-width: 0;
+}
+
+.lead {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ly-text-2);
+}
+
+.rows {
+  margin-top: 8px;
+}
+
+.rows:first-child {
+  margin-top: -12px;
+}
+
+.tooltipTarget {
+  display: inline-flex;
+  align-self: flex-end;
+  border-radius: 999px;
+}
+
+/* ---------- Theme cards ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 767px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+
+/* The outer button keeps the page theme's variables, so the selection ring
+   and focus ring are in the current accent; the inside uses the card's theme.
+   The button is a flex column so the bordered card always fills its grid cell
+   (cards in one row stay the same height when a label wraps).
+   Checked = a solid 2px accent ring hugging the card; keyboard focus = a
+   double ring further out, so a focused card never reads as a second
+   "selected" one, even in themes whose focus colour equals the accent. */
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 12px;
+  transition: transform var(--ly-dur-fast) var(--ly-ease);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+}
+
+.card[data-checked] {
+  box-shadow: 0 0 0 2px var(--ly-surface), 0 0 0 4px var(--ly-accent);
+}
+
+.card:focus-visible {
+  outline: 6px double var(--ly-focus);
+  outline-offset: 4px;
+}
+
+html[data-contrast='high'] .card[data-checked] {
+  box-shadow: 0 0 0 2px var(--ly-surface), 0 0 0 5px var(--ly-accent);
+}
+
+html[data-contrast='high'] .card:focus-visible {
+  outline-offset: 5px;
+}
+
+.themed,
+.system {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--ly-border-strong);
+  background: var(--ly-surface);
+  color: var(--ly-text);
+}
+
+/* Mini UI, 88px tall: nav strip, title + text lines, a card with a dashed
+   "Missing" chip and an accent button. */
+.mini {
+  display: grid;
+  grid-template-columns: 30% 1fr;
+  height: 88px;
+  background: var(--ly-bg);
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.mini i {
+  display: block;
+  border-radius: 3px;
+}
+
+.miniNav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 8px;
+  background: var(--ly-nav);
+  border-right: 1px solid var(--ly-border);
+}
+
+.miniNav i {
+  height: 5px;
+  background: var(--ly-active);
+}
+
+.miniNav i.miniNavActive {
+  width: 60%;
+  background: var(--ly-accent);
+}
+
+.miniNav i.miniNavShort {
+  width: 70%;
+}
+
+.miniMain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.miniTitle {
+  width: 55%;
+  height: 7px;
+  background: var(--ly-text);
+}
+
+.miniText {
+  width: 75%;
+  height: 5px;
+  background: var(--ly-muted);
+}
+
+.miniCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: auto;
+  padding: 5px 6px;
+  background: var(--ly-surface);
+  border: 1px solid var(--ly-border);
+  border-radius: 5px;
+}
+
+.miniMissing {
+  padding: 0 6px;
+  border: 1px dashed var(--ly-control);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 13px;
+  color: var(--ly-text-2);
+  white-space: nowrap;
+}
+
+.miniButton {
+  flex: none;
+  width: 30px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--ly-accent);
+}
+
+.systemPreview {
+  position: relative;
+  height: 88px;
+  border-bottom: 1px solid var(--ly-border);
+}
+
+.systemPreview > .mini {
+  position: absolute;
+  inset: 0;
+  border-bottom: 0;
+}
+
+.systemPreview > .systemLight {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+/* Radio + name on the first line, the scheme label always on its own line
+   underneath (so wrapping never changes the layout between cards). */
+.meta {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  align-content: start;
+  gap: 2px 8px;
+  flex: 1 1 auto;
+  padding: 8px 12px 10px;
+  background: var(--ly-surface);
+}
+
+.radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ly-control);
+  box-sizing: border-box;
+}
+
+.card[data-checked] .radio {
+  border: 4px solid var(--ly-accent);
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ly-text);
+}
+
+.scheme {
+  grid-column: 2;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ly-muted);
+}
+
+.card[data-in-use] .scheme {
+  color: var(--ly-text-2);
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  .miniMain {
+    padding: 8px;
+  }
+
+  .miniCard {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .miniMissing {
+    padding: 0 4px;
+    font-size: 8px;
+  }
+
+  .miniButton {
+    width: 16px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .appearance {
+    scroll-margin-top: calc(var(--ly-sticky-top, 56px) + 64px);
+  }
+}
