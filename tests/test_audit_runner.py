@@ -199,7 +199,7 @@ def test_failed_evidence_repair_keeps_the_pin(small, monkeypatch):
 
 
 def test_retention_keeps_pinned_and_bootstrap_runs(small, monkeypatch):
-    monkeypatch.setattr(settings.audit, 'report_retention', 2)
+    monkeypatch.setitem(settings.audit, 'report_retention', 2)
     add_curated(small, 1)
     evidence = audit.start_run('dry_run', ['H-1'], wait=True)
     from sqlalchemy.dialects.sqlite import insert
@@ -224,8 +224,8 @@ def test_scheduled_runs_only_run_scheduled_checks(small, monkeypatch):
     # Explicitly listed bootstrap_only checks run in a user run, never in a scheduled one.
     assert runner.resolve_checks(['S-4'], 'user') == ['state.backoff_stale']
     assert runner.resolve_checks(['S-4'], 'scheduled') == []
-    monkeypatch.setattr(settings.audit, 'scheduled_mode', 'apply_safe')
-    monkeypatch.setattr(settings.audit, 'scheduled_include_file_scan', False)
+    monkeypatch.setitem(settings.audit, 'scheduled_mode', 'apply_safe')
+    monkeypatch.setitem(settings.audit, 'scheduled_include_file_scan', False)
     last = audit.run_scheduled()
     r = get_run(last)
     assert r.trigger == 'scheduled' and r.mode == 'apply' and r.parent_run_id

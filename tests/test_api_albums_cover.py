@@ -56,7 +56,7 @@ JPEG = b'\xff\xd8\xff\xe0' + b'\x00' * 32
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(settings.metadata.covers, 'folder_art_filename', 'cover')
+    monkeypatch.setitem(settings.metadata.covers, 'folder_art_filename', 'cover')
     app = Flask(__name__)
     api = Api(app)
     api.add_namespace(albums.api_ns_albums, '/')

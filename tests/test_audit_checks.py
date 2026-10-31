@@ -482,7 +482,7 @@ def test_s9_is_report_only_without_lidarr(small, monkeypatch):
     from lyrarr.app.config import settings
     p = add(small, 1, 'Dup')
     L.add_track(2, small['album'], 10, 1, 'Dup', stem=os.path.splitext(os.path.basename(p))[0], audio=False)
-    monkeypatch.setattr(settings.general, 'use_lidarr', False)
+    monkeypatch.setitem(settings.general, 'use_lidarr', False)
     ctx = ctx_for()
     found = detect('S-9', ctx)
     assert len(found) == 1 and found[0].fix_action is None and found[0].fix_mode == 'report'
@@ -490,7 +490,7 @@ def test_s9_is_report_only_without_lidarr(small, monkeypatch):
     assert get_check('S-9').repair(ctx_for(mode='apply'), Issue(
         entity_type='file', entity_id=None, entity_key=f'file:{p}', title='x', path=p,
         fix_action='full_sync')).status == 'skipped'
-    monkeypatch.setattr(settings.general, 'use_lidarr', True)
+    monkeypatch.setitem(settings.general, 'use_lidarr', True)
     assert [i.fix_action for i in detect('S-9')] == ['full_sync']
 
 
@@ -539,7 +539,7 @@ def test_i3_not_instrumental_rolls_back_override_when_adopt_fails(small, monkeyp
 
 def test_c3_never_offers_folder_art(small, monkeypatch):
     from lyrarr.app.config import settings
-    monkeypatch.setattr(settings.metadata.covers, 'folder_art_filename', 'folder')
+    monkeypatch.setitem(settings.metadata.covers, 'folder_art_filename', 'folder')
     artist_dir = os.path.dirname(small['album'])
     folder = os.path.join(artist_dir, 'folder.jpg')
     cover = os.path.join(artist_dir, 'cover.jpg')

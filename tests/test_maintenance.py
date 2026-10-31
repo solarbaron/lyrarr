@@ -134,7 +134,7 @@ def test_tombstone_purge(lib):
 
 
 def test_prune_history_keeps_pinned_rows(lib, monkeypatch):
-    monkeypatch.setattr(settings.general, 'history_retention_days', 30)
+    monkeypatch.setitem(settings.general, 'history_retention_days', 30)
     old = datetime.now() - timedelta(days=85)
     ids = []
     for i in range(3):

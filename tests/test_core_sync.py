@@ -72,9 +72,9 @@ def clean_db(monkeypatch):
                   TableAlbums, TableArtists, TableLibraryRoots):
         database.execute(delete(table))
     monkeypatch.setattr(lidarr_api, 'get_root_folders', lambda: [])
-    monkeypatch.setattr(settings.general, 'use_lidarr', True)
-    monkeypatch.setattr(settings.lidarr, 'only_monitored', False)
-    monkeypatch.setattr(settings.general, 'default_profile_id', None)
+    monkeypatch.setitem(settings.general, 'use_lidarr', True)
+    monkeypatch.setitem(settings.lidarr, 'only_monitored', False)
+    monkeypatch.setitem(settings.general, 'default_profile_id', None)
     monkeypatch.setattr(sync, 'event_stream', lambda *a, **k: None)
     monkeypatch.setattr(sync, '_detect', lambda content: 'en')  # langdetect is optional
     yield
@@ -172,7 +172,7 @@ def _patch_lidarr(monkeypatch, artists, albums, files, records=(), roots=()):
 
 class TestAlbumSyncIsolation:
     def test_unsynced_artist_album_is_skipped_not_fatal(self, monkeypatch):
-        monkeypatch.setattr(settings.lidarr, 'only_monitored', True)
+        monkeypatch.setitem(settings.lidarr, 'only_monitored', True)
         artists = [{'id': 1, 'artistName': 'Mon', 'path': '/m/a', 'monitored': True},
                    {'id': 2, 'artistName': 'Unmon', 'path': '/m/b', 'monitored': False},
                    {'id': 3, 'artistName': 'Later', 'path': '/m/c', 'monitored': True}]
@@ -188,7 +188,7 @@ class TestAlbumSyncIsolation:
 
     def test_stale_default_profile_falls_back_to_null(self, monkeypatch):
         missing = (database.execute(select(func.max(TableProfiles.id))).scalar() or 0) + 50
-        monkeypatch.setattr(settings.general, 'default_profile_id', missing)
+        monkeypatch.setitem(settings.general, 'default_profile_id', missing)
         artists = [{'id': 1, 'artistName': 'A', 'path': '/m/a', 'monitored': True}]
         albums = [{'id': 10, 'artistId': 1, 'title': 'A', 'monitored': True}]
         files = [{'id': 100, 'albumId': 10, 'artistId': 1, 'path': '/m/1/01 - x.flac'}]
@@ -670,7 +670,7 @@ class TestRunFullSync:
         assert sync.sync_in_progress() is False
 
     def test_false_when_disabled(self, monkeypatch):
-        monkeypatch.setattr(settings.general, 'use_lidarr', False)
+        monkeypatch.setitem(settings.general, 'use_lidarr', False)
         assert sync.run_full_sync(timeout_s=1) is False
 
     def test_true_and_roots_refreshed(self, monkeypatch, tmp_path):
@@ -709,7 +709,7 @@ class TestSignalR:
         requested = []
         monkeypatch.setattr(signalr_client, 'request_artist_sync', requested.append)
         monkeypatch.setattr(signalr_client, 'request_sync', lambda: requested.append('full'))
-        monkeypatch.setattr(settings.lidarr, 'sync_on_live', True)
+        monkeypatch.setitem(settings.lidarr, 'sync_on_live', True)
         monkeypatch.setattr(signalr_client, 'event_stream', lambda *a, **k: None)
         client = signalr_client.LidarrSignalRClient()
         client._on_message([{'name': 'album', 'body': {'action': 'deleted', 'resource': {'id': 5}}}])
@@ -717,11 +717,11 @@ class TestSignalR:
         assert requested == [7]
 
     def test_hub_url_includes_messages_path_and_base(self, monkeypatch):
-        monkeypatch.setattr(settings.lidarr, 'base_url', '/lidarr/')
+        monkeypatch.setitem(settings.lidarr, 'base_url', '/lidarr/')
         assert signalr_client._hub_url().endswith(f':{settings.lidarr.port}/lidarr/signalr/messages')
 
     def test_supervisor_retries_until_connected(self, monkeypatch):
-        monkeypatch.setattr(settings.lidarr, 'apikey', 'k')
+        monkeypatch.setitem(settings.lidarr, 'apikey', 'k')
         monkeypatch.setattr(signalr_client, '_BACKOFF_MIN', 0.01)
         monkeypatch.setattr(signalr_client, '_CHECK_INTERVAL', 0.01)
         client = signalr_client.LidarrSignalRClient()

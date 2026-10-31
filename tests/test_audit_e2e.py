@@ -83,7 +83,7 @@ def lib(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(sync, 'run_full_sync', fake_full_sync)
-    monkeypatch.setattr(settings.general, 'use_lidarr', True)  # S-9's repair is a (faked) Lidarr sync
+    monkeypatch.setitem(settings.general, 'use_lidarr', True)  # S-9's repair is a (faked) Lidarr sync
     monkeypatch.setattr(lyrics_store, 'detect_language', lambda text: 'en')
     library = L.build(tmp_path)
     library.events = events
@@ -379,7 +379,7 @@ def test_evidence_survives_trim_and_prune(lib, monkeypatch):
         for i in range(6):
             assert lyrics_store.persist_lyrics(tid, L.verse(f'newer{tid}x{i}', 5), 'lrclib', source='auto',
                                                expect_status=None)
-    monkeypatch.setattr(settings.general, 'history_retention_days', 30)
+    monkeypatch.setitem(settings.general, 'history_retention_days', 30)
     maintenance._prune_history()
     ids = {v.id for v in versions(133)} | {v.id for v in versions(134)}
     assert lib.extra['v133'] in ids and lib.extra['v134'] in ids
@@ -667,7 +667,7 @@ def test_scheduled_runs_never_touch_backoff(lib, monkeypatch):
         upgrade_retry_count=1, upgrade_retry_after=datetime.now() + timedelta(days=3),
         upgrade_retry_set_at=datetime.now()))
     snap = _backoff_snapshot()
-    monkeypatch.setattr(settings.audit, 'scheduled_mode', 'apply_safe')
+    monkeypatch.setitem(settings.audit, 'scheduled_mode', 'apply_safe')
     ids = []
     for _ in range(2):
         last = audit.run_scheduled()

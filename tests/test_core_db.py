@@ -152,20 +152,20 @@ def test_health_url_honours_lidarr_base(monkeypatch, lidarr_base, expected):
         status_code = 200
 
     monkeypatch.setattr(health.requests, 'get', lambda url, **k: seen.append(url) or Resp())
-    monkeypatch.setattr(settings.general, 'use_lidarr', True)
-    monkeypatch.setattr(settings.lidarr, 'ip', 'lidarr')
-    monkeypatch.setattr(settings.lidarr, 'port', 8686)
-    monkeypatch.setattr(settings.lidarr, 'ssl', False)
-    monkeypatch.setattr(settings.lidarr, 'base_url', lidarr_base)
+    monkeypatch.setitem(settings.general, 'use_lidarr', True)
+    monkeypatch.setitem(settings.lidarr, 'ip', 'lidarr')
+    monkeypatch.setitem(settings.lidarr, 'port', 8686)
+    monkeypatch.setitem(settings.lidarr, 'ssl', False)
+    monkeypatch.setitem(settings.lidarr, 'base_url', lidarr_base)
     assert health._check_lidarr_health()['healthy']
     assert seen == [expected]
 
 
 def test_health_warns_when_auth_disabled(monkeypatch):
     from lyrarr.utilities import health
-    monkeypatch.setattr(settings.auth, 'type', None)
+    monkeypatch.setitem(settings.auth, 'type', None)
     assert health._check_auth_health()['healthy'] is False
-    monkeypatch.setattr(settings.auth, 'type', 'form')
+    monkeypatch.setitem(settings.auth, 'type', 'form')
     assert health._check_auth_health()['healthy'] is True
 
 

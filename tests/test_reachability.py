@@ -57,9 +57,9 @@ _TABLES = (TableLyricsVersions, TableBlacklist, TableHistory, TableTrackTombston
 def two_roots(tmp_path, monkeypatch):
     for table in _TABLES:
         database.execute(delete(table))
-    monkeypatch.setattr(settings.general, 'use_lidarr', True)
-    monkeypatch.setattr(settings.lidarr, 'only_monitored', False)
-    monkeypatch.setattr(settings.general, 'default_profile_id', None)
+    monkeypatch.setitem(settings.general, 'use_lidarr', True)
+    monkeypatch.setitem(settings.lidarr, 'only_monitored', False)
+    monkeypatch.setitem(settings.general, 'default_profile_id', None)
     monkeypatch.setattr(sync, 'event_stream', lambda *a, **k: None)
     monkeypatch.setattr(sync, '_detect', lambda content: 'en')
 

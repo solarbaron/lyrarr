@@ -163,7 +163,7 @@ class TestProfiles:
         monkeypatch.setattr(config, 'write_config', lambda: None)
         r = client.post('/profiles', json={'name': 'Temp profile'})
         pid = r.get_json()['id']
-        monkeypatch.setattr(config.settings.general, 'default_profile_id', pid)
+        monkeypatch.setitem(config.settings.general, 'default_profile_id', pid)
         assert client.delete(f'/profiles/{pid}').status_code == 200
         assert config.settings.general.default_profile_id is None
 
